@@ -1,0 +1,4 @@
+interface:
+  display_name: "RagBot Inference Benchmark"
+  short_description: "Benchmark RagBot GPU inference services safely"
+  default_prompt: "Use $ragbot-inference-benchmark to audit and benchmark RagBot inference capacity on staging."

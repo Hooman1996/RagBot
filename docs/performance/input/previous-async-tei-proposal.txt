@@ -1,0 +1,470 @@
+As you know and based on my RagBot project on github, I have an Agentic Rag based chatbot project which is designed to work in production for a Neo Banking app with lots of concurrent requests, thic project uses Postgres to store relational data, qdrant for vector database and minio for object storage.
+Models are google--gemma-4-12B-it for generative model, jinaai--jina-embeddings-v5-text-small-retrieval and BAAI--bge-reranker-v2-m3 for reranker. 
+The generative model is served using vllm and two other models are used with sentence transformers.
+It is used with fastapi and rest request calls on a server with two L4 Gpus each with 24 Gbs of Vram resulting in a total 48 Gb of Vram. 
+The usual plot of a request query is like this : query goes into query rewriting node which uses the same vllm loaded generative model to rewrite the query to some formal seaqrch quesry and use the history of the user chat session to rewrite a follow up question to a searchable format. 
+Then it goes in an intent classifier node with a small model as classifier which clasifies it as General or chitchat. if it is chitchat it will request the vllm with the chitchat prompt to get an warm welcoming answer. if its general it goes through retrieval system to find top 10 most silliar question/answer pairs and then generates a context with them.
+This context goes to the vllm with the answering prompt for another request to get the final answer that will be given to user.
+The top 10 pairs also go through the reranker model and the top 3 most similliar questions will be also provided to the user.
+Now the Neo bank app using this sytem has a Time Out of maximmum 50 seconds for a request and with everything being said and done, this whole app is very slow in a way that if you request 20 queries at the same time (for concurrency and load test) most of these queries will hit a time out wall.
+The vllm loads the gemma model with this command : 
+docker run -d --name gemma4-vllm \
+    --runtime=nvidia \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    --ipc=host \
+    --shm-size=16g \
+    -p 8000:8000 \
+    -v /mnt/storage/models/Engines/google--gemma-4-12B-it:/app/model \
+    -e HF_HUB_OFFLINE=1 \
+    vllm/vllm-openai:latest \
+    /app/model \
+    --tensor-parallel-size 2 \
+    --max-model-len 4000 \
+    --max-num-seqs 8 \
+    --gpu-memory-utilization 0.75 \
+    --kv-cache-dtype fp8 \
+The project code and directory are provided, check every root, every code needed and every way possible to optimize this code to perform better and faster with concurrent requests. 
+Give me the solutions and implementations for each.
+
+Show less
+Looking at your codebase, the concurrency collapse isn't really a "GPU isn't fast enough" problem — it's an application-architecture problem stacked on top of a few real GPU-serving inefficiencies. I'll walk through them in priority order (highest impact first), with concrete fixes.
+
+
+Check if a skill applies for markdown report creation
+Check if a skill applies for markdown report creation
+Continue generation as you interrupted it mid-answer. Just know that now those two embedding and reranker models are served with these two commands: docker run -d --name tei-embedding \
+    --runtime=nvidia \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    -e CUDA_VISIBLE_DEVICES=0 \
+    -e HF_HUB_OFFLINE=1 \
+    -p 7997:80 \
+    -v /root/models:/app/models \
+    ghcr.io/huggingface/text-embeddings-inference:cuda-1.9 \
+    --model-id /app/models/models--jinaai--jina-embeddings-v5-text-small-retrieval \
+    --max-client-batch-size 50 \
+    --max-concurrent-requests 100
+
+sudo docker run -d --name tei-reranker \
+    --runtime=nvidia \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    -e CUDA_VISIBLE_DEVICES=0 \
+    -e HF_HUB_OFFLINE=1 \
+    -p 7998:80 \
+    -v /root/models:/app/models \
+    ghcr.io/huggingface/text-embeddings-inference:cuda-1.9 \
+    --model-id /app/models/BAAI--bge-reranker-v2-m3 \
+    --max-client-batch-size 50 \
+    --max-concurrent-requests 100 and the llm model served with this : sudo docker run -d --name gemma4-vllm     --runtime=nvidia     -e NVIDIA_VISIBLE_DEVICES=all     --ipc=host     --shm-size=16g     -p 8000:8000     -v /root/models/models--google--gemma-4-E4B-it:/app/model     -e HF_HUB_OFFLINE=1     vllm/vllm-openai:latest     /app/model     --tensor-parallel-size 1     --max-model-len 4000     --max-num-seqs 100     --gpu-memory-utilization 0.75     --kv-cache-dtype fp8     --enable-prefix-caching . the python codes that will be using them are still unchanged.
+
+Show more
+
+Identified GPU allocation conflicts and refactoring needs for microservices
+Identified GPU allocation conflicts and refactoring needs for microservices
+Good — those two changes (TEI for embeddings/reranker, --enable-prefix-caching + --max-num-seqs 100 for vLLM) are real improvements, but they expose a critical infrastructure bug and don't fix the application-layer bottlenecks at all, since the Python code is unchanged. Let me continue where I left off, folding in the new setup.
+
+0. Critical: your three GPU services are almost certainly colliding on the same GPU
+Look at your commands:
+
+tei-embedding: NVIDIA_VISIBLE_DEVICES=all, CUDA_VISIBLE_DEVICES=0 → GPU 0
+tei-reranker: NVIDIA_VISIBLE_DEVICES=all, CUDA_VISIBLE_DEVICES=0 → GPU 0
+gemma4-vllm: NVIDIA_VISIBLE_DEVICES=all, no CUDA_VISIBLE_DEVICES set, --tensor-parallel-size 1
+With NVIDIA_VISIBLE_DEVICES=all and no CUDA_VISIBLE_DEVICES restriction, vLLM will default to GPU 0 — the same GPU already hosting both TEI containers. That means under load you have the LLM's KV cache, prefill/decode compute, the embedding model, and the reranker model all fighting over one L4's 24GB and one L4's SM/compute, while your second GPU sits completely idle. This alone can produce exactly the symptom you're seeing (fine at low concurrency, falls over under load).
+
+Fix: pin vLLM to the empty GPU explicitly:
+
+bash
+sudo docker run -d --name gemma4-vllm \
+    --runtime=nvidia \
+    -e NVIDIA_VISIBLE_DEVICES=all \
+    -e CUDA_VISIBLE_DEVICES=1 \
+    --ipc=host \
+    --shm-size=16g \
+    -p 8000:8000 \
+    -v /root/models/models--google--gemma-4-E4B-it:/app/model \
+    -e HF_HUB_OFFLINE=1 \
+    vllm/vllm-openai:latest \
+    /app/model \
+    --tensor-parallel-size 1 \
+    --max-model-len 4000 \
+    --max-num-seqs 100 \
+    --gpu-memory-utilization 0.90 \
+    --kv-cache-dtype fp8 \
+    --enable-prefix-caching
+Since it's now single-GPU, you can also push --gpu-memory-utilization up toward 0.90 (no tensor-parallel coordination overhead to reserve for), which directly increases your KV-cache pool size and therefore how many concurrent sequences/how much context vLLM can actually hold in flight.
+
+Verify with nvidia-smi under load that GPU 0 shows the two TEI processes and GPU 1 shows only vLLM.
+
+1. Your Python code still loads the embedding model locally — it isn't using TEI at all
+PersianHybridSearch.__init__ (in utils/persian_hybrid_search.py) does:
+
+python
+self.query_encoder = SentenceTransformer(query_embedding_model, device=device, ...)
+This loads a third copy of the Jina embedding model directly into your FastAPI process's GPU context — on top of the TEI container already serving it. That's wasted VRAM, wasted load time, and more importantly it means every query's embedding call (self._encode_query) is a local, synchronous, blocking CUDA call inside your request path, competing with vLLM/TEI for GPU cycles and — combined with issue #2 below — freezing your event loop.
+
+Same story for the reranker: it's currently commented out in main.py's lifespan (# reranker_model = CrossEncoder(...)), so no local reranker is loaded today, but if you re-enable it you should not load a CrossEncoder — call your tei-reranker container instead.
+
+Fix — replace local model calls with async HTTP calls to TEI:
+
+python
+import httpx
+
+class PersianHybridSearch:
+    def __init__(self, ..., tei_embed_url="http://localhost:7997", tei_rerank_url="http://localhost:7998"):
+        self.tei_embed_url = tei_embed_url
+        self.tei_rerank_url = tei_rerank_url
+        self.http_client = httpx.AsyncClient(timeout=10.0)
+        # REMOVE: self.query_encoder = SentenceTransformer(...)
+
+    async def _encode_query_async(self, query: str) -> list[float]:
+        resp = await self.http_client.post(
+            f"{self.tei_embed_url}/embed",
+            json={"inputs": query, "normalize": True}
+        )
+        resp.raise_for_status()
+        return resp.json()[0]   # TEI returns a list of vectors
+And for reranking, call TEI's /rerank endpoint (batch all candidate pairs in one call — TEI batches internally, so this is one HTTP round trip instead of N synchronous cross-encoder forward passes):
+
+python
+async def rerank_async(self, query: str, candidates: list[str]) -> list[float]:
+    resp = await self.http_client.post(
+        f"{self.tei_rerank_url}/rerank",
+        json={"query": query, "texts": candidates}
+    )
+    resp.raise_for_status()
+    return resp.json()  # [{"index":..., "score":...}, ...]
+This requires making retrieve()/search() async all the way up through RAGSystem and agent_graph.py nodes — worth doing now since you're already restructuring around TEI.
+
+2. The event loop is still being blocked (this is still your #1 latency killer)
+This doesn't change with the new deployment. Your /api/query endpoint is async def but everything inside it — agent_service.process_message, rag_system.answer() (using a synchronous openai.OpenAI client), the BM25 build, the (still-local, until you fix #1) embedding encode — is blocking, synchronous Python with no await. With Uvicorn's default single-worker asyncio loop, one slow request freezes every other in-flight request, including health checks. Twenty concurrent requests are processed essentially one-at-a-time, not in parallel — so 20 × (2 vLLM calls + retrieval) easily exceeds 50s per request queued behind it.
+
+Two ways to fix, pick one now:
+
+Quick fix (minutes, no logic changes): change your hot-path route handlers from async def to plain def. Starlette automatically runs synchronous path operations in a thread pool (default 40 threads), so concurrent requests actually run in parallel instead of serializing on the event loop:
+
+python
+@app.post("/api/query")
+def query_documents(query_req: QueryRequest):   # not async def
+    ...
+Do this for /api/query, /api/mass-answer, and anywhere agent_service/rag_system is called directly. This is the single highest-ROI change available to you right now given everything else is unchanged.
+
+Proper fix (recommended once TEI migration from #1 is done): switch RAGSystem to AsyncOpenAI and await all three network calls (vLLM, TEI embed, TEI rerank) concurrently with asyncio.gather where independent, and route only the CPU-bound Persian NLP/BM25 work through asyncio.to_thread.
+
+3. BM25 is rebuilt from scratch on every single query
+PersianHybridSearch._build_temporary_bm25 fetches every chunk for the allowed documents from Postgres and re-tokenizes/re-stems them with parsivar (pure-Python, slow) on every request — even with the threadpool fix above, this means 20 concurrent requests each burn significant CPU re-tokenizing the same ~900 FAQ chunks repeatedly.
+
+Fix: cache the built BM25 index (and its tokenized corpus) keyed by the allowed_docs tuple, invalidated only when chunks change (e.g., on kb_manager create/update/delete):
+
+python
+from functools import lru_cache
+
+class PersianHybridSearch:
+    def __init__(self, ...):
+        self._bm25_cache: dict[tuple, tuple] = {}  # key -> (bm25, chunk_ids, chunk_dict)
+
+    def _get_or_build_bm25(self, allowed_docs: list[str]):
+        key = tuple(sorted(allowed_docs))
+        if key not in self._bm25_cache:
+            chunk_dict = self._fetch_chunks(allowed_docs)
+            self._bm25_cache[key] = (*self._build_temporary_bm25(chunk_dict), chunk_dict)
+        return self._bm25_cache[key]
+Invalidate the relevant cache entries (or just clear the whole dict) inside kb_manager.py's create/update/delete/revert endpoints after they commit — you already have the document title/id there, so scope it precisely rather than clearing everything.
+
+4. Two sequential vLLM round-trips per query
+Query rewrite → then intent classify → then answer generation means every "general" query pays for two full LLM generations back-to-back, serially. With prefix caching now on, the fixed instruction blocks are cheap on repeat, but you're still paying two full network round-trips + decode passes per user turn.
+
+Cheap win: skip the rewrite call entirely when there's no session history (current_summary is empty/"[بدون مکالمه قبلی]") — rewrite_query already checks this and returns early, so verify that's actually hit for first-turn queries in the batch/mass-answer path too (currently mass-answer always calls rewrite_query even with "[بدون مکالمه قبلی]" passed — check that rewrite_query's early-return if not current_summary triggers there; if it's passed as the literal string "[بدون مکالمه قبلی]" rather than empty string, it won't early-return and you're burning a full LLM call for nothing on every batch row).
+
+5. Quick vLLM/serving checklist
+Confirm max_new_tokens for the answer prompt (500) is no larger than needed — shorter caps mean faster completion won't get truncated mid-generation but also won't hold a sequence slot longer than necessary.
+Since GPU 0 is shared by two TEI containers, keep --max-concurrent-requests 100 on each but watch nvidia-smi for GPU-0 memory pressure now that both share it — if it's tight, consider giving the reranker container CUDA_VISIBLE_DEVICES=1 alongside vLLM instead (rerankers are cheap/fast; embeddings + vLLM are the heavy hitters) and profile which split gives better headroom.
+Suggested order of operations
+Pin vLLM to GPU 1 (CUDA_VISIBLE_DEVICES=1) — one-line docker change, immediate.
+Change hot-path endpoints from async def → def — minutes, immediate.
+Cache the BM25 index — moderate effort, big CPU win.
+Migrate embedding/reranker calls to TEI HTTP endpoints, drop local SentenceTransformer/CrossEncoder loads — moderate effort, frees VRAM and removes another blocking GPU call from your process.
+Re-run your 20-concurrent-request load test after each step and record p50/p95/timeout-rate — this will tell you which fix actually moved the needle, since right now you're stacking multiple plausible causes and it's worth isolating them.
+If you want, I can also help you convert agent_graph.py/RAGSystem to fully async with AsyncOpenAI + httpx.AsyncClient, or write the BM25 cache invalidation hooks into kb_manager.py directly — let me know which piece to start with.
+
+i added everything in "1. Your Python code still loads the embedding model locally — it isn't using TEI at all" first tell me how to change the code to use these new TEI models then how to handle "2. The event loop is still being blocked (this is still your #1 latency killer)" the propar way "Proper fix (recommended once TEI migration from #1 is done)". pinpoint where to change the code and how to change it
+
+
+Architected TEI migration strategy and async refactoring across entire pipeline
+Architected TEI migration strategy and async refactoring across entire pipeline
+Good — now let's wire the code up properly. This is a full async conversion, so I'll go file-by-file in the order you'd actually apply the changes (leaf dependencies first, entry points last).
+
+Step 1 — utils/persian_hybrid_search.py: replace local models with TEI calls
+Remove the SentenceTransformer load entirely and replace query encoding with an async HTTP call to your tei-embedding container. The whole search() method needs to become async def since it now awaits I/O, and the CPU-bound BM25/Persian-NLP work needs to move off the event loop via asyncio.to_thread.
+
+python
+import asyncio
+import httpx
+# REMOVE: from sentence_transformers import SentenceTransformer
+
+class PersianHybridSearch:
+    def __init__(
+        self,
+        qdrant_client: QdrantClient,
+        collection_name: str = os.getenv("QDRANT_COLLECTION"),
+        tei_embed_url: str = os.getenv("TEI_EMBED_URL", "http://localhost:7997"),
+        use_stemming: bool = True,
+        chunk_fetcher=None,
+    ):
+        self.processor = PersianTextProcessor(use_stemming=use_stemming)
+        self.qdrant_client = qdrant_client
+        self.collection_name = collection_name
+        self.tei_embed_url = tei_embed_url.rstrip("/")
+        # One shared, reusable async client — do NOT create a new one per request
+        self._http = httpx.AsyncClient(timeout=httpx.Timeout(10.0, connect=3.0))
+        self.chunk_fetcher = chunk_fetcher
+        self._bm25_cache: dict[tuple, tuple] = {}
+
+    async def _encode_query(self, query: str) -> list[float]:
+        resp = await self._http.post(
+            f"{self.tei_embed_url}/embed",
+            json={"inputs": query, "normalize": True},
+        )
+        resp.raise_for_status()
+        return resp.json()[0]  # TEI returns a batch; we sent one input
+
+    async def _semantic_search(self, query: str, document_names: list, top_k: int) -> dict:
+        query_vec = await self._encode_query(query)
+        doc_filter = qdrant_models.Filter(
+            must=[qdrant_models.FieldCondition(
+                key="document", match=qdrant_models.MatchAny(any=document_names)
+            )]
+        )
+        # qdrant-client's sync query_points is a blocking network call — push to a thread
+        results = await asyncio.to_thread(
+            self.qdrant_client.query_points,
+            collection_name=self.collection_name,
+            query=query_vec,
+            limit=top_k,
+            query_filter=doc_filter,
+            with_payload=["chunk_id"],
+            with_vectors=False,
+        )
+        return {str(hit.payload["chunk_id"]): hit.score
+                for hit in results.points if "chunk_id" in hit.payload}
+
+    def _get_or_build_bm25(self, allowed_docs: list):
+        key = tuple(sorted(allowed_docs))
+        if key not in self._bm25_cache:
+            chunk_dict = self._fetch_chunks(allowed_docs)
+            bm25, chunk_ids, _ = self._build_temporary_bm25(chunk_dict)
+            self._bm25_cache[key] = (bm25, chunk_ids, chunk_dict)
+        return self._bm25_cache[key]
+
+    async def search(self, query: str, top_k: int = 10, rerank: bool = False,
+                      allowed_docs: list = None) -> list:
+        if not allowed_docs:
+            raise ValueError("allowed_docs must be provided for filtered search.")
+
+        expanded_query = self._expand_query_intent(query)
+
+        # CPU-bound Persian NLP + BM25 lookup — off the event loop
+        bm25, bm25_chunk_ids, chunk_dict = await asyncio.to_thread(
+            self._get_or_build_bm25, allowed_docs
+        )
+        if not chunk_dict:
+            return []
+        query_tokens = await asyncio.to_thread(self.processor.process, expanded_query)
+        bm25_scores = bm25.get_scores(query_tokens)
+        bm25_candidates = sorted(zip(bm25_chunk_ids, bm25_scores), key=lambda x: x[1], reverse=True)[:50]
+        bm25_top_ids = [cid for cid, score in bm25_candidates if score > 0]
+
+        semantic_query = await asyncio.to_thread(
+            lambda: self.processor.normalize(expanded_query).replace("\u200c", " ")
+        )
+        semantic_scores_map = await self._semantic_search(semantic_query, allowed_docs, top_k=50)
+        semantic_top_ids = list(semantic_scores_map.keys())
+
+        candidate_ids = list(set(bm25_top_ids + semantic_top_ids))
+        if not candidate_ids:
+            return []
+
+        RRF_K = 60
+        hybrid_scores = {}
+        for cid in candidate_ids:
+            rank_b = bm25_top_ids.index(cid) + 1 if cid in bm25_top_ids else 61
+            rank_s = semantic_top_ids.index(cid) + 1 if cid in semantic_top_ids else 61
+            hybrid_scores[cid] = {
+                "hybrid": (1.0 / (RRF_K + rank_b)) + (1.0 / (RRF_K + rank_s)),
+                "bm25": next((s for c, s in bm25_candidates if c == cid), 0.0),
+                "semantic": semantic_scores_map.get(cid, 0.0),
+            }
+
+        sorted_ids = sorted(hybrid_scores.keys(), key=lambda c: hybrid_scores[c]["hybrid"], reverse=True)[:top_k]
+        return [
+            SearchResult(
+                doc_id=cid, content=chunk_dict[cid]["text"],
+                score=round(hybrid_scores[cid]["hybrid"], 6),
+                bm25_score=round(hybrid_scores[cid]["bm25"], 6),
+                semantic_score=round(hybrid_scores[cid]["semantic"], 6),
+                metadata={"document_name": chunk_dict[cid].get("document_name", "")},
+            )
+            for cid in sorted_ids
+        ]
+
+    async def rerank(self, query: str, candidates: list, tei_rerank_url: str) -> list:
+        resp = await self._http.post(
+            f"{tei_rerank_url}/rerank",
+            json={"query": query, "texts": candidates},
+        )
+        resp.raise_for_status()
+        return resp.json()  # [{"index":.., "score":..}, ...] — one batched call, not N forward passes
+_fetch_chunks/chunk_fetcher still hits Postgres via psycopg2 (blocking) — leave it sync but always call it via asyncio.to_thread as shown above (it's already wrapped inside _get_or_build_bm25, which itself runs in a thread).
+
+Step 2 — utils/RagSystem.py: switch to AsyncOpenAI, make methods async
+python
+from openai import AsyncOpenAI   # was: from openai import OpenAI
+
+class RAGSystem:
+    def __init__(self, ..., tei_rerank_url: str = os.getenv("TEI_RERANK_URL", "http://localhost:7998")):
+        self.client = AsyncOpenAI(base_url=vllm_url, api_key="vllm-token-not-needed")
+        self.tei_rerank_url = tei_rerank_url
+        self.search_engine = PersianHybridSearch(...)   # now needs no query_encoder arg
+
+    async def retrieve(self, query, top_k=10, allowed_docs=None, rerank=False):
+        results = await self.search_engine.search(query=query, top_k=top_k, allowed_docs=allowed_docs)
+        return results
+
+    async def answer(self, user_question, context, recent_history, ..., category=None):
+        # ... build `prompt` exactly as before (pure string work, stays sync) ...
+        response = await self.client.chat.completions.create(
+            model=self.model_id,
+            messages=[{"role": "system", "content": "You are a helpful assistant."},
+                      {"role": "user", "content": prompt}],
+            max_tokens=max_new_tokens, temperature=temperature, top_p=0.95,
+        )
+        return clean_llm_answer(response.choices[0].message.content)
+
+    async def generate_text(self, prompt):
+        response = await self.client.chat.completions.create(
+            model=self.model_id,
+            messages=[{"role": "system", "content": "You are a helpful assistant."},
+                      {"role": "user", "content": prompt}],
+            max_tokens=1000, temperature=0.0,
+        )
+        return response.choices[0].message.content
+generate_context() is pure regex/string formatting — leave it def, no I/O.
+
+Step 3 — new_architecture/app/services/history/rewriting.py
+python
+async def rewrite_query(self, current_query: str, current_summary: str) -> str:
+    if not current_summary or current_summary == "[بدون مکالمه قبلی]":
+        return current_query   # closes the "wasted rewrite call" gap from before
+    rewrite_prompt = self.config.QUERY_REWRITE_PROMPT.format(
+        current_history=current_summary, current_query=current_query
+    )
+    final_query = await self.rag_system.generate_text(rewrite_prompt)
+    return extract_rewritten_query(final_query, current_query)
+get_formatted_history_string stays sync (pure Postgres/string work via db_manager), just call it with await asyncio.to_thread(...) at the call site.
+
+Step 4 — agent_graph.py: async nodes, ainvoke
+LangGraph supports async node functions natively — the graph itself doesn't need restructuring, just make each node factory return an async def node(state):
+
+python
+def make_handle_general(rag_system):
+    async def node(state: AgentState) -> AgentState:
+        query = state["messages"][-1]["content"]
+        allowed = state.get("allowed_docs") or ["General_FAQ"]
+
+        search_results = await rag_system.retrieve(query, top_k=10, allowed_docs=allowed)
+        aggregated = rag_system.generate_context(search_results)   # sync, cheap
+
+        related = []  # (regex extraction loop unchanged, stays sync)
+        for r in search_results[:5]:
+            ...
+        state["related_questions"] = related
+
+        category = state.get("doc_category")
+        recent = state["messages"][-7:-1]
+        answer = await rag_system.answer(
+            user_question=query,
+            context=aggregated if category == "FAQ" else search_results[:3],
+            recent_history=recent_history_to_text(recent),
+            current_summary="", tone="friendly", response_type="normal",
+            enable_history=False, category=category,
+        )
+        state["last_answer"] = answer
+        state["answer"] = None
+        state["feedback_needed"] = True
+        return state
+    return node
+Do the same for make_handle_chitchat. make_classify_intent, make_validate_slot, make_add_user_message, make_add_assistant_message have no I/O — they can stay def (LangGraph mixes sync/async nodes fine).
+
+Then in build_graph() change:
+
+python
+return graph.compile()
+No change needed here — .compile() returns a CompiledGraph that supports both .invoke() (sync) and .ainvoke() (async); you just need to call the async one downstream.
+
+Step 5 — agent_service.py: process_message becomes async
+python
+class AgentService:
+    async def process_message(self, session_id: str, user_message: str, selected_docs=None):
+        ...
+        session_row = await asyncio.to_thread(self.db_manager.get_session_by_id, session_pk)
+        ...
+        final_state = await self.graph.ainvoke(state)   # was: self.graph.invoke(state)
+        ...
+        if final_state.get("ticket_submitted"):
+            await asyncio.to_thread(self._create_ticket, user_id=..., session_id=session_id)
+
+        await asyncio.to_thread(self.db_manager.update_session_metadata, session_pk, meta)
+        return answer
+_create_ticket itself stays a sync method (raw psycopg2), just always call it via to_thread.
+
+Step 6 — intent_classifier.py
+Two options depending on whether your Jina model deployed in tei-embedding supports the classification LoRA task through TEI's API (check TEI's docs for your specific image/model — some TEI builds expose /embed with a prompt_name field for task-specific adapters, others don't support Jina's multi-task adapters at all). Verify this first:
+
+python
+async def _encode(self, query: str, http_client: httpx.AsyncClient, tei_url: str) -> np.ndarray:
+    resp = await http_client.post(f"{tei_url}/embed", json={"inputs": query, "normalize": True})
+    resp.raise_for_status()
+    return np.array(resp.json()[0], dtype=np.float32)
+
+async def classify(self, query: str) -> dict:
+    if not query or not query.strip():
+        return {"type": "general", "scenario_id": None}
+    embedding = await self._encode(query, self.http_client, self.tei_embed_url)
+    x = torch.tensor(embedding).unsqueeze(0).to(self.device)
+    with torch.no_grad():
+        probs = torch.softmax(self.classifier(x), dim=1).squeeze()
+    class_id = int(torch.argmax(probs).item())
+    return {"type": "chitchat", "scenario_id": "chitchat"} if class_id == LABEL_CHITCHAT \
+           else {"type": "general", "scenario_id": None}
+If TEI doesn't expose the classification adapter for your Jina model, keep this one classifier encode local (it's a tiny, cheap forward pass compared to the LLM calls) — just make sure it doesn't block: wrap the local .encode() call in asyncio.to_thread rather than calling it directly, and stop passing rag_system.search_engine.query_encoder in main.py's lifespan (that object no longer exists after Step 1) — load a small dedicated SentenceTransformer just for this classifier instead.
+
+Step 7 — main.py: tie it together, await everything
+python
+@app.post("/api/query")
+async def query_documents(query_req: QueryRequest):
+    ...
+    intent = await intent_classifier.classify(query_req.query)
+    query_req.query = await asyncio.to_thread(text_processor.normalize, str(query_req.query).strip())
+
+    if intent["type"] == "chitchat":
+        final_query = query_req.query
+    else:
+        history_str = await asyncio.to_thread(
+            history_rewriting_service.get_formatted_history_string,
+            current_chat_id=session_id, max_turns=3,
+        )
+        final_query = await history_rewriting_service.rewrite_query(
+            current_query=query_req.query, current_summary=history_str
+        )
+
+    user_msg = await asyncio.to_thread(chat_manager.add_message, session_id, "user", query_req.query)
+    ...
+    answer = await agent_service.process_message(session_id, final_query, selected_docs=query_req.documents)
+    ...
+    ai_msg = await asyncio.to_thread(chat_manager.add_message, session_id, "assistant", answer)
+    meta = await asyncio.to_thread(db_manager.get_session_metadata, int(session_id))
+    ...
+And in the lifespan() startup block: delete the RAGSystem(qdrant_client=..., chunk_fetcher=...) construction of any local embedding model, delete the commented-out CrossEncoder load entirely, and initialize a shared httpx.AsyncClient (or reuse rag_system.search_engine._http) for reranker calls if you re-enable related-questions reranking — route it through PersianHybridSearch.rerank() from Step 1 instead of a local model.
+
+Why this actually fixes concurrency (vs. the def-not-async def quick fix from before)
+The threadpool trick works but caps you at ~40 concurrent in-flight requests (Starlette's default) and each one occupies a whole OS thread just to sit idle waiting on network I/O. With real async/await, a single-threaded event loop can hold hundreds of in-flight requests concurrently, because while one request is awaiting vLLM's or TEI's HTTP response, the event loop is free to advance every other request. This is the difference between "concurrency limited by thread count" and "concurrency limited by actual GPU/network throughput" — which is what you want given your GPUs, not your Python process, are the real ceiling.
+
+Test after this migration: re-run the 20-concurrent-request load test and watch nvidia-smi on both GPUs simultaneously — you should now see both actively utilized, and p95 latency should track vLLM's actual queueing behavior rather than Python-level serialization.

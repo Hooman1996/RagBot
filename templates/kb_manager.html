@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="fa" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Negah Yar AI - مدیریت پایگاه دانش</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link rel="stylesheet" href="/static/css/kb_manager.css">
+</head>
+<body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none">
+
+    <header class="bg-slate-950 border-b border-slate-800 px-6 py-4 flex justify-between items-center shadow-lg">
+        <div class="flex items-center gap-3">
+            <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-lg text-white shadow-md shadow-blue-500/20">N</div>
+            <div>
+                <h1 class="text-md font-bold tracking-wide">سامانه هوشمند نگاه یار</h1>
+                <p class="text-xs text-slate-400">پنل مدیریت پیشرفته پایگاه دانش و همگام‌سازی برداری</p>
+            </div>
+        </div>
+        <a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all">
+            ◄ بازگشت به میز کار چت
+        </a>
+    </header>
+
+    <div class="flex flex-1 overflow-hidden">
+
+        <aside class="w-80 bg-slate-950/50 border-l border-slate-800 p-4 flex flex-col">
+            <div class="mb-4">
+                <h3 class="text-xs uppercase tracking-wider font-bold text-slate-400 mb-1">فهرست اسناد فعال</h3>
+                <p class="text-[11px] text-slate-500">سند مورد نظر خود را جهت مدیریت تکه‌ها انتخاب نمایید.</p>
+            </div>
+            <div id="document-sidebar-list" class="flex-1 space-y-1.5 overflow-y-auto pr-1">
+                <div class="text-center py-8 text-slate-500 text-xs animate-pulse">در حال بارگذاری لیست اسناد...</div>
+            </div>
+        </aside>
+
+        <main class="flex-1 p-6 flex flex-col bg-slate-900 overflow-y-auto">
+
+            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-md mb-6 flex gap-3 items-center">
+                <div class="flex-1 relative">
+                    <input type="text" id="kb-search-input" placeholder="جستجو در محتوا یا سوالات موجود در تکه‌های این سند..."
+                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-all">
+                </div>
+                <button id="kb-search-trigger" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 text-sm font-semibold rounded-lg shadow-md transition-all">
+                    جستجوی هوشمند
+                </button>
+            </div>
+
+            <div id="chunks-workspace-wrapper" class="space-y-4">
+                <div class="flex flex-col items-center justify-center py-24 text-slate-500 border border-dashed border-slate-800 rounded-xl bg-slate-950/20">
+                    <span class="text-4xl mb-3">📂</span>
+                    <p class="text-sm">جهت مشاهده و مدیریت فیلدهای اطلاعاتی، ابتدا یک سند را از پنل کناری انتخاب کنید.</p>
+                </div>
+            </div>
+
+        </main>
+    </div>
+
+    <div id="history-modal-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-slate-950 w-full max-w-4xl max-h-[85vh] rounded-2xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-200">تاریخچه تغییرات و مدیریت نسخ چانک برداری</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">امکان رصد دقیق تغییرات اعمالی و بازگردانی آنی ساختار بردار متنی به وضعیت‌های گذشته</p>
+                </div>
+                <button id="close-history-modal" class="text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800 transition-all text-sm font-bold">✕</button>
+            </div>
+            <div id="history-versions-stack" class="p-6 overflow-y-auto flex-1 space-y-4 max-h-[60vh]">
+                </div>
+        </div>
+    </div>
+
+    <div id="add-chunk-modal-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+        <div class="bg-slate-950 w-full max-w-2xl rounded-2xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
+            <div class="px-6 py-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+                <div>
+                    <h3 class="text-sm font-bold text-slate-200">افزودن تکه داده (Chunk) جدید به سند فعال</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">متن ورودی جدید پس از نرمال‌سازی بلافاصله وکتورایز شده و به دیتابیس ترکیبی افزوده خواهد شد.</p>
+                </div>
+                <button id="close-add-modal" class="text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800 transition-all text-sm font-bold">✕</button>
+            </div>
+            <div class="p-6 space-y-4">
+                <div>
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1.5">نوع بافت تکه داده:</label>
+                    <select id="new-chunk-is-qa" class="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none transition-all">
+                        <option value="false">تکه متن خام بدون ساختار مستنداتی (Standard Raw Text)</option>
+                        <option value="true">پیکربندی پرسش و پاسخ ساختاریافته (Structured FAQ Link)</option>
+                    </select>
+                </div>
+                <div id="new-chunk-qa-fields-wrapper" class="hidden">
+                    <label class="block text-[11px] font-bold text-slate-400 mb-1.5">🔒 متن سوال متصل:</label>
+                    <input type="text" id="new-chunk-question" placeholder="عنوان سوال مرتبط را وارد کنید..."
+                           class="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-all text-right" style="direction: rtl;">
+                </div>
+                <div>
+                    <label id="content-label-context" class="block text-[11px] font-bold text-blue-400 mb-1.5">✍ متن اصلی چانک / پاسخ الحاقی:</label>
+                    <textarea id="new-chunk-answer" placeholder="محتوای متنی یا پاسخ متصل را با دقت بالا وارد کنید..."
+                              class="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-all h-32 resize-none leading-relaxed text-right" style="direction: rtl;"></textarea>
+                </div>
+                <div class="grid grid-cols-2 gap-4 border-t border-slate-900 pt-3">
+                    <div>
+                        <label class="block text-[10px] text-slate-500 mb-1">شناسه اپراتور تغییرات:</label>
+                        <input type="text" id="new-chunk-operator-name" value="Hooman (AI Engineer)" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-300 focus:outline-none" />
+                    </div>
+                    <div class="flex items-end justify-end">
+                        <button id="submit-new-chunk-btn" class="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-2 px-4 rounded-lg text-xs transition-all shadow-md shadow-blue-600/10">
+                            ✓ ثبت و ایجاد چانک برداری جدید
+                        </button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <div id="global-toast" class="fixed bottom-6 left-6 z-50 transform translate-y-12 opacity-0 transition-all duration-300 pointer-events-none bg-emerald-500 text-slate-950 font-bold text-xs px-5 py-3 rounded-lg shadow-xl shadow-emerald-500/10 flex items-center gap-2">
+        <span>✓</span> <span id="toast-text">تغییرات با موفقیت اعمال شد.</span>
+    </div>
+
+    <script src="/static/js/kb_manager.js"></script>
+</body>
+</html>

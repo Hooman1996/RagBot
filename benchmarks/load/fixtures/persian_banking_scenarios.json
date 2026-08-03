@@ -1,0 +1,103 @@
+{
+  "description": "Synthetic Persian banking questions. No customer or account data is included.",
+  "scenarios": {
+    "banking-smoke": [
+      {
+        "name": "banking-smoke",
+        "query": "چگونه می‌توانم موجودی حسابم را مشاهده کنم؟",
+        "documents": ["General_FAQ"]
+      }
+    ],
+    "banking-faq": [
+      {
+        "name": "card-replacement",
+        "query": "اگر کارت بانکی من مفقود شود برای دریافت کارت جدید چه کاری باید انجام دهم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "transfer-limit",
+        "query": "سقف انتقال وجه روزانه از طریق خدمات بانکی چقدر است؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "joint-account",
+        "query": "آیا امکان افتتاح حساب مشترک به صورت غیرحضوری وجود دارد؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "password-reset",
+        "query": "در صورت فراموش کردن رمز اینترنت بانک چگونه رمز جدید دریافت کنم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "cheque-status",
+        "query": "چگونه می‌توانم وضعیت چک صیادی را بررسی کنم؟",
+        "documents": ["General_FAQ"]
+      }
+    ],
+    "banking-follow-up": [
+      {
+        "name": "transfer-overview",
+        "query": "روش‌های انتقال وجه در بانک چیست؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "transfer-follow-up",
+        "query": "سقف انتقال از طریق پل چقدر است؟",
+        "documents": ["General_FAQ"]
+      }
+    ],
+    "banking-mixed": [
+      {
+        "name": "account-opening",
+        "query": "برای افتتاح حساب بانکی چه مدارکی لازم است؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "card-replacement",
+        "query": "اگر کارت بانکی من مفقود شود برای دریافت کارت جدید چه کاری باید انجام دهم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "transfer-limit",
+        "query": "سقف انتقال وجه روزانه از طریق خدمات بانکی چقدر است؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "joint-account",
+        "query": "آیا امکان افتتاح حساب مشترک به صورت غیرحضوری وجود دارد؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "password-reset",
+        "query": "در صورت فراموش کردن رمز اینترنت بانک چگونه رمز جدید دریافت کنم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "cheque-status",
+        "query": "چگونه می‌توانم وضعیت چک صیادی را بررسی کنم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "mobile-banking",
+        "query": "برای فعال‌سازی همراه بانک چه مراحلی را باید انجام دهم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "deposit-profit",
+        "query": "نحوه محاسبه سود سپرده کوتاه‌مدت چگونه است؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "iban",
+        "query": "شماره شبا را از چه طریقی می‌توانم دریافت کنم؟",
+        "documents": ["General_FAQ"]
+      },
+      {
+        "name": "transaction-history",
+        "query": "چگونه می‌توانم گردش حساب سه ماه اخیر را دریافت کنم؟",
+        "documents": ["General_FAQ"]
+      }
+    ]
+  }
+}

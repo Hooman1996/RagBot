@@ -1,0 +1,4 @@
+interface:
+  display_name: "RagBot Load Test"
+  short_description: "Build and assess safe RagBot API load tests"
+  default_prompt: "Use $ragbot-load-test to audit prerequisites and implement a reproducible staging load test for the mobile talk endpoint."

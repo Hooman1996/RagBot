@@ -1,0 +1,55 @@
+{
+  "description": "Synthetic Persian banking queries derived from the repository's representative mobile-talk fixture, with manually reviewed FAQ chunk relevance labels. Point IDs equal chunk_index + 1 in the staging collection.",
+  "queries": [
+    {
+      "id": "balance",
+      "query": "چگونه می‌توانم موجودی حسابم را مشاهده کنم؟",
+      "relevant_ids": [744, 87]
+    },
+    {
+      "id": "card-replacement",
+      "query": "اگر کارت بانکی من مفقود شود برای دریافت کارت جدید چه کاری باید انجام دهم؟",
+      "relevant_ids": [596]
+    },
+    {
+      "id": "transfer-limit",
+      "query": "سقف انتقال وجه روزانه از طریق خدمات بانکی چقدر است؟",
+      "relevant_ids": [203, 561]
+    },
+    {
+      "id": "joint-account",
+      "query": "آیا امکان افتتاح حساب مشترک به صورت غیرحضوری وجود دارد؟",
+      "relevant_ids": [148]
+    },
+    {
+      "id": "password-reset",
+      "query": "در صورت فراموش کردن رمز اینترنت بانک چگونه رمز جدید دریافت کنم؟",
+      "relevant_ids": [657, 754, 814]
+    },
+    {
+      "id": "cheque-status",
+      "query": "چگونه می‌توانم وضعیت چک صیادی را بررسی کنم؟",
+      "relevant_ids": [817, 954, 29]
+    },
+    {
+      "id": "mobile-banking",
+      "query": "برای فعال‌سازی همراه بانک چه مراحلی را باید انجام دهم؟",
+      "relevant_ids": [765, 662]
+    },
+    {
+      "id": "deposit-profit",
+      "query": "نحوه محاسبه سود سپرده کوتاه‌مدت چگونه است؟",
+      "relevant_ids": [74]
+    },
+    {
+      "id": "iban",
+      "query": "شماره شبا را از چه طریقی می‌توانم دریافت کنم؟",
+      "relevant_ids": [100, 354]
+    },
+    {
+      "id": "transaction-history",
+      "query": "چگونه می‌توانم گردش حساب سه ماه اخیر را دریافت کنم؟",
+      "relevant_ids": [682, 90]
+    }
+  ]
+}

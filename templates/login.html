@@ -1,0 +1,355 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Negah Bank AI — Secure Login</title>
+  <link rel="stylesheet" href="/static/css/base.css">
+  <link rel="stylesheet" href="/static/css/login.css">
+</head>
+<body class="login-page">
+
+  <!-- Background -->
+  <div class="login-bg">
+    <div class="login-bg__grid"></div>
+    <div class="login-bg__glow login-bg__glow--1"></div>
+    <div class="login-bg__glow login-bg__glow--2"></div>
+    <div class="login-bg__glow login-bg__glow--3"></div>
+    <div class="particles" id="particles"></div>
+  </div>
+
+  <!-- Language Toggle -->
+  <button class="lang-toggle" id="langToggle" aria-label="Switch language">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+      <circle cx="12" cy="12" r="10"/>
+      <path d="M2 12h20M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/>
+    </svg>
+    <span id="langLabel">فارسی</span>
+  </button>
+
+  <!-- Layout -->
+  <div class="login-layout">
+    <div class="login-card-wrapper">
+
+      <!-- Left: Hero -->
+      <div class="login-left">
+        <div class="login-left__brand">
+          <div class="brand-logo">
+            <svg width="26" height="26" viewBox="0 0 26 26" fill="none">
+              <path d="M13 2L3 7v3h20V7L13 2z" fill="white" opacity="0.9"/>
+              <rect x="5" y="12" width="3" height="8" rx="1" fill="white" opacity="0.8"/>
+              <rect x="11.5" y="12" width="3" height="8" rx="1" fill="white" opacity="0.8"/>
+              <rect x="18" y="12" width="3" height="8" rx="1" fill="white" opacity="0.8"/>
+              <rect x="3" y="21" width="20" height="2" rx="1" fill="white"/>
+              <circle cx="20" cy="6" r="5" fill="rgba(255,255,255,0.15)" stroke="white" stroke-width="1.5"/>
+              <path d="M18 6l1.5 1.5L22 4" stroke="white" stroke-width="1.5" stroke-linecap="round"/>
+            </svg>
+          </div>
+          <div class="brand-name">
+            <span class="brand-name__primary" data-en="Negah Bank AI" data-fa="هوش مصنوعی بانک نگاه">Negah Bank AI</span>
+            <span class="brand-name__secondary" data-en="Knowledge Intelligence Platform" data-fa="پلتفرم هوشمند دانش">Knowledge Intelligence Platform</span>
+          </div>
+        </div>
+
+        <div class="login-left__hero">
+          <div class="hero-badge">
+            <svg width="12" height="12" viewBox="0 0 12 12" fill="currentColor">
+              <circle cx="6" cy="6" r="6" opacity="0.3"/>
+              <circle cx="6" cy="6" r="3"/>
+            </svg>
+            <span data-en="Enterprise RAG · AI-Powered · Secure" data-fa="RAG سازمانی · مبتنی بر هوش مصنوعی · امن">Enterprise RAG · AI-Powered · Secure</span>
+          </div>
+
+          <h1 class="hero-title">
+            <span data-en="Your Bank's Knowledge," data-fa="دانش بانک شما،">Your Bank's Knowledge,</span><br>
+            <span class="hero-title__accent" data-en="Instantly Accessible" data-fa="در دسترس فوری">Instantly Accessible</span>
+          </h1>
+
+          <p class="hero-desc" data-en="An enterprise-grade AI platform that retrieves verified answers from Negah Bank's internal policies, regulations, and documents — with full source traceability and audit trails." data-fa="یک پلتفرم هوش مصنوعی سازمانی که پاسخ‌های تأییدشده را از سیاست‌ها، مقررات و اسناد داخلی بانک نگاه بازیابی می‌کند — با قابلیت ردیابی کامل منابع و گزارش‌های حسابرسی.">
+            An enterprise-grade AI platform that retrieves verified answers from
+            Negah Bank's internal policies, regulations, and documents — with full
+            source traceability and audit trails.
+          </p>
+
+          <div class="hero-stats">
+            <div class="hero-stat">
+              <div class="hero-stat__value">98%</div>
+              <div class="hero-stat__label" data-en="Answer Accuracy" data-fa="دقت پاسخ">Answer Accuracy</div>
+            </div>
+            <div class="hero-stat">
+              <div class="hero-stat__value">&lt;2s</div>
+              <div class="hero-stat__label" data-en="Response Time" data-fa="زمان پاسخ">Response Time</div>
+            </div>
+            <div class="hero-stat">
+              <div class="hero-stat__value">100%</div>
+              <div class="hero-stat__label" data-en="Source Traced" data-fa="ردیابی منبع">Source Traced</div>
+            </div>
+          </div>
+
+          <div class="hero-features">
+            <div class="hero-feature">
+              <div class="hero-feature__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+                  <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+                </svg>
+              </div>
+              <span data-en="Bank-grade security with end-to-end encryption" data-fa="امنیت درجه بانکی با رمزنگاری سرتاسری">Bank-grade security with end-to-end encryption</span>
+            </div>
+            <div class="hero-feature">
+              <div class="hero-feature__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+                  <circle cx="11" cy="11" r="8"/>
+                  <path d="m21 21-4.35-4.35"/>
+                </svg>
+              </div>
+              <span data-en="Semantic search across all internal documents" data-fa="جستجوی معنایی در تمام اسناد داخلی">Semantic search across all internal documents</span>
+            </div>
+            <div class="hero-feature">
+              <div class="hero-feature__icon">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#10b981" stroke-width="2">
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/>
+                  <polyline points="14,2 14,8 20,8"/>
+                </svg>
+              </div>
+              <span data-en="Cited sources for every AI-generated answer" data-fa="منابع استناد شده برای هر پاسخ تولیدشده توسط هوش مصنوعی">Cited sources for every AI-generated answer</span>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Right: Login Form -->
+      <div class="login-right">
+        <div class="login-card">
+
+          <div class="login-card__header">
+            <div class="login-card__avatar">
+              <svg width="30" height="30" viewBox="0 0 24 24" fill="none" stroke="white" stroke-width="2">
+                <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+              </svg>
+            </div>
+            <div class="login-card__title" data-en="Secure Access Portal" data-fa="درگاه دسترسی امن">Secure Access Portal</div>
+            <div class="login-card__subtitle" data-en="Authorized personnel only" data-fa="فقط برای پرسنل مجاز">Authorized personnel only</div>
+          </div>
+
+          <form id="loginForm" novalidate>
+
+            <!-- Username -->
+            <div class="form-group">
+              <label class="form-label" for="username" data-en="Employee ID / Username" data-fa="شناسه کارمندی / نام کاربری">Employee ID / Username</label>
+              <div class="input-wrapper">
+                <span class="input-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/>
+                    <circle cx="12" cy="7" r="4"/>
+                  </svg>
+                </span>
+                <input type="text" id="username" class="input"
+                       data-en-placeholder="Enter your employee ID"
+                       data-fa-placeholder="شناسه کارمندی خود را وارد کنید"
+                       placeholder="Enter your employee ID"
+                       autocomplete="username" required>
+              </div>
+            </div>
+
+            <!-- Password -->
+            <div class="form-group">
+              <label class="form-label" for="password" data-en="Password" data-fa="رمز عبور">Password</label>
+              <div class="input-wrapper">
+                <span class="input-icon">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                    <rect x="3" y="11" width="18" height="11" rx="2" ry="2"/>
+                    <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+                  </svg>
+                </span>
+                <input type="password" id="password" class="input"
+                       data-en-placeholder="Enter your password"
+                       data-fa-placeholder="رمز عبور خود را وارد کنید"
+                       placeholder="Enter your password"
+                       autocomplete="current-password" required>
+                <button type="button" class="input-toggle" id="togglePassword" aria-label="Toggle password visibility">
+                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" id="eyeIcon">
+                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+                    <circle cx="12" cy="12" r="3"/>
+                  </svg>
+                </button>
+              </div>
+            </div>
+
+            <!-- Options -->
+            <div class="form-options">
+              <label class="checkbox-label">
+                <input type="checkbox" id="rememberMe">
+                <span data-en="Remember this session" data-fa="این نشست را به خاطر بسپار">Remember this session</span>
+              </label>
+              <a href="#" class="form-link" data-en="Reset password" data-fa="بازیابی رمز عبور">Reset password</a>
+            </div>
+
+            <!-- Error -->
+            <div id="loginError" style="display:none;
+                 padding:10px 14px;
+                 background:rgba(239,68,68,0.1);
+                 border:1px solid rgba(239,68,68,0.2);
+                 border-radius:8px;
+                 font-size:0.8rem;
+                 color:#ef4444;
+                 margin-bottom:14px;">
+            </div>
+
+            <!-- Submit -->
+            <button type="submit" class="btn btn-primary btn-login" id="loginBtn">
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/>
+                <polyline points="10 17 15 12 10 7"/>
+                <line x1="15" y1="12" x2="3" y2="12"/>
+              </svg>
+              <span id="loginBtnText" data-en="Access Platform" data-fa="ورود به پلتفرم">Access Platform</span>
+            </button>
+
+          </form>
+
+          <div class="security-note">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+              <rect x="3" y="11" width="18" height="11" rx="2"/>
+              <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
+            </svg>
+            <span data-en="256-bit encrypted · Zero-knowledge session" data-fa="رمزنگاری ۲۵۶ بیتی · نشست بدون دانش">256-bit encrypted · Zero-knowledge session</span>
+          </div>
+
+        </div>
+      </div>
+
+    </div>
+  </div>
+
+  <!-- Toast Container -->
+  <div id="toast-container"></div>
+
+  <script src="/static/js/api.js"></script>
+  <script>
+    // ── Particles ──────────────────────────────────────────────────────────────
+    (function createParticles() {
+      const container = document.getElementById('particles');
+      for (let i = 0; i < 30; i++) {
+        const p = document.createElement('div');
+        p.className = 'particle';
+        p.style.cssText = `
+          left:              ${Math.random() * 100}%;
+          top:               ${Math.random() * 100}%;
+          animation-delay:   ${Math.random() * 8}s;
+          animation-duration:${6 + Math.random() * 6}s;
+          width:             ${1 + Math.random() * 2}px;
+          height:            ${1 + Math.random() * 2}px;
+          opacity:           ${0.1 + Math.random() * 0.5};
+        `;
+        container.appendChild(p);
+      }
+    })();
+
+    // ── Language Toggle ────────────────────────────────────────────────────────
+    let currentLang = 'en';
+
+    function applyLanguage(lang) {
+      const html = document.documentElement;
+      const isFa = lang === 'fa';
+
+      html.lang = isFa ? 'fa' : 'en';
+      html.dir  = isFa ? 'rtl' : 'ltr';
+      document.getElementById('langLabel').textContent = isFa ? 'English' : 'فارسی';
+
+      document.querySelectorAll('[data-en]').forEach(el => {
+        if (el.tagName === 'INPUT') return;
+        el.textContent = el.dataset[lang] || el.dataset.en;
+      });
+
+      document.querySelectorAll('[data-en-placeholder]').forEach(el => {
+        el.placeholder = isFa ? el.dataset.faPlaceholder : el.dataset.enPlaceholder;
+      });
+
+      // re-apply gradient on accent span after textContent swap
+      const accent = document.querySelector('.hero-title__accent');
+      if (accent) {
+        accent.style.background = 'var(--gradient-ai)';
+        accent.style.webkitBackgroundClip = 'text';
+        accent.style.webkitTextFillColor = 'transparent';
+        accent.style.backgroundClip = 'text';
+      }
+
+      document.body.style.fontFamily = isFa
+        ? "'Vazirmatn', 'Tahoma', sans-serif"
+        : '';
+
+      currentLang = lang;
+    }
+
+    document.getElementById('langToggle').addEventListener('click', () => {
+      applyLanguage(currentLang === 'en' ? 'fa' : 'en');
+    });
+
+    // ── Password toggle ────────────────────────────────────────────────────────
+    document.getElementById('togglePassword').addEventListener('click', function () {
+      const input = document.getElementById('password');
+      const icon  = document.getElementById('eyeIcon');
+      const isHidden = input.type === 'password';
+      input.type = isHidden ? 'text' : 'password';
+      icon.innerHTML = isHidden
+        ? `<path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8
+               a18.45 18.45 0 0 1 5.06-5.94"/>
+           <path d="M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8
+               a18.5 18.5 0 0 1-2.16 3.19"/>
+           <line x1="1" y1="1" x2="23" y2="23"/>`
+        : `<path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/>
+           <circle cx="12" cy="12" r="3"/>`;
+    });
+
+    // ── Login form ─────────────────────────────────────────────────────────────
+    document.getElementById('loginForm').addEventListener('submit', async function (e) {
+      e.preventDefault();
+
+      const username  = document.getElementById('username').value.trim();
+      const password  = document.getElementById('password').value;
+      const remember  = document.getElementById('rememberMe').checked;
+      const btn       = document.getElementById('loginBtn');
+      const btnText   = document.getElementById('loginBtnText');
+      const errorBox  = document.getElementById('loginError');
+      const isFa      = currentLang === 'fa';
+
+      errorBox.style.display = 'none';
+      errorBox.textContent   = '';
+
+      if (!username || !password) {
+        errorBox.textContent   = isFa
+          ? 'لطفاً شناسه کارمندی و رمز عبور خود را وارد کنید.'
+          : 'Please enter both your Employee ID and password.';
+        errorBox.style.display = 'block';
+        return;
+      }
+
+      btn.disabled        = true;
+      btn.classList.add('btn--loading');
+      btnText.textContent = isFa ? 'در حال احراز هویت…' : 'Authenticating…';
+
+      try {
+        const result = await API.login(username, password);
+
+        if (result.success) {
+          if (remember) localStorage.setItem('nb_remember', '1');
+          btnText.textContent = isFa ? 'دسترسی تأیید شد ✓' : 'Access Granted ✓';
+          API.initialize("/home/hooman/PycharmProjects/RegAssist/mahboubi_output_texts_checked");
+          btn.classList.remove('btn--loading');
+          btn.classList.add('btn--success');
+          setTimeout(() => { window.location.href = '/app'; }, 800);
+        } else {
+          throw new Error(result.message || (isFa ? 'اطلاعات نادرست است. لطفاً دوباره تلاش کنید.' : 'Invalid credentials. Please try again.'));
+        }
+
+      } catch (err) {
+        btn.disabled        = false;
+        btn.classList.remove('btn--loading');
+        btnText.textContent = isFa ? 'ورود به پلتفرم' : 'Access Platform';
+        errorBox.textContent   = err.message || (isFa ? 'احراز هویت ناموفق بود.' : 'Authentication failed. Please try again.');
+        errorBox.style.display = 'block';
+      }
+    });
+  </script>
+</body>
+</html>

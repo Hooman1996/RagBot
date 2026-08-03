@@ -1,0 +1,162 @@
+# Secrets and local environment
+/.env
+/.env.*
+!/.env.example
+!/.env.example.generated
+!/.env.recommended.rtx5880-staging
+/env.example
+*.pem
+*.key
+*.p12
+*.pfx
+id_rsa
+id_ed25519
+
+# IDE, OS, and project-local assistant state
+/.idea/
+/.vscode/
+/.codex/
+/.qdrant-initialized
+/t -q
+*.code-workspace
+*.swp
+*.swo
+*.swn
+*~
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Python caches, environments, test output, and packaging
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.cache/
+.ipynb_checkpoints/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.pyre/
+.pytype/
+.hypothesis/
+.tox/
+.nox/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.cover
+*.py,cover
+/.venv/
+/venv/
+/env/
+/ENV/
+__pypackages__/
+/build/
+/dist/
+*.egg-info/
+.eggs/
+wheels/
+pip-wheel-metadata/
+*.egg
+MANIFEST
+
+# JavaScript dependencies and build caches
+node_modules/
+.vite/
+.parcel-cache/
+.next/
+
+# Logs, temporary files, and local databases
+*.log
+*.pid
+*.pid.lock
+*.sock
+*.tmp
+*.temp
+*.bak
+*.trace
+*.prof
+*.lprof
+*.pstats
+/core
+/core.*
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+*.db
+*.db-journal
+*.rdb
+celerybeat-schedule
+celerybeat.pid
+/new_architecture/logs/
+/new_architecture/app/logs/
+/new_architecture/app/temp/
+/new_architecture/app/cache/
+
+# Private root-level knowledge-base exports
+/FAQ - end of 23031405 (v2).csv
+/تحویل هومن - خانم اله_بداشتی2.csv
+
+# RAG source documents: preserve only the clone-time directory
+/data_insertion_chunks/DOCUMENTS/*
+!/data_insertion_chunks/DOCUMENTS/.gitkeep
+
+# Generated RAG chunks: preserve intentional category directories only
+/data_insertion_chunks/CHUNKS/*
+!/data_insertion_chunks/CHUNKS/General_FAQ/
+/data_insertion_chunks/CHUNKS/General_FAQ/*
+!/data_insertion_chunks/CHUNKS/General_FAQ/.gitkeep
+/data_insertion_chunks/**/*.npy
+/data_insertion_chunks/**/*.npz
+/data_insertion_chunks/**/*.parquet
+
+# Benchmark results and machine-captured runtime evidence
+/benchmarks/results/*
+!/benchmarks/results/.gitkeep
+/docs/performance/runtime/
+profile-*.json
+profile-*.html
+
+# Runtime storage and service data
+/storage/
+/qdrant_storage/
+/snapshots/
+/qdrant-snapshots/
+/minio-data/
+/minio_data/
+/postgres-data/
+/postgres_data/
+/docker-volumes/
+/embeddings/
+
+# Model weights and model caches
+/models/
+*.safetensors
+*.bin
+*.pt
+*.pth
+*.onnx
+*.gguf
+*.ckpt
+/.cache/huggingface/
+models--*/
+
+# Generated uploads, downloads, and mass-answer output
+/downloads/
+/uploads/
+/output/
+/outputs/
+/tmp/
+/new_architecture/app/uploads/
+mass_answer_output*/
+mass-answer-output*/
+
+# Downloaded service/UI trees and binaries
+/qdrant-web-ui-master/
+/static_qdrant/
+/minio
+
+# Machine-specific repository audit output
+/docs/git/

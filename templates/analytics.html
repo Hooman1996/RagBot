@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Analytics – Negah Bank AI</title>
+    <link rel="stylesheet" href="/static/css/base.css" />
+    <link rel="stylesheet" href="/static/css/app.css" />
+    <link rel="stylesheet" href="/static/css/analytics.css" />
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+</head>
+<body>
+
+<div class="app-shell">
+
+    <!-- Theme Toggle Button -->
+    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode">🌙</button>
+
+    <!-- SIDEBAR (same structure as index.html) -->
+    <div class="sidebar">
+
+        <div class="sidebar__brand">
+            <div class="sidebar__logo">N</div>
+            <div class="sidebar__brand-text">
+                <div class="sidebar__brand-name">Negah Bank AI</div>
+                <div class="sidebar__brand-sub">RAG Platform</div>
+            </div>
+        </div>
+
+        <div class="sidebar__nav">
+            <a href="/app" class="sidebar__nav-item">
+                <span>Chat</span>
+            </a>
+            <a href="/app" class="sidebar__nav-item">
+                <span>Knowledge</span>
+            </a>
+            <a href="/analytics" class="sidebar__nav-item active">
+                <span>Analytics</span>
+            </a>
+        </div>
+
+    </div>
+
+    <!-- MAIN CONTENT -->
+    <div class="main-content">
+
+        <div class="topbar">
+            <div class="topbar__title">Analytics Dashboard</div>
+            <div class="topbar__actions">
+                <select id="timeRange" class="analytics-select">
+                    <option value="30">Last 30 days</option>
+                    <option value="14">Last 14 days</option>
+                    <option value="7">Last 7 days</option>
+                </select>
+                <button id="refreshAnalytics" class="status-chip" style="cursor:pointer;border:none;">
+                    ↻ Refresh
+                </button>
+            </div>
+        </div>
+
+        <div class="analytics-page" id="analyticsRoot">
+
+            <!-- KPI ROW -->
+            <div class="kpi-row" id="kpiRow"></div>
+
+            <!-- CHARTS -->
+            <div class="chart-row">
+                <div class="chart-card wide">
+                    <p class="chart-card__title">Queries per Day</p>
+                    <canvas id="chartQueriesDay"></canvas>
+                </div>
+                <div class="chart-card">
+                    <p class="chart-card__title">Satisfaction Distribution</p>
+                    <canvas id="chartSatisfaction"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-row">
+                <div class="chart-card">
+                    <p class="chart-card__title">Top Documents</p>
+                    <canvas id="chartTopDocs"></canvas>
+                </div>
+                <div class="chart-card">
+                    <p class="chart-card__title">Response Time Buckets</p>
+                    <canvas id="chartResponseTime"></canvas>
+                </div>
+                <div class="chart-card">
+                    <p class="chart-card__title">Active Users per Day</p>
+                    <canvas id="chartUsersDay"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-row">
+                <div class="chart-card wide">
+                    <p class="chart-card__title">Hourly Traffic</p>
+                    <canvas id="chartHourly"></canvas>
+                </div>
+                <div class="chart-card">
+                    <p class="chart-card__title">Weekly Comparison</p>
+                    <canvas id="chartWeekly"></canvas>
+                </div>
+            </div>
+
+            <div class="chart-row">
+                <div class="chart-card extra-wide">
+                    <p class="chart-card__title">Subject × Hour Heatmap</p>
+                    <div id="heatmapContainer" class="heatmap-wrapper"></div>
+                </div>
+            </div>
+
+        </div>
+    </div>
+</div>
+
+<!-- Theme toggle (same logic as index.html) -->
+<script>
+  const themeBtn = document.getElementById('themeToggleBtn');
+  if (localStorage.getItem('theme') === 'light') {
+    document.body.classList.add('light-mode');
+    themeBtn.textContent = '☀️';
+  }
+  themeBtn.addEventListener('click', () => {
+    const isLight = document.body.classList.toggle('light-mode');
+    themeBtn.textContent = isLight ? '☀️' : '🌙';
+    localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    if (window._analyticsDashboard) window._analyticsDashboard.reload();
+  });
+</script>
+<script src="/static/js/chart.umd.js"></script>
+<script src="/static/js/analytics.js"></script>
+</body>
+</html>

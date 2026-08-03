@@ -1,0 +1,361 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>Negah Bank AI</title>
+
+    <link rel="stylesheet" href="/static/css/base.css">
+    <link rel="stylesheet" href="/static/css/app.css">
+</head>
+<body>
+
+<div class="app-shell">
+
+    <div class="top-controls">
+        <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode">
+            <span class="toggle-icon">🌙</span>
+        </button>
+
+        <div class="lang-toggle-container" id="langToggleContainer">
+            <button class="lang-option" data-lang="fa" id="langFaBtn">FA</button>
+            <span class="lang-separator">|</span>
+            <button class="lang-option" data-lang="en" id="langEnBtn">EN</button>
+        </div>
+    </div>
+
+    <div class="sidebar">
+
+        <div class="sidebar__brand">
+            <div class="sidebar__logo">N</div>
+            <div class="sidebar__brand-text">
+                <div class="sidebar__brand-name" data-i18n="brand_name">Negah Bank AI</div>
+                <div class="sidebar__brand-sub" data-i18n="brand_sub">RAG Platform</div>
+            </div>
+        </div>
+
+        <div class="sidebar__nav">
+            <a href="/app" class="sidebar__nav-item active">
+                <span data-i18n="nav_chat">Chat</span>
+            </a>
+
+            <a href="/knowledge-base" class="sidebar__nav-item">
+                <span data-i18n="nav_knowledge">Knowledge</span>
+            </a>
+
+            <a href="/analytics" class="sidebar__nav-item">
+                <span data-i18n="nav_analytics">Analytics</span>
+            </a>
+        </div>
+
+        <div class="sidebar__section" style="padding: 0.75rem 0.85rem 0.4rem;">
+            <button class="btn-new-chat">
+                <span class="btn-new-chat__icon">+</span>
+                <span data-i18n="new_chat">New Chat</span>
+            </button>
+        </div>
+
+        <div class="sidebar__history">
+            <div class="sidebar__filter">
+                <select id="session-filter" class="session-filter-select">
+                    <option value="today" data-i18n="filter_today">📅 Today</option>
+                    <option value="yesterday" data-i18n="filter_yesterday">🕘 Yesterday</option>
+                    <option value="last7days" data-i18n="filter_last7">📆 Last 7 days</option>
+                    <option value="older" data-i18n="filter_older">🗄️ Older</option>
+                </select>
+            </div>
+
+            <div class="sidebar__chat-scroll">
+                <div class="sidebar__chat-list"></div>
+            </div>
+        </div>
+    </div>
+
+    <div class="main-content">
+
+        <div class="topbar">
+            <div class="topbar__title" data-i18n="topbar_title">Main Chat Interface</div>
+
+            <div class="topbar__actions">
+                <div class="status-chip">
+                    <div id="healthDot" class="dot"></div>
+                    <span data-i18n="system_status">System Status</span>
+                </div>
+            </div>
+        </div>
+
+        <div class="chat-layout">
+
+            <div class="chat-main">
+
+                <div id="messages" class="messages-area">
+
+                    <div class="chat-welcome">
+                        <div class="chat-welcome__title" data-i18n="welcome_title">Ask the Bank Knowledge AI</div>
+                        <div class="chat-welcome__subtitle" data-i18n="welcome_subtitle">
+                            Search internal documents, policies and regulatory guidance.
+                        </div>
+                    </div>
+
+                </div>
+
+                <div class="chat-input-area">
+                    <div id="lockNotice" class="lock-notice">
+                        <span class="lock-notice__icon">🔒</span>
+                        <span class="lock-notice__text" data-i18n="lock_text">برای شروع پرسش، حداقل یک سند انتخاب کنید یا فایلی بارگذاری نمایید</span>
+                    </div>
+
+                    <div id="docFilters" class="doc-filter-bar"></div>
+
+                    <div class="chat-input-box">
+                        <textarea id="chatInput" class="chat-textarea" data-i18n-placeholder="input_placeholder"
+                                  placeholder="..." dir="auto"></textarea>
+                        <div class="chat-input-actions">
+                            <button id="sendBtn" class="btn-send">➤</button>
+                        </div>
+                    </div>
+
+                    <div class="batch-processing-container"
+                         style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 0 4px;">
+                        <input type="file" id="batch-file-input" accept=".csv, .xlsx, .xls" style="display: none;"/>
+
+                        <button id="batch-upload-btn"
+                                style="background-color: #4f46e5; color: white; font-family: inherit; font-size: 0.85rem; padding: 8px 14px; border-radius: 6px; display: flex; align-items: center; border: none; cursor: pointer; transition: background-color 0.2s;">
+                            <svg style="width: 16px; height: 16px; margin-inline-end: 8px;" fill="none"
+                                 stroke="currentColor" viewBox="0 0 24 24">
+                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
+                                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
+                            </svg>
+                            پردازش دسته‌ای سوالات (Excel/CSV)
+                        </button>
+
+                        <span id="batch-status" style="font-size: 0.8rem; color: #64748b; display: none;">
+                            ⏳ در حال پردازش فایل، لطفا شکیبا باشید...
+                        </span>
+                    </div>
+
+                </div>
+            </div>
+
+            <div class="knowledge-panel">
+                <div class="kp-header">
+                    <div class="kp-title" data-i18n="doc_filters_title">Document Filters</div>
+                </div>
+                <div class="kp-body">
+                    <div class="kp-section-title">Search</div>
+                    <input type="text" id="doc-search-input" class="doc-search-input"
+                           data-i18n-placeholder="search_placeholder"
+                           placeholder="Search by name or number..."/>
+
+                    <div class="kp-section-title" style="margin-top: 16px;" data-i18n="categories_title">Categories
+                    </div>
+                    <div id="category-filters" class="category-filter-list">
+                    </div>
+                    <div class="kp-section-title" style="margin-top: 20px;" data-i18n="active_sources_title">Active
+                        Sources
+                    </div>
+                    <div id="active-sources-list" class="kp-doc-list">
+                    </div>
+                </div>
+            </div>
+
+        </div>
+
+    </div>
+
+</div>
+
+<script src="/static/js/i18n.js"></script>
+
+<script src="/static/js/api.js"></script>
+<script src="/static/js/sidebar.js"></script>
+<script src="/static/js/categoryFilter.js"></script>
+<script src="/static/js/chat.js"></script>
+<script src="/static/js/app.js"></script>
+
+<script>
+    // Theme toggle (unchanged)
+    const themeBtn = document.getElementById('themeToggleBtn');
+    const body = document.body;
+    const themeIcon = themeBtn.querySelector('.toggle-icon');
+
+    if (localStorage.getItem('theme') === 'light') {
+        body.classList.add('light-mode');
+        themeIcon.textContent = '☀️';
+    }
+
+    themeBtn.addEventListener('click', () => {
+        const isLight = body.classList.toggle('light-mode');
+        themeIcon.textContent = isLight ? '☀️' : '🌙';
+        localStorage.setItem('theme', isLight ? 'light' : 'dark');
+    });
+
+    // Language toggle
+    const langFaBtn = document.getElementById('langFaBtn');
+    const langEnBtn = document.getElementById('langEnBtn');
+
+    function updateLangToggleUI() {
+        if (I18N.lang === 'fa') {
+            langFaBtn.classList.add('active');
+            langEnBtn.classList.remove('active');
+        } else {
+            langEnBtn.classList.add('active');
+            langFaBtn.classList.remove('active');
+        }
+    }
+
+    updateLangToggleUI();
+
+    function setDirection(lang) {
+        document.body.classList.toggle('rtl', lang === 'fa');
+    }
+
+    // inside existing language button listeners:
+    langFaBtn.addEventListener('click', () => {
+        I18N.setLanguage('fa');
+        setDirection('fa');
+    });
+    langEnBtn.addEventListener('click', () => {
+        I18N.setLanguage('en');
+        setDirection('en');
+    });
+
+    // initial state
+    setDirection(I18N.lang);  // 'fa' or 'en'
+
+    window.addEventListener('languagechange', updateLangToggleUI);
+
+    // =========================================================================
+    // BATCH PROCESSING LOGIC (exact selected documents)
+    // =========================================================================
+    document.addEventListener('DOMContentLoaded', () => {
+        const fileInput = document.getElementById('batch-file-input');
+        const uploadBtn = document.getElementById('batch-upload-btn');
+        const statusEl = document.getElementById('batch-status');
+        const lockNotice = document.getElementById('lockNotice');
+
+        // ---- CORRECTED: robust extraction of selected document names ----
+        function getActiveDocuments() {
+            // Option 1: Use the Chat module's array if available and non‑empty
+            if (typeof Chat !== 'undefined' && Chat.selectedDocs && Chat.selectedDocs.length > 0) {
+                return Chat.selectedDocs.slice();   // return a copy
+            }
+
+            // Option 2: Scrape the tag bar for elements with class "selected"
+            const bar = document.getElementById("docFilters");
+            if (!bar) return [];
+
+            const selectedTags = bar.querySelectorAll('.doc-tag.selected');
+            const names = [];
+            selectedTags.forEach(tag => {
+                // Remove any nested elements (like the "×" button) and whitespace
+                const title = tag.textContent.replace(/×/g, '').trim();
+                if (title) names.push(title);
+            });
+            return names;
+        }
+
+        if (uploadBtn && fileInput) {
+
+            uploadBtn.addEventListener('click', (e) => {
+                const isAppLocked = lockNotice && window.getComputedStyle(lockNotice).display !== 'none';
+
+                if (isAppLocked) {
+                    alert("🔒 برای شروع پردازش دسته‌ای، ابتدا محدودیت صفحه را برطرف کنید (انتخاب سند یا بارگذاری فایل).");
+                    e.preventDefault();
+                    return;
+                }
+
+                // Proceed – batch is independent of active chat session
+                fileInput.click();
+            });
+
+            fileInput.addEventListener('change', async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                uploadBtn.disabled = true;
+                uploadBtn.style.opacity = '0.5';
+                uploadBtn.style.cursor = 'not-allowed';
+                statusEl.style.display = 'inline-block';
+                statusEl.style.color = '#64748b';
+                statusEl.textContent = "⏳ در حال پردازش فایل، ممکن است زمان‌بر باشد...";
+
+                const formData = new FormData();
+                formData.append("file", file);
+
+                const activeSessionId = window.currentSessionId || (typeof Chat !== 'undefined' && Chat.currentSessionId) || "0";
+                formData.append("session_id", activeSessionId);
+
+                // ---- Send the real selected documents ----
+                const selectedDocs = getActiveDocuments();
+                console.log("Sending selected docs:", selectedDocs);  // debug
+                formData.append("selected_docs", JSON.stringify(selectedDocs));
+
+                try {
+                    let response = await fetch('/api/mass-answer', {
+                        method: 'POST',
+                        body: formData
+                    });
+
+                    if (response.status === 202) {
+                        const job = await response.json();
+                        while (true) {
+                            await new Promise(resolve => setTimeout(resolve, 2000));
+                            const statusResponse = await fetch(job.status_url);
+                            if (!statusResponse.ok) {
+                                throw new Error("خطا در دریافت وضعیت پردازش دسته‌ای");
+                            }
+                            const progress = await statusResponse.json();
+                            statusEl.textContent = `⏳ پردازش ${progress.completed_rows} از ${progress.total_rows} ردیف...`;
+                            if (progress.status === 'completed') {
+                                response = await fetch(progress.result_url);
+                                break;
+                            }
+                            if (progress.status === 'failed') {
+                                throw new Error(progress.error_message || "پردازش دسته‌ای ناموفق بود");
+                            }
+                        }
+                    }
+
+                    if (!response.ok) {
+                        const errData = await response.json();
+                        throw new Error(errData.detail || "خطا در برقراری ارتباط با سرور");
+                    }
+
+                    const blob = await response.blob();
+                    const downloadUrl = window.URL.createObjectURL(blob);
+                    const a = document.createElement('a');
+                    a.href = downloadUrl;
+                    a.download = `Answered_${file.name}`;
+                    document.body.appendChild(a);
+                    a.click();
+                    a.remove();
+                    window.URL.revokeObjectURL(downloadUrl);
+
+                    statusEl.textContent = "✅ پردازش با موفقیت انجام شد!";
+                    statusEl.style.color = '#059669';
+
+                } catch (error) {
+                    console.error("Batch processing error:", error);
+                    statusEl.textContent = `❌ ${error.message}`;
+                    statusEl.style.color = '#ef4444';
+                } finally {
+                    uploadBtn.disabled = false;
+                    uploadBtn.style.opacity = '1';
+                    uploadBtn.style.cursor = 'pointer';
+                    fileInput.value = '';
+
+                    setTimeout(() => {
+                        statusEl.style.display = 'none';
+                    }, 5000);
+                }
+            });
+        }
+    });
+
+</script>
+
+</script>
+
+</body>
+</html>

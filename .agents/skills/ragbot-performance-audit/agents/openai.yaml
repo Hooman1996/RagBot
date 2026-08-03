@@ -1,0 +1,4 @@
+interface:
+  display_name: "RAGBot Performance Audit"
+  short_description: "Audit Agentic RAG latency and throughput"
+  default_prompt: "Use $ragbot-performance-audit to perform a complete, evidence-based performance audit of this Agentic RAG system."

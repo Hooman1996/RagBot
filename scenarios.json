@@ -1,0 +1,52 @@
+{
+  "scenarios": [
+    {
+      "id": "blocked",
+      "name": "Blocked access (app/card/account)",
+      "description": "Customer asks why something is blocked. Need to know what is blocked (app, card, or bank account) and the relevant identifier.",
+      "trigger_phrases": ["blocked", "locked", "مسدود", "قفل", "دسترسی"],
+      "required_slots": [
+        {
+          "slot_name": "entity_type",
+          "question": "برای بررسی وضعیت، لطفاً بفرمایید کدام یک مسدود شده است؟ (اپلیکیشن، کارت، یا حساب بانکی)",
+          "validation_regex": "^(اپلیکیشن|کارت|حساب بانکی|app|card|account)$",
+          "hint": "لطفاً یکی از موارد 'اپلیکیشن'، 'کارت' یا 'حساب بانکی' را وارد کنید."
+        },
+        {
+          "slot_name": "entity_code",
+          "question": "لطفاً شماره/کد مربوطه را وارد کنید: (شماره کارت ۱۶ رقمی، شماره حساب ۱۳ رقمی، یا کد ملی ۱۰ رقمی)",
+          "validation_regex": "^\\d{10}$|^\\d{13}$|^\\d{16}$",
+          "hint": "شماره باید ۱۰، ۱۳ یا ۱۶ رقم باشد."
+        }
+      ]
+    },
+    {
+      "id": "loan_status",
+      "name": "Loan status inquiry",
+      "description": "Customer wants to know the status of a loan application.",
+      "trigger_phrases": ["وضعیت وام", "تسهیلات", "loan status", "درخواست وام"],
+      "required_slots": [
+        {
+          "slot_name": "tracking_code",
+          "question": "لطفاً کد پیگیری ۱۰ رقمی وام خود را وارد کنید:",
+          "validation_regex": "^\\d{10}$",
+          "hint": "کد پیگیری باید ۱۰ رقم باشد."
+        }
+      ]
+    },
+    {
+      "id": "card_activation",
+      "name": "Card activation help",
+      "description": "Customer needs help activating a bank card.",
+      "trigger_phrases": ["فعال‌سازی کارت", "کارت رو فعال کنم", "activate card"],
+      "required_slots": [
+        {
+          "slot_name": "card_number",
+          "question": "لطفاً شماره کارت ۱۶ رقمی خود را وارد کنید:",
+          "validation_regex": "^\\d{16}$",
+          "hint": "شماره کارت باید ۱۶ رقم باشد."
+        }
+      ]
+    }
+  ]
+}
