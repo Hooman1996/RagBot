@@ -2,12 +2,14 @@ from fastapi import APIRouter, Request, HTTPException
 from pydantic import BaseModel
 from typing import List, Optional, Dict, Any
 import asyncio
+import time
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import ServiceError, ServiceTimeoutError
 from answering_service import AnswerRequestContext
+from utils.request_instrumentation import current_trace, mark_event, trace_span
 
 mobile_router = APIRouter(prefix="/api/mobile", tags=["Gateway API (Internal)"])
 REQUEST_TIMEOUT_SECONDS = (
@@ -81,8 +83,11 @@ def get_services(request: Request):
 @mobile_router.post("/v1/talk", response_model=TalkResponse)
 async def gateway_talk(req: TalkRequest, request: Request):
     async def operation():
-        return await _gateway_talk(req, request)
+        async with trace_span("pipeline"):
+            return await _gateway_talk(req, request)
 
+    mark_event("pre_admission_start")
+    mark_event("pre_admission_end")
     try:
         return await asyncio.wait_for(
             run_with_limit(
@@ -105,37 +110,44 @@ async def _gateway_talk(req: TalkRequest, request: Request):
     if not req.query or not req.session_id or not req.national_code:
         raise HTTPException(status_code=400, detail="session_id, query, and national_code are required.")
 
-    agent_service, chat_manager, intent_classifier, history_rewriting_service = get_services(request)
+    async with trace_span("authentication"):
+        # The direct mobile route has no authentication dependency. A reverse
+        # proxy may authenticate before FastAPI receives the request.
+        agent_service, chat_manager, intent_classifier, history_rewriting_service = get_services(request)
     answering_service = request.app.state.answering_service
     blocking_runner = request.app.state.blocking_runner
 
     # JIT Provisioning Lookup: Automatically handles new users seamlessly
-    user_row = await blocking_runner.run(
-        chat_manager.db.get_or_create_user_by_national_code, req.national_code
-    )
+    async with trace_span("persistence"):
+        user_row = await blocking_runner.run(
+            chat_manager.db.get_or_create_user_by_national_code,
+            req.national_code,
+        )
     if not user_row:
         raise HTTPException(status_code=500, detail="Database failure: Could not provision user profile.")
     user_id = user_row["id"]
 
     try:
         # Resolve mobile UUID to internal integer session ID
-        session_obj = await blocking_runner.run(
-            chat_manager.resolve_mobile_session,
-            user_id,
-            req.session_id,
-            wait_for_completion_on_cancel=True,
-        )
+        async with trace_span("persistence"):
+            session_obj = await blocking_runner.run(
+                chat_manager.resolve_mobile_session,
+                user_id,
+                req.session_id,
+                wait_for_completion_on_cancel=True,
+            )
         internal_session_id = session_obj["id"] if isinstance(session_obj, dict) else session_obj
 
         # Append Transaction Log
-        user_msg = await blocking_runner.run(
-            chat_manager.add_message,
-            str(internal_session_id),
-            "user",
-            req.query,
-            user_id=user_id,
-            wait_for_completion_on_cancel=True,
-        )
+        async with trace_span("persistence"):
+            user_msg = await blocking_runner.run(
+                chat_manager.add_message,
+                str(internal_session_id),
+                "user",
+                req.query,
+                user_id=user_id,
+                wait_for_completion_on_cancel=True,
+            )
         if not user_msg:
             raise HTTPException(status_code=500, detail="Failed to save user transaction message")
 
@@ -155,15 +167,18 @@ async def _gateway_talk(req: TalkRequest, request: Request):
         if not answer:
             answer = "متاسفانه پاسخی دریافت نشد."
 
-        ai_msg = await blocking_runner.run(
-            chat_manager.add_message,
-            str(internal_session_id),
-            "assistant",
-            answer,
-            user_id=user_id,
-            query_id=int(user_msg["id"]),
-            wait_for_completion_on_cancel=True,
-        )
+        mark_event("answer_generation_finished")
+        post_generation_started = time.perf_counter_ns()
+        async with trace_span("persistence"):
+            ai_msg = await blocking_runner.run(
+                chat_manager.add_message,
+                str(internal_session_id),
+                "assistant",
+                answer,
+                user_id=user_id,
+                query_id=int(user_msg["id"]),
+                wait_for_completion_on_cancel=True,
+            )
 
         # Extract Session Metadata Meta Attributes
         # FAQ related questions are already reranked once by the agent graph.
@@ -181,14 +196,22 @@ async def _gateway_talk(req: TalkRequest, request: Request):
 
         feedback_needed = result.feedback_needed
 
-        return TalkResponse(
-            query_id=str(ai_msg["id"]) if ai_msg else "unknown",
-            session_id=req.session_id,
-            query=req.query,
-            answer=answer,
-            related_questions=related_questions,
-            feedback_needed=feedback_needed
-        )
+        async with trace_span("response_build"):
+            response = TalkResponse(
+                query_id=str(ai_msg["id"]) if ai_msg else "unknown",
+                session_id=req.session_id,
+                query=req.query,
+                answer=answer,
+                related_questions=related_questions,
+                feedback_needed=feedback_needed,
+            )
+        trace = current_trace()
+        if trace is not None:
+            trace.add_duration(
+                "post_generation",
+                (time.perf_counter_ns() - post_generation_started) / 1_000_000,
+            )
+        return response
     except (HTTPException, ServiceError):
         raise
     except asyncio.CancelledError:

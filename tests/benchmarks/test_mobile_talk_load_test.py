@@ -175,7 +175,7 @@ class IdentityTests(unittest.TestCase):
         self.assertFalse(load_test.is_valid_iranian_national_code("0084575949"))
         self.assertFalse(load_test.is_valid_iranian_national_code("1111111111"))
 
-    def test_fixture_loading_and_full_synthetic_code_recording(self):
+    def test_fixture_identity_is_never_serialized(self):
         full_code = "stglt_reserved_001"
         with tempfile.TemporaryDirectory() as directory:
             root = Path(directory)
@@ -199,8 +199,8 @@ class IdentityTests(unittest.TestCase):
 
             self.assertEqual(identities[0].national_code, full_code)
             self.assertEqual(scenarios, {})
-            self.assertIn(full_code, jsonl_path.read_text(encoding="utf-8"))
-            self.assertIn(full_code, csv_path.read_text(encoding="utf-8"))
+            self.assertNotIn(full_code, jsonl_path.read_text(encoding="utf-8"))
+            self.assertNotIn(full_code, csv_path.read_text(encoding="utf-8"))
 
     def test_generated_national_code_mode_is_rejected(self):
         config = load_test.Config(
@@ -323,7 +323,7 @@ class WorkloadContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertCountEqual(starts, [1, 2, 3])
         self.assertEqual(len(results), 3)
 
-    async def test_mock_transport_success_records_exact_content(self):
+    async def test_mock_transport_keeps_content_in_memory_but_not_serialized(self):
         calls = 0
         full_code = "stglt_reserved_001"
 
@@ -341,7 +341,17 @@ class WorkloadContractTests(unittest.IsolatedAsyncioTestCase):
                     "related_questions": [],
                     "feedback_needed": False,
                 },
-                headers={"X-Request-Id": "server-7", "X-VLLM-Duration-Ms": "12.5"},
+                headers={
+                    "X-Request-Id": "server-7",
+                    "X-Server-Receive-Time": "2026-08-05T00:00:00+00:00",
+                    "X-Admission-Acquired": "true",
+                    "X-Admission-Outcome": "acquired",
+                    "X-Admission-Wait-Ms": "2.5",
+                    "X-Permit-Hold-Ms": "100.5",
+                    "X-Pipeline-Ms": "90.0",
+                    "X-Post-Generation-Ms": "5.0",
+                    "X-VLLM-Duration-Ms": "12.5",
+                },
             )
 
         transport = httpx.MockTransport(handler)
@@ -377,12 +387,22 @@ class WorkloadContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.national_code, full_code)
         self.assertTrue(result.response_schema_valid)
         self.assertEqual(result.server_request_id, "server-7")
+        self.assertEqual(result.client_request_id, "run-w1-u1-r1")
+        self.assertEqual(result.submission_index, 1)
+        self.assertTrue(result.admission_acquired)
+        self.assertEqual(result.admission_outcome, "acquired")
+        self.assertEqual(result.limiter_wait_ms, 2.5)
+        self.assertEqual(result.permit_hold_ms, 100.5)
+        self.assertEqual(result.pipeline_ms, 90.0)
+        self.assertEqual(result.post_generation_ms, 5.0)
         self.assertEqual(result.vllm_duration_ms, 12.5)
         self.assertEqual(
             result.server_timing_values["x-vllm-duration-ms"], 12.5
         )
-        self.assertIn(full_code, serialized)
-        self.assertIn("synthetic answer", serialized)
+        self.assertNotIn(full_code, serialized)
+        self.assertNotIn("synthetic answer", serialized)
+        self.assertIn("query_hash", serialized)
+        self.assertIn("answer_hash", serialized)
 
     async def test_mock_transport_timeout_is_not_retried(self):
         calls = 0
@@ -647,10 +667,13 @@ class OutputAndAcceptanceTests(unittest.TestCase):
                 "virtual_user_id",
                 "request_number",
                 "scenario_id",
-                "session_id",
-                "national_code",
-                "query_text",
-                "answer_text",
+                "client_request_id",
+                "submission_index",
+                "session_id_hash",
+                "national_code_hash",
+                "query_hash",
+                "query_character_count",
+                "answer_hash",
                 "answer_character_count",
                 "answer_word_count",
                 "answer_is_empty",
@@ -668,7 +691,7 @@ class OutputAndAcceptanceTests(unittest.TestCase):
             self.assertLessEqual(required_fields, set(json_rows[0]))
             self.assertLessEqual(required_fields, set(csv_rows[0]))
 
-    def test_csv_round_trips_persian_multiline_query_and_answer(self):
+    def test_csv_omits_persian_multiline_query_and_answer(self):
         query = 'پرسش، با "نقل قول"\nخط دوم'
         answer = 'پاسخ، با "نقل قول"\nخط دوم\nخط سوم'
         row = record(query_text=query, answer_text=answer)
@@ -679,8 +702,12 @@ class OutputAndAcceptanceTests(unittest.TestCase):
 
             with csv_path.open(encoding="utf-8", newline="") as stream:
                 parsed = next(csv.DictReader(stream))
-            self.assertEqual(parsed["query_text"], query)
-            self.assertEqual(parsed["answer_text"], answer)
+            self.assertNotIn("query_text", parsed)
+            self.assertNotIn("answer_text", parsed)
+            self.assertNotIn(query, csv_path.read_text(encoding="utf-8"))
+            self.assertNotIn(answer, csv_path.read_text(encoding="utf-8"))
+            self.assertTrue(parsed["query_hash"].startswith("sha256:"))
+            self.assertTrue(parsed["answer_hash"].startswith("sha256:"))
 
     def test_answer_quality_lengths_duplicates_and_invalid_schema(self):
         rows = [
@@ -710,7 +737,7 @@ class OutputAndAcceptanceTests(unittest.TestCase):
         self.assertEqual(quality["answers_identical_to_query_count"], 1)
         self.assertEqual(quality["invalid_response_schema_count"], 1)
 
-    def test_interactions_markdown_contains_exact_full_content(self):
+    def test_interactions_markdown_omits_exact_full_content(self):
         query = "پرسش کامل\nخط دوم"
         answer = "پاسخ کامل\nخط دوم"
         row = record(
@@ -723,9 +750,11 @@ class OutputAndAcceptanceTests(unittest.TestCase):
 
         self.assertIn("## Interaction 1", markdown)
         self.assertIn("- Scenario: fixture", markdown)
-        self.assertIn("- National code: synthetic-code", markdown)
-        self.assertIn(f"### Query\n\n{query}", markdown)
-        self.assertIn(f"### Bot answer\n\n{answer}", markdown)
+        self.assertNotIn("synthetic-code", markdown)
+        self.assertNotIn(query, markdown)
+        self.assertNotIn(answer, markdown)
+        self.assertIn("Query hash: sha256:", markdown)
+        self.assertIn("Answer hash: sha256:", markdown)
 
     def test_metric_explanations_include_tail_latency_and_worked_example(self):
         markdown = load_test.metric_explanations_markdown()
@@ -736,7 +765,7 @@ class OutputAndAcceptanceTests(unittest.TestCase):
         self.assertIn("Concurrency 30 does not mean throughput 30", markdown)
         self.assertIn("One repetition is not enough", markdown)
         self.assertIn("does not prove concurrency 50 will pass", markdown)
-        self.assertIn("interactions.md", markdown)
+        self.assertIn("intentionally omit question and answer content", markdown)
 
     def test_all_required_artifacts_are_written(self):
         rows = [record()]

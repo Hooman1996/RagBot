@@ -7,6 +7,8 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
+from utils.request_instrumentation import trace_span
+
 
 @dataclass(frozen=True)
 class AnswerRequestContext:
@@ -157,7 +159,13 @@ class AnsweringService:
         timings: dict[str, float], name: str, awaitable: Any
     ) -> Any:
         started = time.perf_counter()
+        trace_name = {
+            "intent_classification": "intent",
+            "history": "history",
+            "rewrite": "rewrite",
+        }.get(name, name)
         try:
-            return await awaitable
+            async with trace_span(trace_name):
+                return await awaitable
         finally:
             timings[name] = (time.perf_counter() - started) * 1000

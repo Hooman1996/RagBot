@@ -10,6 +10,7 @@ import sys
 import threading
 import uuid
 import logging
+import time
 from dotenv import load_dotenv
 
 # Load variables from .env into os.environ
@@ -53,7 +54,17 @@ from mass_answer_files import (
 from kb_manager import router as kb_router
 
 from utils.persian_hybrid_search import PersianTextProcessor
-from utils.concurrency import BoundedBlockingRunner, run_with_limit
+from utils.concurrency import AdmissionLimiter, BoundedBlockingRunner, run_with_limit
+from utils.request_instrumentation import (
+    RequestTrace,
+    current_trace,
+    mark_event,
+    reset_current_trace,
+    safe_request_id,
+    set_current_trace,
+    trace_span,
+    trace_summary,
+)
 from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
@@ -213,7 +224,9 @@ async def lifespan(app: FastAPI):
     global tei_http_client, tei_sync_http_client, llm_client
 
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
-    request_limiter = asyncio.Semaphore(REQUEST_CONCURRENCY_LIMIT)
+    request_limiter = AdmissionLimiter(
+        REQUEST_CONCURRENCY_LIMIT, name="answering"
+    )
     app.state.ready = False
     try:
         text_processor = await blocking_runner.run(
@@ -458,6 +471,40 @@ app = FastAPI(
     lifespan=lifespan
 )
 
+request_trace_logger = logging.getLogger("request_trace")
+
+
+@app.middleware("http")
+async def request_trace_middleware(request: Request, call_next):
+    trace = RequestTrace(
+        request_id=safe_request_id(request.headers.get("X-Request-Id")),
+        process_id=os.getpid(),
+    )
+    trace.mark("request_received")
+    token = set_current_trace(trace)
+    response = None
+    try:
+        response = await call_next(request)
+        trace.mark("response_returned")
+        for name, value in trace.response_headers().items():
+            response.headers[name] = value
+        return response
+    finally:
+        request_trace_logger.info(
+            json.dumps(
+                {
+                    "event": "request_complete",
+                    "method": request.method,
+                    "path": request.url.path,
+                    "status_code": getattr(response, "status_code", 500),
+                    **trace_summary(trace),
+                },
+                separators=(",", ":"),
+                sort_keys=True,
+            )
+        )
+        reset_current_trace(token)
+
 templates = Jinja2Templates(directory="templates")
 app.mount("/static", StaticFiles(directory="static"), name="static")
 
@@ -589,21 +636,26 @@ async def get_documents():
 @app.post("/api/query")
 async def query_documents(query_req: QueryRequest, request: Request):
     async def operation():
-        try:
-            return await asyncio.wait_for(
-                _query_documents(query_req), timeout=REQUEST_TIMEOUT_SECONDS
-            )
-        except TimeoutError as exc:
-            from utils.service_errors import ServiceTimeoutError
-            raise ServiceTimeoutError(
-                "AI request exceeded the 50-second deadline"
-            ) from exc
+        async with trace_span("pipeline"):
+            return await _query_documents(query_req)
 
-    return await run_with_limit(
-        request.app.state.request_limiter,
-        operation,
-        acquire_timeout=REQUEST_ADMISSION_TIMEOUT_SECONDS,
-    )
+    mark_event("pre_admission_start")
+    mark_event("pre_admission_end")
+    try:
+        return await asyncio.wait_for(
+            run_with_limit(
+                request.app.state.request_limiter,
+                operation,
+                acquire_timeout=REQUEST_ADMISSION_TIMEOUT_SECONDS,
+            ),
+            timeout=REQUEST_TIMEOUT_SECONDS,
+        )
+    except TimeoutError as exc:
+        from utils.service_errors import ServiceTimeoutError
+        raise ServiceTimeoutError(
+            f"AI request exceeded the {REQUEST_TIMEOUT_SECONDS:g}-second "
+            "total deadline"
+        ) from exc
 
 
 async def _query_documents(query_req: QueryRequest):
@@ -616,13 +668,14 @@ async def _query_documents(query_req: QueryRequest):
     original_query = str(query_req.query).strip()
 
     # Log incoming user message interaction
-    user_msg = await blocking_runner.run(
-        chat_manager.add_message,
-        session_id,
-        "user",
-        original_query,
-        wait_for_completion_on_cancel=True,
-    )
+    async with trace_span("persistence"):
+        user_msg = await blocking_runner.run(
+            chat_manager.add_message,
+            session_id,
+            "user",
+            original_query,
+            wait_for_completion_on_cancel=True,
+        )
 
 
     if not user_msg:
@@ -647,14 +700,17 @@ async def _query_documents(query_req: QueryRequest):
     if answer is None:
         answer = "متاسفانه پاسخی دریافت نشد. لطفاً دوباره تلاش کنید."
 
-    ai_msg = await blocking_runner.run(
-        chat_manager.add_message,
-        session_id,
-        "assistant",
-        answer,
-        query_id=int(user_msg["id"]),
-        wait_for_completion_on_cancel=True,
-    )
+    mark_event("answer_generation_finished")
+    post_generation_started = time.perf_counter_ns()
+    async with trace_span("persistence"):
+        ai_msg = await blocking_runner.run(
+            chat_manager.add_message,
+            session_id,
+            "assistant",
+            answer,
+            query_id=int(user_msg["id"]),
+            wait_for_completion_on_cancel=True,
+        )
 
     query_id = ai_msg["id"] if ai_msg else None
 
@@ -670,14 +726,22 @@ async def _query_documents(query_req: QueryRequest):
 
     feedback_needed = result.feedback_needed
 
-    return {
-        "status": "success",
-        "query": original_query,
-        "answer": answer,
-        "query_id": query_id,
-        "related_questions": related_questions,
-        "feedback_needed": feedback_needed,
-    }
+    async with trace_span("response_build"):
+        response = {
+            "status": "success",
+            "query": original_query,
+            "answer": answer,
+            "query_id": query_id,
+            "related_questions": related_questions,
+            "feedback_needed": feedback_needed,
+        }
+    trace = current_trace()
+    if trace is not None:
+        trace.add_duration(
+            "post_generation",
+            (time.perf_counter_ns() - post_generation_started) / 1_000_000,
+        )
+    return response
 
 
 # ----------------------------------------------------------------------
@@ -1729,6 +1793,35 @@ async def health_check():
         "documents_available": len(available_documents),
         "ocr_available": ocr_service is not None
     }
+
+
+@app.get("/api/metrics/admission")
+async def admission_metrics(request: Request):
+    """Content-free, worker-local limiter and dependency saturation counters."""
+
+    limiter = request.app.state.request_limiter
+    admission = limiter.snapshot()
+    payload = {
+        "process_id": os.getpid(),
+        "scope": "worker-local",
+        "admission": {
+            "limiter_id": admission.limiter_id,
+            "capacity": admission.capacity,
+            "active": admission.active,
+            "waiting": admission.waiting,
+            "acquired_total": admission.acquired_total,
+            "timeout_total": admission.timeout_total,
+            "cancelled_total": admission.cancelled_total,
+            "released_total": admission.released_total,
+        },
+        "blocking": request.app.state.blocking_runner.snapshot(),
+    }
+    active_rag = request.app.state.answering_service.agent_service.rag_system
+    if hasattr(active_rag, "metrics_snapshot"):
+        payload["vllm"] = active_rag.metrics_snapshot()
+    if hasattr(active_rag.search_engine, "metrics_snapshot"):
+        payload["retrieval"] = active_rag.search_engine.metrics_snapshot()
+    return payload
 
 
 if __name__ == "__main__":

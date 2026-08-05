@@ -67,11 +67,13 @@ FIELD_NAMES = [
     "request_number",
     "scenario_id",
     "scenario",
-    "session_id",
-    "national_code",
+    "client_request_id",
+    "submission_index",
+    "session_id_hash",
     "national_code_hash",
-    "query_text",
-    "answer_text",
+    "query_hash",
+    "query_character_count",
+    "answer_hash",
     "answer_character_count",
     "answer_word_count",
     "answer_is_empty",
@@ -93,17 +95,31 @@ FIELD_NAMES = [
     "response_bytes",
     "answer_characters",
     "server_request_id",
+    "server_receive_time",
     "server_timing",
     "server_timing_values",
     "limiter_wait_ms",
+    "admission_acquired",
+    "admission_outcome",
+    "permit_hold_ms",
+    "pipeline_ms",
+    "post_generation_ms",
     "endpoint_processing_ms",
     "rewrite_duration_ms",
     "embedding_duration_ms",
+    "blocking_wait_ms",
+    "history_duration_ms",
+    "intent_duration_ms",
+    "persistence_duration_ms",
+    "response_build_ms",
+    "qdrant_wait_ms",
     "qdrant_duration_ms",
     "reranker_duration_ms",
     "vllm_duration_ms",
     "timeout_category",
     "exception_type",
+    "error_code",
+    "error_body_category",
     "sanitized_error",
 ]
 
@@ -211,12 +227,28 @@ class RequestRecord:
     endpoint_processing_ms: float | None = None
     rewrite_duration_ms: float | None = None
     embedding_duration_ms: float | None = None
+    blocking_wait_ms: float | None = None
+    history_duration_ms: float | None = None
+    intent_duration_ms: float | None = None
+    persistence_duration_ms: float | None = None
+    response_build_ms: float | None = None
+    qdrant_wait_ms: float | None = None
     qdrant_duration_ms: float | None = None
     reranker_duration_ms: float | None = None
     vllm_duration_ms: float | None = None
     timeout_category: str | None = None
     exception_type: str | None = None
     sanitized_error: str | None = None
+    client_request_id: str | None = None
+    submission_index: int | None = None
+    server_receive_time: str | None = None
+    admission_acquired: bool | None = None
+    admission_outcome: str | None = None
+    permit_hold_ms: float | None = None
+    pipeline_ms: float | None = None
+    post_generation_ms: float | None = None
+    error_code: str | None = None
+    error_body_category: str | None = None
 
     @property
     def success(self) -> bool:
@@ -224,6 +256,13 @@ class RequestRecord:
 
     def to_dict(self) -> dict[str, Any]:
         result = asdict(self)
+        for sensitive_name in (
+            "session_id",
+            "national_code",
+            "query_text",
+            "answer_text",
+        ):
+            result.pop(sensitive_name, None)
         result.update(
             {
                 "timestamp": self.request_start_timestamp,
@@ -235,6 +274,14 @@ class RequestRecord:
                 "failure_category": self.failure_class,
                 "error_message": self.sanitized_error,
                 "response_byte_count": self.response_bytes,
+                "session_id_hash": content_hash(
+                    self.session_id, self.run_id, "session"
+                ),
+                "query_hash": content_hash(self.query_text, self.run_id, "query"),
+                "query_character_count": len(self.query_text),
+                "answer_hash": content_hash(
+                    self.answer_text, self.run_id, "answer"
+                ),
             }
         )
         return result
@@ -336,6 +383,13 @@ def is_valid_iranian_national_code(value: str) -> bool:
 
 def national_code_hash(national_code: str, run_id: str) -> str:
     digest = hashlib.sha256(f"{run_id}:{national_code}".encode("utf-8")).hexdigest()
+    return f"sha256:{digest[:16]}"
+
+
+def content_hash(value: str, run_id: str, category: str) -> str:
+    digest = hashlib.sha256(
+        f"{run_id}:{category}:{value}".encode("utf-8")
+    ).hexdigest()
     return f"sha256:{digest[:16]}"
 
 
@@ -555,6 +609,18 @@ def _safe_float(headers: httpx.Headers, *names: str) -> float | None:
     return None
 
 
+def _safe_bool(headers: httpx.Headers, name: str) -> bool | None:
+    value = headers.get(name)
+    if value is None:
+        return None
+    normalized = value.strip().lower()
+    if normalized == "true":
+        return True
+    if normalized == "false":
+        return False
+    return None
+
+
 def _server_timing_values(headers: httpx.Headers) -> dict[str, str | float]:
     """Capture server timing headers without guessing unavailable stages."""
 
@@ -726,6 +792,8 @@ async def perform_request(
     timeout_category: str | None = None
     exception_type: str | None = None
     sanitized_error: str | None = None
+    error_code: str | None = None
+    error_body_category: str | None = None
     response_bytes = 0
     answer_characters = 0
     answer_text = ""
@@ -738,6 +806,7 @@ async def perform_request(
         response_bytes = len(response.content)
         response_headers = response.headers
         failure_class, timeout_category = classify_response(response)
+        error_code = _error_code(response)
         if failure_class == SUCCESS:
             try:
                 response_body = response.json()
@@ -750,15 +819,20 @@ async def perform_request(
                 )
                 response_schema_valid = valid
                 if valid:
+                    error_body_category = "talk_response"
                     answer_characters = len(answer_text)
                     answer_word_count = len(answer_text.split())
                 else:
+                    error_body_category = "invalid_talk_response"
                     failure_class = INVALID_SCHEMA
                     sanitized_error = schema_error
         else:
-            code = _error_code(response)
+            error_body_category = (
+                "structured_service_error" if error_code else "http_error"
+            )
             sanitized_error = (
-                f"HTTP {status}" + (f" errorCode={code}" if code else "")
+                f"HTTP {status}"
+                + (f" errorCode={error_code}" if error_code else "")
             )
     except Exception as exc:
         failure_class, timeout_category = classify_exception(exc)
@@ -767,6 +841,7 @@ async def perform_request(
             str(exc) or exception_type,
             (config.auth_token or "",),
         )
+        error_body_category = "client_exception"
 
     end_ns = time.perf_counter_ns()
     return RequestRecord(
@@ -811,6 +886,14 @@ async def perform_request(
         embedding_duration_ms=_safe_float(
             response_headers, "x-embedding-duration-ms"
         ),
+        blocking_wait_ms=_safe_float(response_headers, "x-blocking-wait-ms"),
+        history_duration_ms=_safe_float(response_headers, "x-history-duration-ms"),
+        intent_duration_ms=_safe_float(response_headers, "x-intent-duration-ms"),
+        persistence_duration_ms=_safe_float(
+            response_headers, "x-persistence-duration-ms"
+        ),
+        response_build_ms=_safe_float(response_headers, "x-response-build-ms"),
+        qdrant_wait_ms=_safe_float(response_headers, "x-qdrant-wait-ms"),
         qdrant_duration_ms=_safe_float(response_headers, "x-qdrant-duration-ms"),
         reranker_duration_ms=_safe_float(
             response_headers, "x-reranker-duration-ms"
@@ -819,6 +902,21 @@ async def perform_request(
         timeout_category=timeout_category,
         exception_type=exception_type,
         sanitized_error=sanitized_error,
+        client_request_id=request_id,
+        submission_index=(wave_number - 1) * config.concurrency
+        + virtual_user.number,
+        server_receive_time=response_headers.get("x-server-receive-time"),
+        admission_acquired=_safe_bool(
+            response_headers, "x-admission-acquired"
+        ),
+        admission_outcome=response_headers.get("x-admission-outcome"),
+        permit_hold_ms=_safe_float(response_headers, "x-permit-hold-ms"),
+        pipeline_ms=_safe_float(response_headers, "x-pipeline-ms"),
+        post_generation_ms=_safe_float(
+            response_headers, "x-post-generation-ms"
+        ),
+        error_code=error_code,
+        error_body_category=error_body_category,
     )
 
 
@@ -1065,6 +1163,43 @@ def summarize_records(
         for record in records
     )
     success_count = len(successful)
+    admission_waits = [
+        record.limiter_wait_ms
+        for record in records
+        if record.limiter_wait_ms is not None
+    ]
+    permit_holds = [
+        record.permit_hold_ms
+        for record in records
+        if record.permit_hold_ms is not None
+    ]
+    release_offsets = []
+    receive_times = []
+    for record in records:
+        if record.server_receive_time:
+            try:
+                received = datetime.fromisoformat(record.server_receive_time)
+            except ValueError:
+                continue
+            receive_ms = received.timestamp() * 1000
+            receive_times.append(receive_ms)
+            if record.limiter_wait_ms is not None and record.permit_hold_ms is not None:
+                release_offsets.append(
+                    receive_ms + record.limiter_wait_ms + record.permit_hold_ms
+                )
+    first_receive_ms = min(receive_times) if receive_times else None
+    release_from_origin = (
+        [value - first_receive_ms for value in release_offsets]
+        if first_receive_ms is not None
+        else []
+    )
+
+    def stage_values(name: str) -> list[float]:
+        return [
+            value
+            for value in (getattr(record, name) for record in records)
+            if value is not None
+        ]
 
     def percentage_within(seconds: float) -> float:
         if not success_latencies:
@@ -1116,6 +1251,45 @@ def summarize_records(
         "counts_by_status_code": dict(sorted(status_counts.items())),
         "successful_latency_ms": latency_statistics(success_latencies),
         "all_completed_attempt_latency_ms": latency_statistics(completed_latencies),
+        "admission_wait_ms": latency_statistics(admission_waits),
+        "permit_hold_ms": latency_statistics(permit_holds),
+        "first_permit_release_ms": (
+            min(release_from_origin) if release_from_origin else None
+        ),
+        "permits_released_by_8_seconds": sum(
+            value <= 8_000 for value in release_from_origin
+        ),
+        "permits_released_by_10_seconds": sum(
+            value <= 10_000 for value in release_from_origin
+        ),
+        "permits_released_by_12_seconds": sum(
+            value <= 12_000 for value in release_from_origin
+        ),
+        "waiting_requests_admitted_before_12_seconds": sum(
+            record.admission_acquired is True
+            and record.limiter_wait_ms is not None
+            and record.limiter_wait_ms > 1.0
+            and record.limiter_wait_ms <= 12_000
+            for record in records
+        ),
+        "stage_latency_ms": {
+            name.removesuffix("_ms"): latency_statistics(stage_values(name))
+            for name in (
+                "pipeline_ms",
+                "post_generation_ms",
+                "rewrite_duration_ms",
+                "embedding_duration_ms",
+                "blocking_wait_ms",
+                "history_duration_ms",
+                "intent_duration_ms",
+                "persistence_duration_ms",
+                "response_build_ms",
+                "qdrant_wait_ms",
+                "qdrant_duration_ms",
+                "reranker_duration_ms",
+                "vllm_duration_ms",
+            )
+        },
         "requests_per_second": attempts / wall_seconds if wall_seconds else 0.0,
         "total_wall_clock_seconds": wall_seconds,
         "successful_within_10_seconds_percent": percentage_within(10),
@@ -1352,7 +1526,7 @@ def metric_explanations_markdown() -> str:
 
 All 30 requests completed successfully. 95% completed in approximately 9.30 seconds or less, and the slowest request completed in approximately 9.31 seconds. No failed requests were excluded from latency calculations. The full burst completed at an effective rate of approximately 3.22 requests per second.
 
-Concurrency 30 does not mean throughput 30 requests per second. One repetition is not enough to establish stability; multiple repeated waves are needed. Passing at concurrency 30 does not prove concurrency 50 will pass. Response quality should be reviewed using `interactions.md`."""
+Concurrency 30 does not mean throughput 30 requests per second. One repetition is not enough to establish stability; multiple repeated waves are needed. Passing at concurrency 30 does not prove concurrency 50 will pass. The performance artifacts intentionally omit question and answer content; quality review requires a separately controlled workflow."""
 
 
 def interactions_markdown(records: Sequence[RequestRecord]) -> str:
@@ -1363,22 +1537,18 @@ def interactions_markdown(records: Sequence[RequestRecord]) -> str:
                 f"## Interaction {interaction_number}",
                 "",
                 f"- Scenario: {record.scenario}",
-                f"- Session ID: {record.session_id}",
-                f"- National code: {record.national_code}",
+                f"- Session hash: {content_hash(record.session_id, record.run_id, 'session')}",
+                f"- Identity hash: {record.national_code_hash}",
                 f"- Virtual user: {record.virtual_user_number}",
                 f"- Wave: {record.wave_number}",
                 f"- Request latency: {record.client_elapsed_ms:.2f} ms",
                 f"- HTTP status: {record.http_status if record.http_status is not None else 'n/a'}",
                 f"- Success: {'true' if record.success else 'false'}",
                 f"- Request ID: {record.server_request_id or 'n/a'}",
-                "",
-                "### Query",
-                "",
-                record.query_text,
-                "",
-                "### Bot answer",
-                "",
-                record.answer_text,
+                f"- Query hash: {content_hash(record.query_text, record.run_id, 'query')}",
+                f"- Query characters: {len(record.query_text)}",
+                f"- Answer hash: {content_hash(record.answer_text, record.run_id, 'answer')}",
+                f"- Answer characters: {record.answer_characters}",
                 "",
             ]
         )
@@ -1589,14 +1759,18 @@ def write_artifacts(
             "run_id": summary["configuration"]["run_id"],
             "warning": (
                 "Operator action required: reconcile and remove only this run's "
-                "staging records using an approved database procedure."
+                "staging records using the separately controlled identity fixture."
             ),
-            "session_ids": sorted({record.session_id for record in records}),
-            "national_codes": sorted({record.national_code for record in records}),
+            "session_id_hashes": sorted(
+                {
+                    content_hash(record.session_id, record.run_id, "session")
+                    for record in records
+                }
+            ),
             "national_code_hashes": sorted(
                 {record.national_code_hash for record in records}
             ),
-            "full_national_codes_included": True,
+            "full_identifiers_included": False,
         }
         (output_dir / "cleanup-manifest.json").write_text(
             json.dumps(cleanup_manifest, indent=2, sort_keys=True) + "\n",

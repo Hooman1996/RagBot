@@ -20,21 +20,21 @@ Resolve these gates with the staging owner before sending even one request.
 |---|---|---|---|---|
 | Effective endpoint | Repository-direct path is `POST /api/mobile/v1/talk`; a gateway may expose it as `POST /v1/talk` | `mobile_api.py:10,77`, `main.py:414-416` | Default `--endpoint` is `/v1/talk`; pass `/api/mobile/v1/talk` when targeting the app directly | Confirm the deployed reverse-proxy path |
 | Request | Required strings: `session_id`, `query`, `national_code`; optional `documents` defaults to `["General_FAQ"]` | `mobile_api.py:22-26,96-98` | The runner sends the exact four-field JSON shape | External gateway validation remains unknown |
-| Success | HTTP 200 and all six `TalkResponse` fields with valid types; the bot answer is in `answer` | `mobile_api.py:29-35,193-202` | Full synthetic queries and answers are written to every request artifact and `interactions.md` | Deployed revision must match |
+| Success | HTTP 200 and all six `TalkResponse` fields with valid types; the bot answer is in `answer` | `mobile_api.py` | Query and answer text remain in memory only; artifacts contain hashes, lengths, status, and timings | Deployed revision must match |
 | Headers/auth | App route has no auth dependency; JSON is required; `X-Request-Id` is accepted on errors | `mobile_api.py:10,73-78`, `main.py:438-455` | Optional bearer token comes from `RAGBOT_STAGING_AUTH_TOKEN`; tokens are omitted from artifacts | Confirm gateway/network authentication |
 | Session IDs | Truthy strings at the API; database column is unique `VARCHAR(36)` | `mobile_api.py:22-26`, `database.py:108-112,641-658` | Deterministic UUIDs are unique per virtual user and retained for follow-ups | Preflight every planned UUID; lookup is not user-scoped |
 | National codes | No digit, length, or Iranian checksum validation in the endpoint | `mobile_api.py:22-26,96-98` | Generation is forbidden; an input fixture of reserved identities is mandatory | Staging owner must guarantee isolation/reservation |
 | Identity provisioning | Unknown codes create persistent users | `database.py:203-245` | Use pre-created identities only | Confirm fixture identities and clean database ownership |
 | Write footprint | A call can create a session, insert the prompt, store the answer, and update session metadata | `mobile_api.py:103-169`, `database.py:349-504,641-658` | Every live example is state-changing | Partial writes can remain after failures/timeouts |
 | Cleanup | No safe API deletes by the external session UUID and no user-delete API is available | `main.py:744-754`, `mobile_api.py:195-202` | `--cleanup` writes a manifest only; an authorized operator must reconcile/delete run sessions and queries | Rehearse the database cleanup procedure first |
-| Limiter | Source default is 32 per process, shared by several AI routes; mobile acquire timeout is 2 seconds | `main.py:77-82,208-218`, `mobile_api.py:89-93` | HTTP 503 plus `SERVICE_BUSY` is a limiter rejection | Verify live worker count and effective capacity |
-| Deadline | Work after admission has a 50-second `asyncio.wait_for` deadline | `mobile_api.py:77-87`, `utils/concurrency.py:99-117` | HTTP 504 plus `DEPENDENCY_TIMEOUT` is an application deadline timeout; default client read timeout is 55 seconds | Cancellation may not stop downstream GPU work |
-| Observability | Successful response schema has no request ID or stage timing | `mobile_api.py:29-35` | Known timing headers are captured when a gateway adds them; unavailable values stay null | Correlating server-side stages needs separately authorized telemetry |
+| Limiter | One `AdmissionLimiter` per worker is shared by the web and mobile answer routes | `main.py`, `mobile_api.py`, `utils/concurrency.py` | HTTP 503 plus `SERVICE_BUSY` is an admission timeout | Verify live worker count and effective capacity |
+| Deadline | Admission plus application work share one configured endpoint deadline | `main.py`, `mobile_api.py`, `utils/concurrency.py` | HTTP 504 plus `DEPENDENCY_TIMEOUT` is an application deadline timeout; default client read timeout is 55 seconds | Cancellation may not stop already-submitted downstream work |
+| Observability | The application emits content-free request/admission/stage headers and worker-local counters | `main.py`, `utils/request_instrumentation.py` | The runner records these headers when present; unavailable values stay null | Service schedulers still require their own telemetry |
 
 Do not use real customer data. The built-in prompts are synthetic questions
-from the reviewed FAQ/chitchat scenarios. Full synthetic query text and the
-complete returned bot answer are recorded by default, without redaction,
-hashing, truncation, or an opt-in switch.
+from the reviewed FAQ/chitchat scenarios. Plaintext remains in memory only as
+needed to send requests and validate responses. Persisted performance
+artifacts contain run-salted hashes, lengths, classifications, and timings.
 
 ## Identity fixture
 
@@ -64,8 +64,8 @@ Select one of `banking-smoke`, `banking-faq`, `banking-follow-up`, or
 `banking-mixed` using `--scenario`, and provide the file using
 `--scenario-file`.
 
-The runner records the full synthetic fixture national code in request
-artifacts and also retains the legacy run-salted hash field for compatibility.
+The runner does not record the fixture national code or session ID in result
+artifacts. It records only run-salted hashes for correlation.
 `--national-code-mode iranian-checksum` intentionally exits with code 2 because
 a generated checksum-valid code could collide with an existing user.
 
@@ -369,17 +369,15 @@ benchmarks/results/mobile-talk/<UTC timestamp>/
 
 The directory contains `requests.jsonl`, `requests.csv`, `summary.json`,
 `report.md`, and `interactions.md`. `--cleanup` also adds
-`cleanup-manifest.json`. Raw request records contain full synthetic query text,
-full bot answers, full synthetic national codes, timings, classifications,
-response sizes, answer character/word counts, schema validity, request IDs,
-and all recognized server timing headers. Authentication tokens are never
-written.
+`cleanup-manifest.json`. Request records contain run-salted identifier/query/
+answer hashes, lengths, timings, classifications, schema validity, request
+IDs, and recognized server timing headers. They contain no authentication
+token, national code, session ID, query text, or answer text.
 
-CSV is UTF-8 and uses standard CSV quoting, so commas, double quotes, Persian
-text, line breaks, and multiline answers round-trip without losing content.
-`interactions.md` presents every exact query and answer as a human-reviewable
-interaction. The tool calculates descriptive quality-supporting metrics but
-does not score semantic correctness. Answer lengths are Unicode character
+CSV is UTF-8 and uses standard CSV quoting. `interactions.md` presents hashes,
+lengths, outcomes, and timings. Perform answer-quality review in a separately
+access-controlled workflow. The tool calculates descriptive quality-supporting
+metrics but does not score semantic correctness. Answer lengths are Unicode character
 counts over schema-valid answers. Duplicate count means repeated exact answer
 occurrences beyond the first; duplicate and empty-answer percentages use the
 number of schema-valid answers as their denominator.
@@ -427,7 +425,7 @@ completed at an effective rate of approximately 3.22 requests per second.
 Concurrency 30 does not mean throughput 30 requests per second. One repetition
 is not enough to establish stability; multiple repeated waves are needed.
 Passing at concurrency 30 does not prove concurrency 50 will pass. Review
-response quality separately in `interactions.md`.
+response quality separately in an access-controlled quality artifact.
 
 The runner does not execute cleanup itself. Stop traffic, reconcile the
 manifest against the staging database, remove only run-created sessions and

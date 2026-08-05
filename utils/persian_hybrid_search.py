@@ -2,6 +2,7 @@ import numpy as np
 import asyncio
 import math
 import threading
+import time
 from typing import List, Dict, Tuple, Optional, Callable
 from dataclasses import dataclass
 from tqdm import tqdm
@@ -31,6 +32,7 @@ from utils.service_errors import (
     ServiceTimeoutError,
     ServiceUnavailableError,
 )
+from utils.request_instrumentation import current_trace, trace_span
 from utils.tei_embedding_client import (
     TeiEmbeddingClient,
     build_document_payload,
@@ -280,6 +282,16 @@ class PersianHybridSearch:
         self._qdrant_semaphore = asyncio.Semaphore(
             qdrant_concurrency or PERFORMANCE_SETTINGS.qdrant_concurrency
         )
+        self._qdrant_capacity = (
+            qdrant_concurrency or PERFORMANCE_SETTINGS.qdrant_concurrency
+        )
+        self._qdrant_active = 0
+        self._qdrant_waiting = 0
+        self._qdrant_acquired_total = 0
+        self._qdrant_released_total = 0
+        self._tei_embedding_active = 0
+        self._tei_reranker_active = 0
+        self._tei_pool_timeout_total = 0
         self._closed = False
         self._expected_embedding_dimensions = int(
             os.getenv("QDRANT_VECTOR_SIZE", "1024")
@@ -295,14 +307,37 @@ class PersianHybridSearch:
 
     async def _encode_query(self, query: str) -> list[float]:
         self._ensure_open()
+        self._tei_embedding_active = getattr(
+            self, "_tei_embedding_active", 0
+        ) + 1
         try:
-            return await self.embedding_client.embed_query(query)
+            async with trace_span("embedding"):
+                return await self.embedding_client.embed_query(query)
+        except httpx.PoolTimeout as exc:
+            self._tei_pool_timeout_total = getattr(
+                self, "_tei_pool_timeout_total", 0
+            ) + 1
+            raise ServiceTimeoutError("Embedding HTTP pool timed out") from exc
         except httpx.TimeoutException as exc:
             raise ServiceTimeoutError("Embedding service timed out") from exc
         except httpx.HTTPError as exc:
             raise ServiceUnavailableError(
                 "Embedding service is unavailable"
             ) from exc
+        finally:
+            self._tei_embedding_active -= 1
+
+    def metrics_snapshot(self) -> dict[str, int]:
+        return {
+            "qdrant_capacity": getattr(self, "_qdrant_capacity", 0),
+            "qdrant_active": getattr(self, "_qdrant_active", 0),
+            "qdrant_waiting": getattr(self, "_qdrant_waiting", 0),
+            "qdrant_acquired_total": getattr(self, "_qdrant_acquired_total", 0),
+            "qdrant_released_total": getattr(self, "_qdrant_released_total", 0),
+            "tei_embedding_active": getattr(self, "_tei_embedding_active", 0),
+            "tei_reranker_active": getattr(self, "_tei_reranker_active", 0),
+            "tei_pool_timeout_total": getattr(self, "_tei_pool_timeout_total", 0),
+        }
 
     async def embed_documents(
         self, documents: List[str]
@@ -432,17 +467,35 @@ class PersianHybridSearch:
             )]
         )
         # qdrant-client's sync query_points is a blocking network call — push to a thread
-        async with self._qdrant_semaphore:
+        trace = current_trace()
+        if trace is not None:
+            trace.mark("qdrant_wait_start")
+        qdrant_wait_started = time.perf_counter_ns()
+        self._qdrant_waiting += 1
+        try:
+            await self._qdrant_semaphore.acquire()
+        finally:
+            self._qdrant_waiting -= 1
+        self._qdrant_active += 1
+        self._qdrant_acquired_total += 1
+        if trace is not None:
+            trace.mark("qdrant_acquired")
+            trace.add_duration(
+                "qdrant_wait",
+                (time.perf_counter_ns() - qdrant_wait_started) / 1_000_000,
+            )
+        try:
             try:
-                results = await self._blocking_runner.run(
-                    self.qdrant_client.query_points,
-                    collection_name=self.collection_name,
-                    query=query_vec,
-                    limit=top_k,
-                    query_filter=doc_filter,
-                    with_payload=["chunk_id"],
-                    with_vectors=False,
-                )
+                async with trace_span("qdrant"):
+                    results = await self._blocking_runner.run(
+                        self.qdrant_client.query_points,
+                        collection_name=self.collection_name,
+                        query=query_vec,
+                        limit=top_k,
+                        query_filter=doc_filter,
+                        with_payload=["chunk_id"],
+                        with_vectors=False,
+                    )
             except asyncio.CancelledError:
                 raise
             except TimeoutError as exc:
@@ -453,6 +506,12 @@ class PersianHybridSearch:
                 raise ServiceUnavailableError(
                     "Vector search service is unavailable"
                 ) from exc
+        finally:
+            self._qdrant_active -= 1
+            self._qdrant_released_total += 1
+            self._qdrant_semaphore.release()
+            if trace is not None:
+                trace.mark("qdrant_end")
         return {str(hit.payload["chunk_id"]): hit.score
                 for hit in results.points if "chunk_id" in hit.payload}
 
@@ -565,18 +624,29 @@ class PersianHybridSearch:
     ) -> list[dict]:
         texts = [candidate.get("question", "") for candidate in candidates]
         self._ensure_open()
+        self._tei_reranker_active = getattr(
+            self, "_tei_reranker_active", 0
+        ) + 1
         try:
-            resp = await self._http.post(
-                f"{self.tei_rerank_url}/rerank",
-                json={"query": query, "texts": texts},
-            )
-            resp.raise_for_status()
+            async with trace_span("reranker"):
+                resp = await self._http.post(
+                    f"{self.tei_rerank_url}/rerank",
+                    json={"query": query, "texts": texts},
+                )
+                resp.raise_for_status()
+        except httpx.PoolTimeout as exc:
+            self._tei_pool_timeout_total = getattr(
+                self, "_tei_pool_timeout_total", 0
+            ) + 1
+            raise ServiceTimeoutError("Reranking HTTP pool timed out") from exc
         except httpx.TimeoutException as exc:
             raise ServiceTimeoutError("Reranking service timed out") from exc
         except httpx.HTTPError as exc:
             raise ServiceUnavailableError(
                 "Reranking service is unavailable"
             ) from exc
+        finally:
+            self._tei_reranker_active -= 1
         try:
             rankings = resp.json()
         except ValueError as exc:

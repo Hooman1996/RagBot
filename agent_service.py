@@ -13,6 +13,7 @@ from dataclasses import dataclass
 from agent_graph import build_graph, AgentState
 from new_architecture.app.services.history.database import DatabaseManager, ChatManager
 from utils.concurrency import BoundedBlockingRunner
+from utils.request_instrumentation import trace_span
 
 @dataclass
 class AgentTurnResult:
@@ -196,12 +197,13 @@ class AgentService:
 
         # 9. Save into meta_data
         meta["agent_state"] = final_state
-        await self.blocking_runner.run(
-            self.db_manager.update_session_metadata,
-            session_pk,
-            meta,
-            wait_for_completion_on_cancel=True,
-        )
+        async with trace_span("persistence"):
+            await self.blocking_runner.run(
+                self.db_manager.update_session_metadata,
+                session_pk,
+                meta,
+                wait_for_completion_on_cancel=True,
+            )
         return AgentTurnResult(answer=answer, state=final_state)
 
     async def process_stateless_message(

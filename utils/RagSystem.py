@@ -23,6 +23,7 @@ from utils.service_errors import (
     ServiceTimeoutError,
     ServiceUnavailableError,
 )
+from utils.request_instrumentation import trace_span
 from .rag_utils import clean_llm_answer
 
 @dataclass
@@ -110,6 +111,8 @@ class RAGSystem:
         self._closed = False
         self.blocking_runner = blocking_runner or BoundedBlockingRunner()
         self._owns_blocking_runner = blocking_runner is None
+        self._vllm_active = 0
+        self._vllm_timeout_total = 0
 
         self.qdrant_client = qdrant_client
         self.chunk_fetcher = chunk_fetcher
@@ -181,14 +184,25 @@ class RAGSystem:
 
     async def _completion(self, **kwargs):
         self._ensure_open()
+        self._vllm_active += 1
         try:
-            return await self.client.chat.completions.create(**kwargs)
+            async with trace_span("vllm"):
+                return await self.client.chat.completions.create(**kwargs)
         except APITimeoutError as exc:
+            self._vllm_timeout_total += 1
             raise ServiceTimeoutError("Language model service timed out") from exc
         except (APIConnectionError, APIStatusError) as exc:
             raise ServiceUnavailableError(
                 "Language model service is unavailable"
             ) from exc
+        finally:
+            self._vllm_active -= 1
+
+    def metrics_snapshot(self) -> dict[str, int]:
+        return {
+            "vllm_active": self._vllm_active,
+            "vllm_timeout_total": self._vllm_timeout_total,
+        }
 
     def generate_context(self, results: List[SearchResult]) -> str:
         """
