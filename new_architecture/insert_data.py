@@ -57,6 +57,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.tei_embedding_batches import TeiInsertionSession
+from new_architecture.knowledge_sources import discover_knowledge_sources
 
 
 # ═══════════════════════════════════════════════════════════
@@ -140,19 +141,22 @@ DATA_DIR = os.getenv("DATA_INSERTION_DIRECTORY")
 #                (must match the folder name exactly)
 
 
-DOCUMENTS = []
 documents_directory = os.path.join(DATA_DIR, "DOCUMENTS")
 CHUNKS_ROOT_DIR = os.path.join(DATA_DIR, "CHUNKS")
 
-for filename in os.listdir(documents_directory):
-    DOCUMENTS.append(
-        {"file_path": os.path.join(documents_directory, filename),
-         "chunk_dir": os.path.join(CHUNKS_ROOT_DIR, filename.split(".")[0]),
-         "title":filename.split(".")[0],
-         "owner": "admin",  # Must match a username below
-        "collection": "Hi_Help"  # Must match a collection below
-        }
+DOCUMENTS = [
+    {
+        "file_path": str(source.file_path),
+        "chunk_dir": source.title,
+        "title": source.title,
+        "owner": "admin",
+        "collection": "Hi_Help",
+    }
+    for source in discover_knowledge_sources(
+        documents_directory,
+        CHUNKS_ROOT_DIR,
     )
+]
 
 
 # DOCUMENTS = [
@@ -823,8 +827,10 @@ def insert_documents(
         mime_type = mime_type or "application/octet-stream"
 
         # ── MinIO storage path ───────────────────────────────
+        minio_prefix = os.getenv("MINIO_KNOWLEDGE_PREFIX", "").strip("/")
         minio_path = (
-            f"user_{owner_id}"
+            (f"{minio_prefix}/" if minio_prefix else "")
+            + f"user_{owner_id}"
             f"/{now.year}/{now.month:02d}"
             f"/{doc_uuid}_{filename}"
         )

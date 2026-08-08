@@ -10,6 +10,11 @@ class ServiceError(Exception):
         self.public_message = public_message
 
 
+class InvalidRequestError(ServiceError, ValueError):
+    error_code = "INVALID_REQUEST"
+    status_code = 400
+
+
 class ServiceTimeoutError(ServiceError):
     error_code = "DEPENDENCY_TIMEOUT"
     status_code = 504

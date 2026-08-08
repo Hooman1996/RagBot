@@ -24,12 +24,15 @@ Usage:
 Run this ONCE before running your main application.
 """
 
+import argparse
 import asyncio
+import json
 import sys
 from pathlib import Path
 
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 import asyncpg
 from urllib.parse import urlparse
@@ -38,6 +41,13 @@ from sqlalchemy import text
 
 import os
 from dotenv import load_dotenv
+from new_architecture.knowledge_reset import (
+    PRODUCTION_RESET_CONFIRMATION,
+    RESET_CONFIRMATION,
+    KnowledgeResetService,
+    ResetPhaseError,
+    reset_postgres_schema,
+)
 
 # Load variables from .env into os.environ
 load_dotenv()
@@ -81,6 +91,11 @@ TARGET_DB_URL = (
     f"postgresql+asyncpg://{TARGET_DB_USER}:{TARGET_DB_PASSWORD}"
     f"@{TARGET_DB_HOST}:{TARGET_DB_PORT}/{TARGET_DB_NAME}"
 )
+
+
+def schema_reset_requested(response: str) -> bool:
+    """Interpret the explicit PostgreSQL reset prompt deterministically."""
+    return response.strip().lower() in {"yes", "y"}
 
 
 # ═══════════════════════════════════════════════════════════
@@ -154,7 +169,7 @@ async def create_database():
 # STEP 2: CREATE TABLES (MINIMAL SAFE MODELS ONLY)
 # ═══════════════════════════════════════════════════════════
 
-async def create_tables():
+async def create_tables(*, allow_production_reset: bool = False):
     """
     Connect to target DB and create ONLY minimal safe tables
     """
@@ -199,6 +214,7 @@ async def create_tables():
             "feedbacks",
             "tickets",
             "chunk_versions",  # Added for KB version control
+            "mass_answer_jobs",
         ]
 
         # Note: chunk_versions won't be in Base.metadata.tables initially if not modelled in SQLAlchemy
@@ -212,7 +228,10 @@ async def create_tables():
 
         # Verify we have exactly the expected tables (excluding the raw SQL one for the set check)
         actual_tables = set(Base.metadata.tables.keys())
-        expected_orm_tables = set(expected_tables) - {"chunk_versions"}
+        expected_orm_tables = set(expected_tables) - {
+            "chunk_versions",
+            "mass_answer_jobs",
+        }
 
         if actual_tables != expected_orm_tables:
             print("⚠️  WARNING: Table mismatch detected in ORM!")
@@ -268,13 +287,29 @@ async def create_tables():
                 print(f"   - {table}")
             print()
 
-            response = input("Do you want to DROP and RECREATE all tables? (yes/no): ")
+            response = input(
+                "Drop and recreate PostgreSQL application tables? [y/N]: "
+            )
 
-            if response.lower() not in ['yes', 'y']:
+            if not schema_reset_requested(response):
                 print()
-                print("⚠️  Skipping table creation")
-                print("   Existing tables will be kept")
+                print("⚠️  PostgreSQL schema reset skipped")
+                print("   Existing tables and data will be kept")
                 return True
+
+            if os.getenv("ENVIRONMENT", "development").lower() == "production":
+                if not allow_production_reset:
+                    print(
+                        "❌ Production schema reset refused. Use "
+                        "--allow-production-reset only under an approved procedure."
+                    )
+                    return False
+                confirmation = input(
+                    "Type RESET PRODUCTION SCHEMA to confirm PostgreSQL reset: "
+                )
+                if confirmation != "RESET PRODUCTION SCHEMA":
+                    print("Production PostgreSQL reset cancelled.")
+                    return False
 
             print()
 
@@ -290,59 +325,16 @@ async def create_tables():
             pool_pre_ping=True
         )
 
-        # Drop tables if user chose to recreate
-        if existing_tables:
-            print("→ Dropping all existing tables...")
+        print("→ Recreating PostgreSQL application schema...")
+        await reset_postgres_schema(engine, Base.metadata)
 
-            async with engine.begin() as conn:
-                # Drop raw SQL table first due to foreign key constraints
-                await conn.execute(text("DROP TABLE IF EXISTS chunk_versions CASCADE;"))
-                await conn.run_sync(Base.metadata.drop_all)
-
-            print("✓ All tables dropped")
-            print()
-
-        # Create all tables
-        print("→ Creating tables...")
-
-        async with engine.begin() as conn:
-            await conn.run_sync(Base.metadata.create_all)
-
-            # Explicit initialization of the knowledge base chunk versioning ledger
-            await conn.execute(text("""
-                                    CREATE TABLE IF NOT EXISTS chunk_versions
-                                    (
-                                        id
-                                        SERIAL
-                                        PRIMARY
-                                        KEY,
-                                        chunk_id
-                                        INT
-                                        NOT
-                                        NULL,
-                                        content
-                                        TEXT
-                                        NOT
-                                        NULL,
-                                        changed_by
-                                        VARCHAR
-                                    (
-                                        255
-                                    ) NOT NULL,
-                                        created_at TIMESTAMP WITHOUT TIME ZONE NOT NULL,
-                                        CONSTRAINT fk_chunk_id FOREIGN KEY
-                                    (
-                                        chunk_id
-                                    ) REFERENCES chunks
-                                    (
-                                        id
-                                    )
-                                                             ON DELETE CASCADE
-                                        );
-                                    """))
-
-        print("✅ All tables created successfully")
+        print("✅ PostgreSQL schema recreated successfully")
         print()
+
+        if existing_tables:
+            await prompt_for_knowledge_reset(
+                allow_production_reset=allow_production_reset
+            )
 
         # ═══════════════════════════════════════════════════════════
         # VERIFY TABLES WERE CREATED
@@ -424,6 +416,73 @@ async def create_tables():
 
 
 # ═══════════════════════════════════════════════════════════
+# OPTIONAL CROSS-STORE KNOWLEDGE RESET
+# ═══════════════════════════════════════════════════════════
+
+async def prompt_for_knowledge_reset(*, allow_production_reset: bool) -> None:
+    print(
+        "Knowledge-base state may also exist in Qdrant, MinIO, "
+        "and datasource selections."
+    )
+    response = input(
+        "Clear ALL application knowledge-base data from PostgreSQL metadata, "
+        "Qdrant, MinIO, and stale datasource selections? [y/N]: "
+    )
+    if response.lower() not in {"yes", "y"}:
+        print("Knowledge-base data outside the PostgreSQL schema was preserved.")
+        return
+
+    service = KnowledgeResetService.from_environment()
+    try:
+        postgres = await asyncio.to_thread(service.inspect_postgres)
+        qdrant = await asyncio.to_thread(service.inspect_qdrant)
+        minio = await asyncio.to_thread(service.inspect_minio)
+        print()
+        print(f"PostgreSQL datasource records to clear: {postgres['documents']}")
+        print(f"Qdrant points to clear: {qdrant['points']}")
+        print(f"MinIO knowledge objects to clear: {minio['objects']}")
+        print(
+            "Stale datasource selections to clear: "
+            f"{postgres['datasource_selections_to_clear']}"
+        )
+        print(f"MinIO reset scope: {minio['scope']}")
+        print()
+
+        production = service.config.environment == "production"
+        if production and not allow_production_reset:
+            raise RuntimeError(
+                "Production knowledge reset refused without "
+                "--allow-production-reset"
+            )
+        expected = (
+            PRODUCTION_RESET_CONFIRMATION if production else RESET_CONFIRMATION
+        )
+        confirmation = input(f"Type {expected} to confirm: ")
+        if confirmation != expected:
+            print("Knowledge-base reset cancelled; confirmation did not match.")
+            return
+
+        result = await asyncio.to_thread(service.full_knowledge_reset)
+        print(json.dumps(result.public_dict(), indent=2, ensure_ascii=False))
+
+        if not production:
+            clear_local = input(
+                "Also clear generated files under DATA_INSERTION_DIRECTORY "
+                "(FULL_DEV_RESET)? [y/N]: "
+            )
+            if clear_local.lower() in {"yes", "y"}:
+                local_result = await asyncio.to_thread(
+                    service.clear_generated_knowledge
+                )
+                print(json.dumps(local_result, indent=2, ensure_ascii=False))
+    except ResetPhaseError as exc:
+        print(json.dumps(exc.result.public_dict(), indent=2, ensure_ascii=False))
+        raise
+    finally:
+        service.close()
+
+
+# ═══════════════════════════════════════════════════════════
 # STEP 3: VERIFY INSTALLATION
 # ═══════════════════════════════════════════════════════════
 
@@ -467,11 +526,11 @@ async def verify_installation():
 
             print(f"✅ Tables: {table_count} tables found")
 
-            # Expected: 8 ORM tables + 1 Raw SQL table = 9
-            if table_count >= 8:
+            # Expected: 9 ORM tables + 2 raw SQL tables = 11
+            if table_count >= 11:
                 print(f"   ✓ Correct number of tables")
             else:
-                print(f"   ⚠️  Expected at least 8 tables, found {table_count}")
+                print(f"   ⚠️  Expected at least 11 tables, found {table_count}")
             print()
 
             # Test each table
@@ -485,6 +544,7 @@ async def verify_installation():
                 "chat_sessions",
                 "tickets",
                 "chunk_versions",  # Testing new KB ledger
+                "mass_answer_jobs",
             ]
 
             print("✅ Testing table access:")
@@ -614,7 +674,7 @@ async def create_sample_data():
 # MAIN FUNCTION
 # ═══════════════════════════════════════════════════════════
 
-async def main():
+async def main(*, allow_production_reset: bool = False):
     """
     Main initialization function
     """
@@ -636,6 +696,7 @@ async def main():
     print("║" + "  • chat_sessions".ljust(78) + "║")
     print("║" + "  • tickets".ljust(78) + "║")
     print("║" + "  • chunk_versions (KB Ledger)".ljust(78) + "║")
+    print("║" + "  • mass_answer_jobs".ljust(78) + "║")
     print("║" + " " * 78 + "║")
     print("╚" + "═" * 78 + "╝")
     print()
@@ -649,7 +710,9 @@ async def main():
         sys.exit(1)
 
     # Step 2: Create Tables
-    success = await create_tables()
+    success = await create_tables(
+        allow_production_reset=allow_production_reset
+    )
     if not success:
         print()
         print("❌ Failed to create tables")
@@ -682,6 +745,7 @@ async def main():
     print("      • queries         - User queries and responses")
     print("      • chat_sessions   - Chat conversation sessions")
     print("      • chunk_versions  - Version tracking for KB modifications")
+    print("      • mass_answer_jobs - Durable batch job metadata")
     print()
     print("    Next steps:")
     print("      1. Run your application")
@@ -697,8 +761,19 @@ async def main():
 # ═══════════════════════════════════════════════════════════
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--allow-production-reset",
+        action="store_true",
+        help="Allow reset prompts in production; stronger confirmation still applies",
+    )
+    arguments = parser.parse_args()
     try:
-        asyncio.run(main())
+        asyncio.run(
+            main(
+                allow_production_reset=arguments.allow_production_reset
+            )
+        )
     except KeyboardInterrupt:
         print("\n\n⚠️  Interrupted by user")
         sys.exit(0)

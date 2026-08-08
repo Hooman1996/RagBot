@@ -665,7 +665,39 @@ class DatabaseManager:
         return self._execute("SELECT COUNT(*) FROM chunks", fetch="all")
 
     def get_available_documents(self):
-        return self._execute("SELECT title FROM documents", fetch="all")
+        """Return only named documents that have retrievable chunks."""
+        return self._execute("""
+            SELECT DISTINCT d.title
+            FROM documents d
+            WHERE NULLIF(BTRIM(d.title), '') IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM chunks c
+                  WHERE c.document_id = d.id
+              )
+            ORDER BY d.title
+        """, fetch="all")
+
+    def filter_available_document_titles(self, titles: list[str]) -> list[str]:
+        """Discard blank, duplicate, or stale client-supplied datasource names."""
+        requested = list(dict.fromkeys(
+            str(title).strip() for title in titles if str(title).strip()
+        ))
+        if not requested:
+            return []
+        rows = self._execute("""
+            SELECT DISTINCT d.title
+            FROM documents d
+            WHERE d.title = ANY (%s)
+              AND NULLIF(BTRIM(d.title), '') IS NOT NULL
+              AND EXISTS (
+                  SELECT 1
+                  FROM chunks c
+                  WHERE c.document_id = d.id
+              )
+        """, (requested,), fetch="all")
+        existing = {row["title"] for row in rows}
+        return [title for title in requested if title in existing]
 
     def get_chunks_by_document_titles(self, titles: list[str]) -> list[dict]:
         """Return all chunks (id, content, document title) for the given document titles."""

@@ -19,6 +19,7 @@ from utils.rag_utils import clean_llm_answer
 from langgraph.graph import StateGraph, END
 from utils.rag_utils import aggregate_results
 from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.service_errors import InvalidRequestError
 
 # ---------- State definition ----------
 class AgentState(TypedDict):
@@ -146,7 +147,9 @@ def make_handle_general(rag_system):
 
         allowed = state.get("allowed_docs", [])
         if not allowed:
-            allowed = ["General_FAQ"]
+            raise InvalidRequestError(
+                "No current datasource is selected for retrieval"
+            )
 
         # Retrieve once
         search_results = await rag_system.retrieve(

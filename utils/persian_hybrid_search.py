@@ -403,6 +403,13 @@ class PersianHybridSearch:
         """Provide a function that retrieves chunk texts from the database."""
         self.chunk_fetcher = fetcher
 
+    def clear_document_cache(self) -> int:
+        """Discard process-local BM25 corpora after ingestion or reset."""
+        with self._cache_lock:
+            count = len(self._bm25_cache)
+            self._bm25_cache.clear()
+        return count
+
     def _expand_query_intent(self, query: str) -> str:
         """
         Rewrites/Expands short colloquial phrases to align with documentation terminology.

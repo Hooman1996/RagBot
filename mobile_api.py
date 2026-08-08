@@ -1,5 +1,5 @@
 from fastapi import APIRouter, Request, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import asyncio
 import time
@@ -29,7 +29,7 @@ class TalkRequest(BaseModel):
     session_id: str
     query: str
     national_code: str  # Mandatory identifier provided by the Gateway
-    documents: List[str] = ["General_FAQ"]
+    documents: List[str] = Field(default_factory=list)
 
 
 class TalkResponse(BaseModel):

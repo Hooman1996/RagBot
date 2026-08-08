@@ -142,7 +142,12 @@ def api_list_documents():
     conn = get_db_connection()
     cursor = conn.cursor()
     try:
-        cursor.execute("SELECT id, title, filename FROM documents ORDER BY title ASC;")
+        cursor.execute("""
+            SELECT id, title, filename
+            FROM documents
+            WHERE NULLIF(BTRIM(title), '') IS NOT NULL
+            ORDER BY title ASC;
+        """)
         return {"documents": cursor.fetchall()}
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

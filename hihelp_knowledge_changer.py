@@ -1,64 +1,153 @@
-import pandas as pd
-import numpy as np
+"""Convert a source FAQ CSV into one document manifest and numbered chunks."""
 
+from __future__ import annotations
+
+import argparse
 import os
+from pathlib import Path
+
+import pandas as pd
 from dotenv import load_dotenv
 
-# Load variables from .env into os.environ
+from new_architecture.knowledge_sources import discover_chunk_files
+
+
 load_dotenv()
 
 
-# data = pd.read_csv("/nvme/Chatbot/faq/FAQ - end of 23031405 (v2).csv")
-# data_insertion_chunks_directory = "/nvme/Chatbot/faq/data_insertion_chunks"
-
-data = pd.read_csv(os.getenv("KNOWLEDGE_BASE_CSV"))
-data_insertion_chunks_directory = os.getenv("DATA_INSERTION_DIRECTORY")
-
-chunk_dir_name = "General_FAQ"
-chunks_directory = data_insertion_chunks_directory +  "/CHUNKS" + f"/{chunk_dir_name}"
+def _clean_cell(value: object) -> str:
+    if pd.isna(value):
+        return ""
+    return str(value).replace("\u200c", " ").strip()
 
 
-
-final_data = pd.DataFrame(columns=["question_and_answer", "category", "sub_category"])
-# final_data = pd.DataFrame(columns=["question_and_answer", "category"])
-
-for i in range(0, len(data)):
-    user_question = data.iloc[i]['سوال استاندارد'].replace("\u200c", " ")
-    # print(user_question)
-    print(i)
-    category = data.iloc[i]['موضوع اصلی'].replace("\u200c", " ")
-    if type(data.iloc[i]['کلید کنترل تجمیع']) == str:
-        sub_category = data.iloc[i]['کلید کنترل تجمیع'].replace("\u200c", " ")
-    else:
-        sub_category = ""
-    intended_question = data.iloc[i]['سوال شفاف‌سازی شده'].replace("\u200c", " ")
-
-    answer = (data.iloc[i]['پاسخ']).replace("\u200c", " ")
-    # print(answers)
-
-    question_and_answer = f"question : {intended_question}\nanswer : {answer}"
-
-    new_row = pd.DataFrame({"question_and_answer": [question_and_answer], "category": [category], "sub_category": [sub_category]})
-    # new_row = pd.DataFrame({"question_and_answer": [question_and_answer], "category": [category]})
-
-    final_data = pd.concat([final_data, new_row], ignore_index=True)
+def _resolve_source_name(source_csv: Path, requested_name: str | None) -> str:
+    source_name = (requested_name or source_csv.stem).strip()
+    if not source_name or source_name.startswith("."):
+        raise ValueError("Knowledge source name cannot be empty or hidden")
+    if Path(source_name).name != source_name:
+        raise ValueError("Knowledge source name must not contain path separators")
+    return source_name
 
 
-for i in range(0,len(final_data)):
-    user_question_and_answer = final_data.iloc[i]["question_and_answer"].replace("\u200c", " ")
-    category = final_data.iloc[i]["category"].replace("\u200c", " ")
+def generate_knowledge_files(
+    source_csv: str | Path,
+    output_root: str | Path,
+    *,
+    source_name: str | None = None,
+) -> dict[str, object]:
+    """Generate a clean, deterministic datasource from one non-empty CSV."""
+    source_path = Path(source_csv)
+    output_path = Path(output_root)
+    if not source_path.is_file() or source_path.stat().st_size == 0:
+        raise ValueError(f"Knowledge source is missing or empty: {source_path}")
 
-    if type(final_data.iloc[i]['sub_category']) == str:
-        sub_category = final_data.iloc[i]['sub_category'].replace("\u200c", " ")
-        data = f"{user_question_and_answer}\nquestion category : {category.replace("\n", " ")}. sub_category : {sub_category.replace("\n", " ")}"
+    title = _resolve_source_name(source_path, source_name)
+    data = pd.read_csv(source_path)
+    required_columns = {
+        "سوال استاندارد",
+        "موضوع اصلی",
+        "کلید کنترل تجمیع",
+        "سوال شفاف‌سازی شده",
+        "پاسخ",
+    }
+    missing = sorted(required_columns.difference(data.columns))
+    if missing:
+        raise ValueError("Knowledge CSV is missing required columns")
 
-    else:
-        sub_category = ""
-        data = f"{user_question_and_answer}question category : {category.replace("\n", " ")}."
+    documents_dir = output_path / "DOCUMENTS"
+    chunks_dir = output_path / "CHUNKS" / title
+    documents_dir.mkdir(parents=True, exist_ok=True)
+    chunks_dir.mkdir(parents=True, exist_ok=True)
 
-    # data = f"{user_question_and_answer}\nquestion category : {category.replace("\n", " ")}"
+    # A shorter replacement dataset must not inherit old higher-numbered chunks.
+    for old_chunk in discover_chunk_files(chunks_dir):
+        old_chunk.unlink()
 
-    with open(f"{chunks_directory}/{chunk_dir_name}_{i}.txt", "w", newline="", encoding="utf8") as file:
-        file.write(data)
+    rows: list[dict[str, str]] = []
+    for _, source_row in data.iterrows():
+        intended_question = _clean_cell(source_row["سوال شفاف‌سازی شده"])
+        answer = _clean_cell(source_row["پاسخ"])
+        category = _clean_cell(source_row["موضوع اصلی"])
+        sub_category = _clean_cell(source_row["کلید کنترل تجمیع"])
+        if not intended_question or not answer:
+            continue
+        rows.append(
+            {
+                "question_and_answer": (
+                    f"question : {intended_question}\nanswer : {answer}"
+                ),
+                "category": category,
+                "sub_category": sub_category,
+            }
+        )
 
-final_data.to_csv(data_insertion_chunks_directory + f"/DOCUMENTS/{chunk_dir_name}.csv")
+    if not rows:
+        raise ValueError("Knowledge CSV contains no valid question/answer rows")
+
+    final_data = pd.DataFrame(
+        rows,
+        columns=["question_and_answer", "category", "sub_category"],
+    )
+    for index, row in final_data.iterrows():
+        chunk = (
+            f"{row['question_and_answer']}\n"
+            f"question category : {row['category'].replace(chr(10), ' ')}. "
+            f"sub_category : {row['sub_category'].replace(chr(10), ' ')}"
+        )
+        (chunks_dir / f"{title}_{index}.txt").write_text(
+            chunk,
+            encoding="utf-8",
+            newline="",
+        )
+
+    document_path = documents_dir / f"{title}.csv"
+    final_data.to_csv(document_path, index=False)
+    return {
+        "source_name": title,
+        "document_path": str(document_path),
+        "chunk_directory": str(chunks_dir),
+        "chunk_count": len(final_data.index),
+    }
+
+
+def _build_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--source",
+        default=os.getenv("KNOWLEDGE_BASE_CSV"),
+        help="Source CSV (defaults to KNOWLEDGE_BASE_CSV)",
+    )
+    parser.add_argument(
+        "--output-root",
+        default=os.getenv("DATA_INSERTION_DIRECTORY"),
+        help="Generated data root (defaults to DATA_INSERTION_DIRECTORY)",
+    )
+    parser.add_argument(
+        "--source-name",
+        default=os.getenv("KNOWLEDGE_SOURCE_NAME"),
+        help="Optional datasource name; defaults to the source filename stem",
+    )
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = _build_parser().parse_args(argv)
+    if not args.source or not args.output_root:
+        raise SystemExit(
+            "Both a source CSV and output root are required via arguments or environment"
+        )
+    result = generate_knowledge_files(
+        args.source,
+        args.output_root,
+        source_name=args.source_name,
+    )
+    print(
+        f"Generated datasource {result['source_name']!r} with "
+        f"{result['chunk_count']} chunks"
+    )
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

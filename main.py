@@ -27,7 +27,7 @@ from fastapi.templating import Jinja2Templates
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.background import BackgroundTasks
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from openai import AsyncOpenAI
 from psycopg2 import Error as PostgresError
 
@@ -37,6 +37,7 @@ from new_architecture.app.services.history.database import DatabaseManager, Chat
 from new_architecture.app.services.history.rewriting import HistoryRewritingService
 from new_architecture.app.services.db_connection import DatabaseConnections
 from new_architecture.app.services.authentication import AuthenticationService
+from new_architecture.knowledge_sources import build_datasource_listing
 
 # AI & Domain Service Layers
 from utils.RagSystem import RAGSystem
@@ -142,7 +143,7 @@ class LoginRequest(BaseModel):
 
 class QueryRequest(BaseModel):
     query: str
-    documents: List[str] = []
+    documents: List[str] = Field(default_factory=list)
     top_k: int = 10
     alpha: float = 0.3
     session_id: Optional[int] = None
@@ -366,6 +367,7 @@ async def lifespan(app: FastAPI):
             text_processor=text_processor,
             blocking_runner=blocking_runner,
             category_resolver=get_document_category,
+            selection_validator=db_manager.filter_available_document_titles,
         )
         mass_answer_processor = MassAnswerProcessor(
             answering_service=answering_service,
@@ -609,6 +611,8 @@ async def initialize_system(init_req: InitRequest):
             db_manager.get_available_documents
         )
         available_documents = [doc["title"] for doc in documents]
+        if rag_system is not None:
+            rag_system.search_engine.clear_document_cache()
         return {
             "status": "success",
             "message": f"Initialized with {len(available_documents)} docs",
@@ -623,11 +627,19 @@ async def initialize_system(init_req: InitRequest):
 
 @app.get("/api/documents")
 async def get_documents():
-    if not available_documents:
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="System not initialized")
-    docs_with_category = [{"name": doc, "category": get_document_category(doc)} for doc in available_documents]
-    categories = list(set(c["category"] for c in docs_with_category))
-    return {"documents": docs_with_category, "count": len(docs_with_category), "categories": categories}
+    global available_documents
+    documents = await blocking_runner.run(db_manager.get_available_documents)
+    available_documents = [doc["title"] for doc in documents]
+    if rag_system is not None:
+        rag_system.search_engine.clear_document_cache()
+    payload = build_datasource_listing(
+        available_documents,
+        get_document_category,
+    )
+    return JSONResponse(
+        content=payload,
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 # ----------------------------------------------------------------------

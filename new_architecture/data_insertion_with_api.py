@@ -51,12 +51,16 @@ import httpx
 from minio import Minio
 from minio.error import S3Error
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, VectorParams, PointStruct
+from qdrant_client.models import Distance, PointIdsList, VectorParams, PointStruct
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.tei_embedding_batches import TeiInsertionSession
+from new_architecture.knowledge_sources import (
+    discover_chunk_files,
+    discover_knowledge_sources,
+)
 
 
 # -----------------------------------------------------------
@@ -141,19 +145,22 @@ DATA_DIR = os.getenv("DATA_INSERTION_DIRECTORY")  # ? REPLACE THIS
 #                (must match the folder name exactly)
 
 
-DOCUMENTS = []
 documents_directory = os.path.join(DATA_DIR, "DOCUMENTS")
 CHUNKS_ROOT_DIR = os.path.join(DATA_DIR, "CHUNKS")
 
-for filename in os.listdir(documents_directory):
-    DOCUMENTS.append(
-        {"file_path": os.path.join(documents_directory, filename),
-         "chunk_dir": os.path.join(CHUNKS_ROOT_DIR, filename.split(".")[0]),
-         "title":filename.split(".")[0],
-         "owner": "admin",  # Must match a username below
-        "collection": "Hi_Help"  # Must match a collection below
-        }
+DOCUMENTS = [
+    {
+        "file_path": str(source.file_path),
+        "chunk_dir": source.title,
+        "title": source.title,
+        "owner": "admin",  # Must match a username below
+        "collection": "Hi_Help",  # Must match a collection below
+    }
+    for source in discover_knowledge_sources(
+        documents_directory,
+        CHUNKS_ROOT_DIR,
     )
+]
 
 
 # DOCUMENTS = [
@@ -473,41 +480,10 @@ def load_chunks_from_folder(
         print(f"  ? Not a directory: {folder_path}")
         return []
 
-    # -- Collect all .txt files in this folder ----------------
-    # Expected pattern: chunk_dir_<number>.txt
-    # Example: my_first_document_0.txt, my_first_document_1.txt
-
-    chunk_files = []
-
-    for file in folder_path.iterdir():
-
-        if not file.is_file():
-            continue
-
-        # Accept .txt files only
-        if file.suffix.lower() != ".txt":
-            continue
-
-        # Extract chunk index from filename
-        # e.g. "my_first_document_7.txt" ? stem = "my_first_document_7"
-        stem = file.stem  # filename without extension
-
-        # Split on last underscore to get the number
-        # e.g. "my_first_document_7" ? ["my_first_document", "7"]
-        # parts = stem.split("/")[-1].split("_")[0]
-        #
-        # if len(parts) != 2:
-        #     print(f"  ??  Skipping unexpected filename: {file.name}")
-        #     continue
-
-        try:
-            # chunk_index = int(parts[1])
-            chunk_index = int(re.findall(r'\d+', stem)[0])
-        except ValueError:
-            print(f"  ??  Skipping non-numeric index: {file.name}")
-            continue
-
-        chunk_files.append((chunk_index, file))
+    chunk_files = [
+        (int(file.stem.rsplit("_", 1)[1]), file)
+        for file in discover_chunk_files(folder_path)
+    ]
 
     if not chunk_files:
         print(f"  ? No valid chunk files found in: {folder_path}")
@@ -784,9 +760,17 @@ def insert_documents(
         print(f"  ? Document: {doc['title']}")
 
         # -- Validate file ------------------------------------
-        if not os.path.exists(file_path):
-            print(f"    ? File not found: {file_path}")
+        if not os.path.isfile(file_path) or os.path.getsize(file_path) == 0:
+            print(f"    ? Missing or empty source file: {file_path}")
             print(f"    ? Skipping")
+            print()
+            continue
+
+        valid_chunks = discover_chunk_files(
+            Path(CHUNKS_ROOT_DIR) / doc["chunk_dir"]
+        )
+        if not valid_chunks:
+            print("    ? No valid chunks for source — skipping")
             print()
             continue
 
@@ -826,8 +810,10 @@ def insert_documents(
         mime_type = mime_type or "application/octet-stream"
 
         # -- MinIO storage path -------------------------------
+        minio_prefix = os.getenv("MINIO_KNOWLEDGE_PREFIX", "").strip("/")
         minio_path = (
-            f"user_{owner_id}"
+            (f"{minio_prefix}/" if minio_prefix else "")
+            + f"user_{owner_id}"
             f"/{now.year}/{now.month:02d}"
             f"/{doc_uuid}_{filename}"
         )
@@ -848,9 +834,7 @@ def insert_documents(
             )
             print(f"    ? Uploaded to MinIO")
         except S3Error as e:
-            print(f"    ? MinIO upload failed: {e}")
-            print()
-            continue
+            raise RuntimeError("MinIO knowledge upload failed") from e
 
         # -- Generate presigned URL ---------------------------
         try:
@@ -863,7 +847,8 @@ def insert_documents(
             presigned_url = None
 
         # -- Insert into PostgreSQL ---------------------------
-        cursor.execute("""
+        try:
+            cursor.execute("""
                        INSERT INTO documents (uuid, user_id, collection_id,
                                               title, filename,
                                               file_path, file_url, file_size,
@@ -876,7 +861,7 @@ def insert_documents(
                                %s, %s, %s,
                                %s, %s, %s,
                                %s, %s) RETURNING id
-                       """, (
+                           """, (
                            doc_uuid,
                            owner_id,
                            collection_id,
@@ -893,22 +878,26 @@ def insert_documents(
                            json.dumps({}),
                            now,
                            now
-                       ))
+                           ))
 
-        doc_id = cursor.fetchone()[0]
-        document_ids[doc["title"]] = doc_id
+            doc_id = cursor.fetchone()[0]
+            document_ids[doc["title"]] = doc_id
 
-        # -- Update collection stats --------------------------
-        if collection_id:
-            cursor.execute("""
+            # -- Update collection stats ----------------------
+            if collection_id:
+                cursor.execute("""
                            UPDATE collections
                            SET document_count = document_count + 1,
                                total_size     = total_size + %s,
                                updated_at     = %s
                            WHERE id = %s
-                           """, (file_size, now, collection_id))
+                               """, (file_size, now, collection_id))
 
-        pg.commit()
+            pg.commit()
+        except Exception:
+            pg.rollback()
+            minio.remove_object(Config.MINIO_BUCKET, minio_path)
+            raise
 
         print(f"    ? Inserted into PostgreSQL (ID: {doc_id})")
         print()
@@ -1182,8 +1171,9 @@ def insert_embeddings(
 
         now = datetime.utcnow()
 
-        for c_id, vector in zip(c_ids, vectors):
-            cursor.execute("""
+        try:
+            for c_id, vector in zip(c_ids, vectors):
+                cursor.execute("""
                            INSERT INTO embeddings (uuid, chunk_id, document_id,
                                                    vector, vector_dimension,
                                                    model_name, model_version,
@@ -1194,7 +1184,7 @@ def insert_embeddings(
                                    %s, %s,
                                    %s, %s,
                                    %s, %s, %s)
-                           """, (
+                               """, (
                                c_id,
                                doc_id,
                                json.dumps(vector),
@@ -1207,21 +1197,27 @@ def insert_embeddings(
                                "active",
                                now,
                                now
-                           ))
+                               ))
 
-        pg.commit()
+            # -- Mark document as completed -------------------
+            cursor.execute("""
+                           UPDATE documents
+                           SET status            = 'completed',
+                               processing_status = 'completed',
+                               processed_at      = %s,
+                               updated_at        = %s
+                           WHERE id = %s
+                           """, (now, now, doc_id))
 
-        # -- Mark document as completed -----------------------
-        cursor.execute("""
-                       UPDATE documents
-                       SET status            = 'completed',
-                           processing_status = 'completed',
-                           processed_at      = %s,
-                           updated_at        = %s
-                       WHERE id = %s
-                       """, (now, now, doc_id))
-
-        pg.commit()
+            pg.commit()
+        except Exception:
+            pg.rollback()
+            qdrant.delete(
+                collection_name=Config.QDRANT_COLLECTION,
+                points_selector=PointIdsList(points=c_ids),
+                wait=True,
+            )
+            raise
 
         print(f"    ? Saved {len(c_ids)} embedding records")
         print()
@@ -1332,6 +1328,9 @@ def verify(pg, qdrant):
 # -----------------------------------------------------------
 
 def main():
+    if not DOCUMENTS:
+        print("No valid source documents with chunks were found; nothing to insert.")
+        return 0
     if not isinstance(Config.TEI_EMBED_URL, str) or not Config.TEI_EMBED_URL.strip():
         raise ValueError("TEI_EMBED_URL must be present")
     print()
@@ -1350,13 +1349,13 @@ def main():
 
     if answer != "yes":
         print("\n  Cancelled.\n")
-        return
+        return 0
 
     # -- Connect ----------------------------------------------
     db = Connections()
     if not db.connect():
         print("? Connection failed. Exiting.")
-        return
+        return 1
 
     try:
         # -- Step 1: Users -------------------------------------
@@ -1372,9 +1371,15 @@ def main():
             user_ids,
             collection_ids
         )
+        if len(document_ids) != len(DOCUMENTS):
+            raise RuntimeError("Not every discovered datasource was inserted")
 
         # -- Step 4: Chunks ? PostgreSQL -----------------------
         all_chunk_ids = insert_chunks(db.pg, document_ids)
+        if set(all_chunk_ids) != set(document_ids) or any(
+            not chunk_ids for chunk_ids in all_chunk_ids.values()
+        ):
+            raise RuntimeError("Datasource chunk insertion was incomplete")
 
         # -- Step 5: Embeddings ? Qdrant + PostgreSQL ----------
         timeout = httpx.Timeout(
@@ -1417,11 +1422,13 @@ def main():
         print("¦" + " " * 78 + "¦")
         print("+" + "-" * 78 + "+")
         print()
+        return 0
 
     except Exception as e:
         print(f"\n? Error: {e}")
         import traceback
         traceback.print_exc()
+        return 1
 
     finally:
         db.close()
@@ -1429,7 +1436,7 @@ def main():
 
 if __name__ == "__main__":
     try:
-        main()
+        raise SystemExit(main())
     except KeyboardInterrupt:
         print("\n\n??  Cancelled\n")
     except Exception as e:

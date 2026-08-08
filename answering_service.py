@@ -8,6 +8,7 @@ from dataclasses import dataclass, field
 from typing import Any, Callable
 
 from utils.request_instrumentation import trace_span
+from utils.service_errors import InvalidRequestError
 
 
 @dataclass(frozen=True)
@@ -46,6 +47,7 @@ class AnsweringService:
         text_processor,
         blocking_runner,
         category_resolver: Callable[[str], str],
+        selection_validator: Callable[[list[str]], list[str]] | None = None,
     ):
         self.agent_service = agent_service
         self.intent_classifier = intent_classifier
@@ -53,6 +55,7 @@ class AnsweringService:
         self.text_processor = text_processor
         self.blocking_runner = blocking_runner
         self.category_resolver = category_resolver
+        self.selection_validator = selection_validator
 
     async def answer(self, request: AnswerRequestContext) -> AnswerResult:
         if request.timeout_seconds is None:
@@ -108,7 +111,26 @@ class AnsweringService:
                 ),
             )
 
-        documents = list(request.selected_documents)
+        requested_documents = list(request.selected_documents)
+        if self.selection_validator is not None:
+            documents = await self._timed(
+                timings,
+                "document_validation",
+                self.blocking_runner.run(
+                    self.selection_validator,
+                    requested_documents,
+                ),
+            )
+        else:
+            documents = list(dict.fromkeys(
+                str(document).strip()
+                for document in requested_documents
+                if str(document).strip()
+            ))
+        if intent == "general" and not documents:
+            raise InvalidRequestError(
+                "Select at least one current datasource before asking a knowledge question"
+            )
         category = (
             self.category_resolver(documents[0]) if documents else None
         )
