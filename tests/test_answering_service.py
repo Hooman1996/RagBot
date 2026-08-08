@@ -62,7 +62,7 @@ class Agent:
 
 
 class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
-    def make_service(self, intent="general"):
+    def make_service(self, intent="general", selection_validator=None):
         self.classifier = Classifier(intent)
         self.rewriter = Rewriter()
         self.agent = Agent()
@@ -73,6 +73,7 @@ class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
             text_processor=Processor(),
             blocking_runner=ImmediateRunner(),
             category_resolver=lambda _document: "FAQ",
+            selection_validator=selection_validator,
         )
 
     async def test_online_turn_classifies_once_and_uses_rewrite(self):
@@ -125,6 +126,35 @@ class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
         with self.assertRaisesRegex(ValueError, "query is empty"):
             await service.answer(AnswerRequestContext(original_query="   "))
         self.assertEqual(self.classifier.queries, [])
+
+    async def test_stale_document_selection_is_discarded_and_rejected(self):
+        service = self.make_service(
+            selection_validator=lambda documents: [
+                document for document in documents if document == "current"
+            ]
+        )
+        with self.assertRaisesRegex(ValueError, "current datasource"):
+            await service.answer(
+                AnswerRequestContext(
+                    original_query="knowledge question",
+                    selected_documents=("General_FAQ",),
+                    session_id="12",
+                )
+            )
+        self.assertEqual(self.agent.persisted, [])
+
+    async def test_selection_validator_passes_only_current_documents(self):
+        service = self.make_service(
+            selection_validator=lambda _documents: ["current"]
+        )
+        await service.answer(
+            AnswerRequestContext(
+                original_query="knowledge question",
+                selected_documents=("General_FAQ", "current"),
+                session_id="12",
+            )
+        )
+        self.assertEqual(self.agent.persisted[0]["selected_docs"], ["current"])
 
     async def test_online_and_batch_feed_equivalent_fresh_turn_inputs_to_graph(self):
         service = self.make_service()
