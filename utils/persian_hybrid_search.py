@@ -38,6 +38,7 @@ from utils.tei_embedding_client import (
     build_document_payload,
     validate_embedding_response,
 )
+from utils.persian_normalization import normalize_persian_text
 
 @dataclass
 class SearchResult:
@@ -101,8 +102,7 @@ class PersianTextProcessor:
         }
         for old, new in replacements.items():
             text = text.replace(old, new)
-        text = re.sub(r'\s+', ' ', text).strip()
-        return text
+        return re.sub(r'\s+', ' ', text).strip()
 
     def tokenize(self, text: str) -> List[str]:
         try:
@@ -540,7 +540,7 @@ class PersianHybridSearch:
 
     def _normalise_query(self, query: str) -> str:
         with self._processor_lock:
-            return self.processor.normalize(query).replace("\u200c", " ")
+            return normalize_persian_text(self.processor.normalize(query))
 
     # ------------------------------------------------------------------
     #  Score normalisation
@@ -561,7 +561,9 @@ class PersianHybridSearch:
             raise ValueError("allowed_docs must be provided for filtered search.")
         top_k = top_k or PERFORMANCE_SETTINGS.rag_retrieval_top_k
 
-        expanded_query = self._expand_query_intent(query)
+        expanded_query = normalize_persian_text(
+            self._expand_query_intent(query)
+        )
 
         # CPU-bound Persian NLP + BM25 lookup — off the event loop
         bm25, bm25_chunk_ids, chunk_dict = await self._blocking_runner.run(
@@ -603,7 +605,7 @@ class PersianHybridSearch:
             }
 
         sorted_ids = sorted(hybrid_scores.keys(), key=lambda c: hybrid_scores[c]["hybrid"], reverse=True)[:top_k]
-        return [
+        search_results = [
             SearchResult(
                 doc_id=cid, content=chunk_dict[cid]["text"],
                 score=round(hybrid_scores[cid]["hybrid"], 6),
@@ -613,6 +615,21 @@ class PersianHybridSearch:
             )
             for cid in sorted_ids
         ]
+        trace = current_trace()
+        if trace is not None:
+            trace.set_diagnostic(
+                "retrieval_top",
+                [
+                    {
+                        "candidate_id": result.doc_id,
+                        "hybrid_score": result.score,
+                        "semantic_score": result.semantic_score,
+                        "bm25_score": result.bm25_score,
+                    }
+                    for result in search_results[:10]
+                ],
+            )
+        return search_results
 
     @staticmethod
     def _score_bm25(bm25, chunk_ids, query_tokens):
@@ -629,7 +646,11 @@ class PersianHybridSearch:
         candidates: list[dict],
         threshold: float,
     ) -> list[dict]:
-        texts = [candidate.get("question", "") for candidate in candidates]
+        normalized_query = normalize_persian_text(query)
+        texts = [
+            normalize_persian_text(candidate.get("question", ""))
+            for candidate in candidates
+        ]
         self._ensure_open()
         self._tei_reranker_active = getattr(
             self, "_tei_reranker_active", 0
@@ -638,7 +659,7 @@ class PersianHybridSearch:
             async with trace_span("reranker"):
                 resp = await self._http.post(
                     f"{self.tei_rerank_url}/rerank",
-                    json={"query": query, "texts": texts},
+                    json={"query": normalized_query, "texts": texts},
                 )
                 resp.raise_for_status()
         except httpx.PoolTimeout as exc:
@@ -666,6 +687,7 @@ class PersianHybridSearch:
             )
 
         ranked_candidates = []
+        trace_rankings = []
         seen_indexes = set()
         for ranking in rankings:
             if not isinstance(ranking, dict):
@@ -691,7 +713,21 @@ class PersianHybridSearch:
                     "Reranking service returned an invalid response"
                 )
             seen_indexes.add(index)
+            trace_rankings.append(
+                {
+                    "candidate_id": str(
+                        candidates[index].get("_trace_id", index)
+                    ),
+                    "score": round(float(score), 8),
+                    "accepted": bool(score >= threshold),
+                }
+            )
             if score >= threshold:
                 ranked_candidates.append(candidates[index])
+
+        trace = current_trace()
+        if trace is not None:
+            trace.set_diagnostic("rerank_top", trace_rankings[:10])
+            trace.set_diagnostic("rerank_threshold", threshold)
 
         return ranked_candidates[:5]

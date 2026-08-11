@@ -130,6 +130,7 @@ profile-*.html
 /postgres_data/
 /docker-volumes/
 /embeddings/
+/training/intent_classifier/cache/
 
 # Model weights and model caches
 /models/

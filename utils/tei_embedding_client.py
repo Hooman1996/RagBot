@@ -9,6 +9,7 @@ from typing import Any
 import httpx
 
 from utils.service_errors import ServiceProtocolError
+from utils.persian_normalization import normalize_persian_text
 
 
 EMBEDDING_DIMENSION = 1024
@@ -19,8 +20,11 @@ def build_query_payload(query: str) -> dict[str, Any]:
     """Build the measured query-role request without a manual text prefix."""
     if not isinstance(query, str) or not query.strip():
         raise ValueError("query must be a non-empty string")
+    normalized_query = normalize_persian_text(query)
+    if not normalized_query:
+        raise ValueError("query must be non-empty after normalization")
     return {
-        "inputs": query,
+        "inputs": normalized_query,
         "prompt_name": QUERY_PROMPT_NAME,
         "normalize": True,
     }

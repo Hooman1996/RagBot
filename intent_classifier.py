@@ -29,6 +29,8 @@ import numpy as np
 import torch
 import torch.nn as nn
 
+from utils.persian_normalization import normalize_persian_text
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Constants  (must match chitchat_guardrail.py exactly)
@@ -110,8 +112,8 @@ class IntentClassifier:
         self,
         embedding_model      : Optional[Callable[[str], Awaitable[Sequence[float]]]] = None,
         scenarios_path       : str            = "scenarios.json",
-        similarity_threshold : float          = 0.5,              # kept for API compat, unused
-        classifier_model_path: Optional[str]  = "chitchat_guardrail.pt",
+        similarity_threshold : float          = 0.875,
+        classifier_model_path: Optional[str]  = "chitchat_guardrail_finetuned.pt",
         device               : Optional[str]  = None,             # None = auto-detect
         blocking_runner       = None,
     ):
@@ -121,8 +123,11 @@ class IntentClassifier:
         self.blocking_runner = blocking_runner
         self._inference_lock = threading.Lock()
 
-        # similarity_threshold is preserved for API compatibility but is no longer
-        # used — the neural network makes the binary decision on its own.
+        if not 0.0 < similarity_threshold < 1.0:
+            raise ValueError("similarity_threshold must be between 0 and 1")
+        # Route to chit-chat only when its softmax probability clears the
+        # validation-selected boundary. Ambiguous predictions stay in the safer
+        # banking/RAG route.
         self.threshold = similarity_threshold
 
         # Scenarios are still loaded so existing code that reads self.scenarios
@@ -218,7 +223,10 @@ class IntentClassifier:
             return {"type": "general", "scenario_id": None}
 
         # ── Encode ────────────────────────────────────────────────────────────
-        embedding = await self._encode(query)                         # (1024,)
+        preprocessed_query = normalize_persian_text(query)
+        if not preprocessed_query:
+            return {"type": "general", "scenario_id": None}
+        embedding = await self._encode(preprocessed_query)            # (1024,)
         if self.blocking_runner is not None:
             class_id, _confidence, _p_act, _p_chat = (
                 await self.blocking_runner.run(
@@ -261,9 +269,22 @@ class IntentClassifier:
                 "p_actionable": 1.0,
                 "p_chitchat"  : 0.0,
                 "route_to_rag": True,
+                "preprocessed_query": "",
             }
 
-        embedding = await self._encode(query)
+        preprocessed_query = normalize_persian_text(query)
+        if not preprocessed_query:
+            return {
+                "type": "general",
+                "scenario_id": None,
+                "class_id": LABEL_ACTIONABLE,
+                "confidence": 1.0,
+                "p_actionable": 1.0,
+                "p_chitchat": 0.0,
+                "route_to_rag": True,
+                "preprocessed_query": "",
+            }
+        embedding = await self._encode(preprocessed_query)
         if self.blocking_runner is not None:
             class_id, confidence, p_act, p_chat = (
                 await self.blocking_runner.run(
@@ -284,6 +305,7 @@ class IntentClassifier:
             "p_actionable": p_act,
             "p_chitchat"  : p_chat,
             "route_to_rag": not is_chitchat,
+            "preprocessed_query": preprocessed_query,
         }
 
     def _classify_embedding(self, embedding):
@@ -297,7 +319,11 @@ class IntentClassifier:
             with torch.no_grad():
                 logits = self.classifier(x)
                 probs = torch.softmax(logits, dim=1).squeeze()
-            class_id = int(torch.argmax(probs).item())
+            class_id = (
+                LABEL_CHITCHAT
+                if float(probs[LABEL_CHITCHAT].item()) >= self.threshold
+                else LABEL_ACTIONABLE
+            )
             return (
                 class_id,
                 float(probs[class_id].item()),

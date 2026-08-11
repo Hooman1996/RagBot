@@ -20,6 +20,12 @@ from langgraph.graph import StateGraph, END
 from utils.rag_utils import aggregate_results
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import InvalidRequestError
+from utils.request_instrumentation import current_trace
+
+
+FAQ_FALLBACK_FRAGMENT = (
+    "متاسفانه اطلاعات دقیقی در این زمینه ندارم. لطفا اقدام به ثبت تیکت کنید."
+)
 
 # ---------- State definition ----------
 class AgentState(TypedDict):
@@ -41,6 +47,7 @@ class AgentState(TypedDict):
     allowed_docs: List[str]
     doc_category: Optional[str]
     preclassified_intent: Optional[Dict[str, Optional[str]]]
+    fallback_reason: Optional[str]
 
 
 def extract_slots_from_text(text: str, slot_defs: List[Dict]) -> Dict[str, str]:
@@ -121,7 +128,7 @@ def make_handle_general(rag_system):
     def prepare_context(search_results, recent):
         aggregated = rag_system.generate_context(search_results)
         related = []
-        for result in search_results[:5]:
+        for candidate_index, result in enumerate(search_results[:5]):
             q_match = re.search(
                 r'question\s*:\s*(.+?)(?=answer\s*\d*\s*:|question category\s*:|$)',
                 result.content,
@@ -137,6 +144,9 @@ def make_handle_general(rag_system):
                 {
                     "question": question,
                     "answer": "\n".join(answer.strip() for answer in answers),
+                    "_trace_id": getattr(
+                        result, "doc_id", str(candidate_index)
+                    ),
                 }
             )
         return aggregated, related, recent_history_to_text(recent)
@@ -157,6 +167,15 @@ def make_handle_general(rag_system):
             top_k=PERFORMANCE_SETTINGS.rag_retrieval_top_k,
             allowed_docs=allowed,
         )
+        state["fallback_reason"] = (
+            None if search_results else "NO_RETRIEVAL_RESULTS"
+        )
+        trace = current_trace()
+        if trace is not None:
+            trace.set_diagnostic(
+                "selected_context_ids",
+                [result.doc_id for result in search_results],
+            )
         recent = state["messages"][-7:-1]
         if hasattr(rag_system, "blocking_runner"):
             aggregated, related, recent_text = (
@@ -172,13 +191,30 @@ def make_handle_general(rag_system):
         state["related_questions"] = related
         category = state.get("doc_category")
         if category == "FAQ" and related:
-            state["related_questions"] = await rag_system.search_engine.rerank(
+            reranked_related = await rag_system.search_engine.rerank(
                 query,
                 related,
                 threshold=(
                     PERFORMANCE_SETTINGS.rag_related_questions_rerank_threshold
                 ),
             )
+            state["related_questions"] = [
+                {
+                    key: value
+                    for key, value in candidate.items()
+                    if not key.startswith("_")
+                }
+                for candidate in reranked_related
+            ]
+        else:
+            state["related_questions"] = [
+                {
+                    key: value
+                    for key, value in candidate.items()
+                    if not key.startswith("_")
+                }
+                for candidate in related
+            ]
         answer = await rag_system.answer(
             user_question=query,
             context=aggregated if category == "FAQ" else search_results[:3],
@@ -186,6 +222,14 @@ def make_handle_general(rag_system):
             current_summary="", tone="friendly", response_type="normal",
             enable_history=False, category=category,
         )
+        if FAQ_FALLBACK_FRAGMENT in (answer or ""):
+            state["fallback_reason"] = (
+                state.get("fallback_reason") or "LLM_CONTEXT_REFUSAL"
+            )
+        if trace is not None:
+            trace.set_diagnostic(
+                "fallback_reason", state.get("fallback_reason")
+            )
 
         state["last_answer"] = answer
         state["answer"] = None

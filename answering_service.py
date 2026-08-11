@@ -9,6 +9,8 @@ from typing import Any, Callable
 
 from utils.request_instrumentation import trace_span
 from utils.service_errors import InvalidRequestError
+from utils.persian_normalization import normalize_persian_text, query_fingerprint
+from utils.request_instrumentation import current_trace
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,7 @@ class AnswerResult:
     related_questions: list[dict[str, str]] = field(default_factory=list)
     feedback_needed: bool = False
     timings_ms: dict[str, float] = field(default_factory=dict)
+    fallback_reason: str | None = None
 
 
 class AnsweringService:
@@ -79,8 +82,19 @@ class AnsweringService:
             ),
         )
         normalized_query = str(normalized_query).strip()
+        normalized_query = normalize_persian_text(normalized_query)
         if not normalized_query:
             raise ValueError("query is empty after normalization")
+
+        trace = current_trace()
+        if trace is not None:
+            trace.set_diagnostic(
+                "raw_query_fingerprint", query_fingerprint(original_query)
+            )
+            trace.set_diagnostic(
+                "normalized_query_fingerprint",
+                query_fingerprint(normalized_query),
+            )
 
         intent_data = await self._timed(
             timings,
@@ -109,6 +123,16 @@ class AnsweringService:
                     current_query=normalized_query,
                     current_summary=history,
                 ),
+            )
+            rewritten_query = normalize_persian_text(rewritten_query)
+
+        if trace is not None:
+            trace.set_diagnostic(
+                "rewrite_used", rewritten_query != normalized_query
+            )
+            trace.set_diagnostic(
+                "rewritten_query_fingerprint",
+                query_fingerprint(rewritten_query),
             )
 
         requested_documents = list(request.selected_documents)
@@ -174,6 +198,7 @@ class AnsweringService:
             related_questions=related,
             feedback_needed=bool(state.get("feedback_needed", False)),
             timings_ms=timings,
+            fallback_reason=state.get("fallback_reason"),
         )
 
     @staticmethod

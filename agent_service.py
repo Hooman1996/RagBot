@@ -136,6 +136,7 @@ class AgentService:
                 "allowed_docs": [],
                 "doc_category": None,
                 "preclassified_intent": None,
+                "fallback_reason": None,
             }
         else:
             defaults = {
@@ -153,6 +154,7 @@ class AgentService:
                 "asked_feedback": False,
                 "ticket_submitted": False,
                 "preclassified_intent": None,
+                "fallback_reason": None,
             }
             for k, v in defaults.items():
                 if k not in state:
@@ -171,6 +173,7 @@ class AgentService:
         state["latest_user_input"] = user_message
         state["retrieval_query"] = retrieval_query or user_message
         state["preclassified_intent"] = preclassified_intent
+        state["fallback_reason"] = None
 
         # 5. Run the graph (modifies the state dict)
         final_state = await self.graph.ainvoke(state)   # was: self.graph.invoke(state)
@@ -240,6 +243,7 @@ class AgentService:
             "allowed_docs": documents,
             "doc_category": doc_category,
             "related_questions": [],
+            "fallback_reason": None,
         }
         final_state = await self.graph.ainvoke(state)
         answer = None

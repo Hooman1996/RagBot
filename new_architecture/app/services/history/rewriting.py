@@ -5,6 +5,7 @@ import torch
 import re
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
+from utils.persian_normalization import normalize_persian_text
 
 class HistoryRewritingService:
 
@@ -242,13 +243,16 @@ class HistoryRewritingService:
         return summary, history_prompt_string, meta
 
     async def rewrite_query(self, current_query: str, current_summary: str) -> str:
+        current_query = normalize_persian_text(current_query)
         if not current_summary or current_summary == "[بدون مکالمه قبلی]":
             return current_query
         rewrite_prompt = self.config.QUERY_REWRITE_PROMPT.format(
             current_history=current_summary, current_query=current_query
         )
         final_query = await self.rag_system.generate_text(rewrite_prompt)
-        return extract_rewritten_query(final_query, current_query)
+        return normalize_persian_text(
+            extract_rewritten_query(final_query, current_query)
+        )
 
     
 

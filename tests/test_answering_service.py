@@ -189,6 +189,26 @@ class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
         ):
             self.assertEqual(online[key], batch[key])
 
+    async def test_rewrite_output_is_canonicalized_before_retrieval(self):
+        service = self.make_service()
+        self.rewriter.rewrite_query = lambda **_kwargs: _async_value(
+            "میشه اسم حساب ها رو بگی"
+        )
+        result = await service.answer(
+            AnswerRequestContext(
+                original_query="میشه اسم حساب‌ها رو بگی",
+                selected_documents=("General_FAQ",),
+                session_id="12",
+            )
+        )
+
+        self.assertEqual(result.normalized_query, "میشه اسم حساب هارو بگی")
+        self.assertEqual(result.rewritten_query, "میشه اسم حساب هارو بگی")
+        self.assertEqual(
+            self.agent.persisted[0]["retrieval_query"],
+            "میشه اسم حساب هارو بگی",
+        )
+
 
 async def _async_value(value):
     return value
