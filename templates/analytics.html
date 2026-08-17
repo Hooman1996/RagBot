@@ -4,10 +4,10 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Analytics – Negah Bank AI</title>
-    <link rel="stylesheet" href="/static/css/base.css" />
-    <link rel="stylesheet" href="/static/css/app.css" />
-    <link rel="stylesheet" href="/static/css/analytics.css" />
-    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/analytics.css') }}" />
 </head>
 <body>
 
@@ -126,7 +126,7 @@
     if (window._analyticsDashboard) window._analyticsDashboard.reload();
   });
 </script>
-<script src="/static/js/chart.umd.js"></script>
-<script src="/static/js/analytics.js"></script>
+<script src="{{ url_for('static', path='vendor/chart.js/4.5.1/chart.umd.js') }}"></script>
+<script src="{{ url_for('static', path='js/analytics.js') }}"></script>
 </body>
 </html>

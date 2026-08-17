@@ -1,0 +1,96 @@
+{
+  "schema_version": 1,
+  "generated_at": "2026-08-17",
+  "dependencies": [
+    {
+      "name": "Tailwind CSS",
+      "version": "3.4.17",
+      "purpose": "Compiled utility CSS for the knowledge-base manager",
+      "original_source": "https://cdn.tailwindcss.com/3.4.17",
+      "local_path": "static/vendor/tailwind/3.4.17",
+      "license": "MIT (LICENSE)",
+      "sha256": "e49e4e41dd2dfdcea02024556e8f75cc33b5e1fe73c57f8d7ea8599775af11b0",
+      "files_required": [
+        {"path": "tailwind.min.css", "sha256": "e49e4e41dd2dfdcea02024556e8f75cc33b5e1fe73c57f8d7ea8599775af11b0"},
+        {"path": "input.css", "sha256": "4ceb95bf130bde13beb870bcf3322a9e8759a9cb92a49374284393124b08c702"},
+        {"path": "LICENSE", "sha256": "60e0b68c0f35c078eef3a5d29419d0b03ff84ec1df9c3f9d6e39a519a5ae7985"}
+      ]
+    },
+    {
+      "name": "Chart.js",
+      "version": "4.5.1",
+      "purpose": "Analytics dashboard charts",
+      "original_source": "https://www.npmjs.com/package/chart.js/v/4.5.1",
+      "local_path": "static/vendor/chart.js/4.5.1",
+      "license": "MIT (LICENSE.md)",
+      "sha256": "84d0e233daba702b8f77d669d8c137cad36d441a10f200b6f2d3ab553bdfcf6b",
+      "files_required": [
+        {"path": "chart.umd.js", "sha256": "84d0e233daba702b8f77d669d8c137cad36d441a10f200b6f2d3ab553bdfcf6b"},
+        {"path": "LICENSE.md", "sha256": "41a84aa2caba645f966a18d9c2056b73e6d3a81d80bc0046bc0011a2634d4cce"}
+      ],
+      "notes": "The non-runtime sourceMappingURL trailer was removed; executable code is unchanged."
+    },
+    {
+      "name": "Inter (Google Fonts artifact)",
+      "version": "v20, weights 300-800",
+      "purpose": "Primary Latin UI font",
+      "original_source": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap",
+      "local_path": "static/vendor/google-fonts",
+      "license": "SIL Open Font License 1.1 (INTER-OFL.txt)",
+      "sha256": "0dd3fbb2d20841755445a3490c7b40463b76bec528ff7231f6cf5e35ad08c07b",
+      "files_required": [
+        {"path": "fonts.css", "sha256": "0dd3fbb2d20841755445a3490c7b40463b76bec528ff7231f6cf5e35ad08c07b"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa0ZL7SUc.woff2", "sha256": "71d5ee93cc1e9f1d520a3a8b66456de18c7879d8df09d57fcd2eaff75fef0075"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1ZL7.woff2", "sha256": "3100e775e8616cd2611beecfa23a4263d7037586789b43f035236a2e6fbd4c62"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa1pL7SUc.woff2", "sha256": "1be3448e292fbf05ffe176fe1e43f135013d50b1e7d324ad1a558f623d3bb6f6"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa25L7SUc.woff2", "sha256": "34b9c504cab7a73e37b746343a449132e56cf7b5481af2cb81dc74dcff25c956"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2JL7SUc.woff2", "sha256": "ca157063339ac4ad418f214f3abfed119b0798ab4d377386ce5c9e5a7a435ebd"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2ZL7SUc.woff2", "sha256": "6e9e020a25f9b56d418f2c085b1d3c09725a4da23fe693a5b463064606732190"},
+        {"path": "UcC73FwrK3iLTeHuS_nVMrMxCp50SjIa2pL7SUc.woff2", "sha256": "5c66f9e07e90c6d4ac4922cc68d60de26c17b1858e677fb5e603fce3952b3ff2"},
+        {"path": "INTER-OFL.txt", "sha256": "5b9321a4298cfeb6b34354164a1c3afc3db114569984c502b9b35d988fd58c57"}
+      ]
+    },
+    {
+      "name": "JetBrains Mono (Google Fonts artifact)",
+      "version": "v24, weights 400-500",
+      "purpose": "Monospace UI font",
+      "original_source": "https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500&display=swap",
+      "local_path": "static/vendor/google-fonts",
+      "license": "SIL Open Font License 1.1 (JETBRAINS-MONO-OFL.txt)",
+      "sha256": "0dd3fbb2d20841755445a3490c7b40463b76bec528ff7231f6cf5e35ad08c07b",
+      "files_required": [
+        {"path": "fonts.css", "sha256": "0dd3fbb2d20841755445a3490c7b40463b76bec528ff7231f6cf5e35ad08c07b"},
+        {"path": "tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx3cwhsk.woff2", "sha256": "62213be8a78b42f1e29d1452d91e2f8b3e745572a9dd98d3941e39fa00b37d76"},
+        {"path": "tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx7cwhsk.woff2", "sha256": "db5ff4db83e580426280e9337a58dc57d3a83784a1b03ad80914651594441d52"},
+        {"path": "tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxDcwg.woff2", "sha256": "83c005d49d8a6a50474c73a5a36ac0468076e9c4a29da7bdb14995d80560a5be"},
+        {"path": "tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxPcwhsk.woff2", "sha256": "0a557721b1f8b36d3f3f84442689a71ca4a744300abcb46a1953f51bfc663b66"},
+        {"path": "tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPxTcwhsk.woff2", "sha256": "e17cfd15fb96909d64095015f958207063a0c07191da3512df7d560a781aebdf"},
+        {"path": "tDbv2o-flEEny0FZhsfKu5WU4zr3E_BX0PnT8RD8yKwBNntkaToggR7BYRbKPx_cwhsk.woff2", "sha256": "c89b9cc0bc6262bd4f8d8494b6961601f3aefa829d08c2e3635f4d501d3a47c2"},
+        {"path": "JETBRAINS-MONO-OFL.txt", "sha256": "b2fe5e8987594e9ffd1d2ca52a2f5d73eb8335243893c5d6254b5ad69269591d"}
+      ]
+    },
+    {
+      "name": "Vazirmatn",
+      "version": "33.003",
+      "purpose": "Persian and Arabic UI font for the knowledge-base manager",
+      "original_source": "https://github.com/rastikerdar/vazirmatn/tree/v33.003",
+      "local_path": "static/vendor/vazirmatn/33.003",
+      "license": "SIL Open Font License 1.1 (OFL.txt)",
+      "sha256": "09eda7d9fd0b1c98b5df31d7c866151449c91cd6d4b6d23a5f0b17536ccc7d70",
+      "files_required": [
+        {"path": "vazirmatn.css", "sha256": "09eda7d9fd0b1c98b5df31d7c866151449c91cd6d4b6d23a5f0b17536ccc7d70"},
+        {"path": "fonts/webfonts/Vazirmatn-Thin.woff2", "sha256": "fa5ff0c39630b21e85f014d5c878d80cde8ab50cf3c022f117a20545f0dd6f56"},
+        {"path": "fonts/webfonts/Vazirmatn-ExtraLight.woff2", "sha256": "77efc8bd9708d9be6289738e67dd2142a36f8cb31cfa222ad55d844a15a9bbef"},
+        {"path": "fonts/webfonts/Vazirmatn-Light.woff2", "sha256": "a3aa104f9a256734ca6769e017b4a2697c3036221e13758e0995a0cbeea969c4"},
+        {"path": "fonts/webfonts/Vazirmatn-Regular.woff2", "sha256": "e382101336c6eb32cfb31381c027d02d2e0354bad08f6a395d4088beb3db3d91"},
+        {"path": "fonts/webfonts/Vazirmatn-Medium.woff2", "sha256": "3333e31188a2b628db8780ca22fd5aad85bc083ccee9beb8d4d52db18cb98d48"},
+        {"path": "fonts/webfonts/Vazirmatn-SemiBold.woff2", "sha256": "6a39a3c25eb18503cad590527b95bb5d4062b889a7ebbd3f01b0488d239e0499"},
+        {"path": "fonts/webfonts/Vazirmatn-Bold.woff2", "sha256": "836fae7d42d83faa249bc00e0099592be98a1fa260d22d82f269b6091e585627"},
+        {"path": "fonts/webfonts/Vazirmatn-ExtraBold.woff2", "sha256": "cd67558bbca0ad319b89e3b2edb8a914f87f864951d7a9d24e1404cbf3b45b02"},
+        {"path": "fonts/webfonts/Vazirmatn-Black.woff2", "sha256": "e65a05523e6c0a434265913805746ebe6ed48af843e6126a936d06f69d7d47ad"},
+        {"path": "OFL.txt", "sha256": "17e355067c8284f47743a1ee3b1ef7ff684ff0601eda357f9353b10b3016ab31"}
+      ],
+      "notes": "The former v33.0.0 jsDelivr URL is invalid (HTTP 404); v33.003 is the published compatible v33 release."
+    }
+  ]
+}

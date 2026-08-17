@@ -69,6 +69,7 @@ from utils.request_instrumentation import (
 from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
+from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 
 class Config:
     """Configuration"""
@@ -507,8 +508,8 @@ async def request_trace_middleware(request: Request, call_next):
         )
         reset_current_trace(token)
 
-templates = Jinja2Templates(directory="templates")
-app.mount("/static", StaticFiles(directory="static"), name="static")
+templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
 
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 

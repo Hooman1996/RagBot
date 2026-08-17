@@ -1,0 +1,5 @@
+/* Build source for the knowledge-base page. The production server serves only
+   the compiled tailwind.min.css and never needs Node.js or network access. */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;

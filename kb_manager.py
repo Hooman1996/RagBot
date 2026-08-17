@@ -12,9 +12,10 @@ from qdrant_client.models import PointStruct, PointIdsList
 import psycopg2
 import psycopg2.extras
 from parsivar import Normalizer
+from frontend_paths import TEMPLATE_DIR
 
 router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base Management"])
-templates = Jinja2Templates(directory="templates")
+templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 normalizer = Normalizer()
 
 POSTGRES_ENVIRONMENT_VARIABLES = (

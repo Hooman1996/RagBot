@@ -4,8 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Negah Yar AI - مدیریت پایگاه دانش</title>
-    <script src="https://cdn.tailwindcss.com"></script>
-    <link rel="stylesheet" href="/static/css/kb_manager.css">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind/3.4.17/tailwind.min.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/kb_manager.css') }}">
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none">
 
@@ -116,6 +117,6 @@
         <span>✓</span> <span id="toast-text">تغییرات با موفقیت اعمال شد.</span>
     </div>
 
-    <script src="/static/js/kb_manager.js"></script>
+    <script src="{{ url_for('static', path='js/kb_manager.js') }}"></script>
 </body>
 </html>
