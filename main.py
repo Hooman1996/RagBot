@@ -256,8 +256,12 @@ async def lifespan(app: FastAPI):
         )
         available_documents = [doc["title"] for doc in documents]
 
-        from utils.rag_utils import chunk_fetcher_factory
+        from utils.rag_utils import (
+            chunk_fetcher_factory,
+            chunk_revision_fetcher_factory,
+        )
         chunk_fetcher = chunk_fetcher_factory(db_manager)
+        chunk_revision_fetcher = chunk_revision_fetcher_factory(db_manager)
 
         tei_timeout = httpx.Timeout(
             connect=PERFORMANCE_SETTINGS.tei_http_connect_timeout_seconds,
@@ -320,6 +324,7 @@ async def lifespan(app: FastAPI):
             RAGSystem,
             qdrant_client=qdrant_client,
             chunk_fetcher=chunk_fetcher,
+            chunk_revision_fetcher=chunk_revision_fetcher,
             llm_client=llm_client,
             tei_http_client=tei_http_client,
             tei_sync_http_client=tei_sync_http_client,

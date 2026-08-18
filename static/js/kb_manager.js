@@ -33,6 +33,17 @@ document.addEventListener('DOMContentLoaded', () => {
 
     loadAvailableDocuments();
 
+    function apiErrorMessage(data, fallback) {
+        if (typeof data?.detail === 'string') return data.detail;
+        if (typeof data?.detail?.message === 'string') {
+            const updateId = data.detail.knowledge_update_id;
+            return updateId
+                ? `${data.detail.message} (شناسه پیگیری: ${updateId})`
+                : data.detail.message;
+        }
+        return fallback;
+    }
+
     // Event Bindings
     UI.searchBtn.addEventListener('click', () => triggerWorkspaceResetQuery());
     UI.searchBar.addEventListener('keyup', (e) => {
@@ -274,7 +285,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 UI.addChunkModal.classList.remove('flex');
                 triggerWorkspaceResetQuery();
             } else {
-                throw new Error(data.detail || "Error injecting item.");
+                throw new Error(apiErrorMessage(data, "Error injecting item."));
             }
         } catch (err) {
             displayToastNotify(`خطا: ${err.message}`, "error");
@@ -300,7 +311,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 const card = document.getElementById(`chunk-card-wrapper-${chunkId}`);
                 if (card) card.remove();
             } else {
-                throw new Error(result.detail || "Purge pipeline issue.");
+                throw new Error(apiErrorMessage(result, "Purge pipeline issue."));
             }
         } catch (err) {
             displayToastNotify(`خطای ناموفقیت امیز: ${err.message}`, "error");
@@ -378,7 +389,7 @@ document.addEventListener('DOMContentLoaded', () => {
                 UI.historyModal.classList.remove('flex');
                 triggerWorkspaceResetQuery(); // Refresh tracking workspace grid nodes
             } else {
-                throw new Error(result.detail || "Reversion pipeline execution error.");
+                throw new Error(apiErrorMessage(result, "Reversion pipeline execution error."));
             }
         } catch (err) {
             displayToastNotify(`خطا در بازگردانی: ${err.message}`, "error");
@@ -427,7 +438,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (response.ok) {
                 displayToastNotify("بروزرسانی موفقیت‌آمیز در پایگاه داده و Qdrant اعمال گردید.", "success");
             } else {
-                throw new Error(result.detail || "Error processing pipeline script.");
+                throw new Error(apiErrorMessage(result, "Error processing pipeline script."));
             }
         } catch (err) {
             displayToastNotify(`خطا در پردازش: ${err.message}`, "error");

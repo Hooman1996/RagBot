@@ -50,6 +50,15 @@ def chunk_fetcher_factory(db_manager):
     return fetcher
 
 
+def chunk_revision_fetcher_factory(db_manager):
+    """Return the shared PostgreSQL revision observed by every app worker."""
+    def fetcher(document_titles: List[str]) -> str:
+        return db_manager.get_chunks_revision_by_document_titles(
+            document_titles
+        )
+    return fetcher
+
+
 # utils/rag_utils.py
 import re
 

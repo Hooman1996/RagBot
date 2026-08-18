@@ -49,6 +49,7 @@ class RAGSystem:
             model_id: str = "/app/model",
             qdrant_client: Optional[QdrantClient] = None,
             chunk_fetcher = None,
+            chunk_revision_fetcher = None,
             vllm_url: str = os.getenv("VLLM_URL", "http://localhost:8000/v1"),
             tei_rerank_url: str = os.getenv("TEI_RERANK_URL", "http://localhost:7998"),
             llm_client: Optional[AsyncOpenAI] = None,
@@ -116,6 +117,7 @@ class RAGSystem:
 
         self.qdrant_client = qdrant_client
         self.chunk_fetcher = chunk_fetcher
+        self.chunk_revision_fetcher = chunk_revision_fetcher
         # pipe = pipeline("text-generation", model="deepseek-ai/DeepSeek-R1-0528-Qwen3-8B", device_map= 'auto')
         # self.tokenizer = tokenizer
         # self.model = pipe
@@ -128,6 +130,7 @@ class RAGSystem:
             use_gpu=True,
             qdrant_client = self.qdrant_client,
             chunk_fetcher= self.chunk_fetcher,
+            chunk_revision_fetcher=self.chunk_revision_fetcher,
             http_client=tei_http_client,
             sync_http_client=tei_sync_http_client,
             blocking_runner=self.blocking_runner,

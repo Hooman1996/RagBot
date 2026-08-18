@@ -39,6 +39,7 @@ from utils.tei_embedding_client import (
     validate_embedding_response,
 )
 from utils.persian_normalization import normalize_persian_text
+from utils.revision_cache import RevisionAwareCache
 
 @dataclass
 class SearchResult:
@@ -224,6 +225,7 @@ class PersianHybridSearch:
         use_gpu: bool = True,
         use_stemming: bool = True,
         chunk_fetcher: Optional[Callable[[List[str]], Dict[str, dict]]] = None,
+        chunk_revision_fetcher: Optional[Callable[[List[str]], str]] = None,
         tei_embed_url = os.getenv("TEI_EMBED_URL"),
         tei_rerank_url = os.getenv("TEI_RERANK_URL"),
         http_client: Optional[httpx.AsyncClient] = None,
@@ -274,9 +276,10 @@ class PersianHybridSearch:
             timeout=timeout, limits=limits
         )
         self.tei_rerank_url = tei_rerank_url.rstrip("/")
-        self._bm25_cache: dict[tuple, tuple] = {}
+        self._bm25_cache: RevisionAwareCache[tuple, tuple] = (
+            RevisionAwareCache()
+        )
         self._processor_lock = threading.Lock()
-        self._cache_lock = threading.Lock()
         self._blocking_runner = blocking_runner or BoundedBlockingRunner()
         self._owns_blocking_runner = blocking_runner is None
         self._qdrant_semaphore = asyncio.Semaphore(
@@ -303,6 +306,7 @@ class PersianHybridSearch:
         )
         
         self.chunk_fetcher = chunk_fetcher
+        self.chunk_revision_fetcher = chunk_revision_fetcher
 
 
     async def _encode_query(self, query: str) -> list[float]:
@@ -405,10 +409,7 @@ class PersianHybridSearch:
 
     def clear_document_cache(self) -> int:
         """Discard process-local BM25 corpora after ingestion or reset."""
-        with self._cache_lock:
-            count = len(self._bm25_cache)
-            self._bm25_cache.clear()
-        return count
+        return self._bm25_cache.clear()
 
     def _expand_query_intent(self, query: str) -> str:
         """
@@ -526,13 +527,19 @@ class PersianHybridSearch:
 
     def _get_or_build_bm25(self, allowed_docs: list):
         key = tuple(sorted(allowed_docs))
-        with self._cache_lock:
-            if key not in self._bm25_cache:
-                chunk_dict = self._fetch_chunks(allowed_docs)
-                with self._processor_lock:
-                    bm25, chunk_ids, _ = self._build_temporary_bm25(chunk_dict)
-                self._bm25_cache[key] = (bm25, chunk_ids, chunk_dict)
-            return self._bm25_cache[key]
+        revision = (
+            self.chunk_revision_fetcher(list(key))
+            if self.chunk_revision_fetcher
+            else None
+        )
+
+        def build():
+            chunk_dict = self._fetch_chunks(allowed_docs)
+            with self._processor_lock:
+                bm25, chunk_ids, _ = self._build_temporary_bm25(chunk_dict)
+            return bm25, chunk_ids, chunk_dict
+
+        return self._bm25_cache.get_or_build(key, revision, build)
 
     def _process_query(self, query: str) -> list[str]:
         with self._processor_lock:

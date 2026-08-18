@@ -180,6 +180,15 @@ class DatabaseManager:
         );
         """)
 
+        self._execute("""
+        CREATE TABLE IF NOT EXISTS knowledge_document_revisions (
+            document_id INTEGER PRIMARY KEY
+                REFERENCES documents(id) ON DELETE CASCADE,
+            revision BIGINT NOT NULL DEFAULT 0,
+            updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+        );
+        """)
+
         for ddl in [
             "ALTER TABLE mass_answer_jobs ADD COLUMN IF NOT EXISTS total_duration_ms FLOAT;",
             "ALTER TABLE mass_answer_jobs ADD COLUMN IF NOT EXISTS average_row_ms FLOAT;",
@@ -707,6 +716,24 @@ class DatabaseManager:
                                       JOIN documents d ON c.document_id = d.id
                              WHERE d.title = ANY (%s)
                              """, (titles,), fetch="all")
+
+    def get_chunks_revision_by_document_titles(self, titles: list[str]) -> str:
+        """Return the transactional cross-process revision for a corpus."""
+        rows = self._execute("""
+            SELECT COALESCE(
+                STRING_AGG(
+                    d.id::text || ':' || COALESCE(r.revision, 0)::text,
+                    ',' ORDER BY d.id
+                ),
+                ''
+            ) AS revision
+            FROM documents d
+            LEFT JOIN knowledge_document_revisions r ON r.document_id = d.id
+            WHERE d.title = ANY (%s)
+        """, (titles,), fetch="one")
+        if not rows:
+            return ""
+        return str(rows.get("revision") or "")
 
 
     @staticmethod

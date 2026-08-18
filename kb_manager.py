@@ -13,6 +13,13 @@ import psycopg2
 import psycopg2.extras
 from parsivar import Normalizer
 from frontend_paths import TEMPLATE_DIR
+from new_architecture.knowledge_update import (
+    KnowledgeChunkNotFound,
+    KnowledgeUpdateCoordinator,
+    KnowledgeUpdateFailure,
+    PsycopgKnowledgeRepository,
+    VectorPoint,
+)
 
 router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base Management"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -86,6 +93,15 @@ def get_db_connection():
                                              ON DELETE CASCADE
                         );
                     """)
+        cur.execute("""
+                    CREATE TABLE IF NOT EXISTS knowledge_document_revisions
+                    (
+                        document_id INT PRIMARY KEY
+                            REFERENCES documents(id) ON DELETE CASCADE,
+                        revision BIGINT NOT NULL DEFAULT 0,
+                        updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+                    );
+                    """)
         conn.commit()
     return conn
 
@@ -110,6 +126,71 @@ class RevertPayload(BaseModel):
     chunk_id: int
     version_id: int
     changed_by: Optional[str] = "Hooman (AI Engineer)"
+
+
+class QdrantKnowledgeVectorStore:
+    """Targeted Qdrant operations with acknowledged write semantics."""
+
+    def __init__(self, client, collection_name: str):
+        self.client = client
+        self.collection_name = collection_name
+
+    def read(self, point_id: int) -> VectorPoint | None:
+        points = self.client.retrieve(
+            collection_name=self.collection_name,
+            ids=[int(point_id)],
+            with_payload=True,
+            with_vectors=True,
+        )
+        if not points:
+            return None
+        point = points[0]
+        return VectorPoint(
+            point_id=int(point.id),
+            vector=point.vector,
+            payload=dict(point.payload or {}),
+        )
+
+    def upsert(self, point: VectorPoint) -> None:
+        self.client.upsert(
+            collection_name=self.collection_name,
+            points=[
+                PointStruct(
+                    id=point.point_id,
+                    vector=point.vector,
+                    payload=point.payload,
+                )
+            ],
+            wait=True,
+        )
+
+    def restore(self, point_id: int, previous: VectorPoint | None) -> None:
+        if previous is None:
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=PointIdsList(points=[int(point_id)]),
+                wait=True,
+            )
+            return
+        self.upsert(previous)
+
+
+def _knowledge_update_coordinator(main_module) -> KnowledgeUpdateCoordinator:
+    search_engine = main_module.rag_system.search_engine
+    return KnowledgeUpdateCoordinator(
+        repository_factory=lambda: PsycopgKnowledgeRepository(
+            get_db_connection
+        ),
+        vector_store=QdrantKnowledgeVectorStore(
+            main_module.qdrant_client,
+            main_module.QDRANT_COLLECTION,
+        ),
+        embed_content=lambda content: search_engine.embed_documents_sync(
+            [content]
+        )[0],
+        invalidate_local_cache=search_engine.clear_document_cache,
+        database_name=os.getenv("POSTGRES_DB"),
+    )
 
 
 def extract_qa_components(content: str) -> dict:
@@ -253,6 +334,14 @@ def api_create_chunk(payload: ChunkCreatePayload):
                        INSERT INTO chunk_versions (chunk_id, content, changed_by, created_at)
                        VALUES (%s, %s, %s, %s);
                        """, (new_chunk_id, reconstructed_content, payload.changed_by, now))
+        cursor.execute("""
+                       INSERT INTO knowledge_document_revisions
+                           (document_id, revision, updated_at)
+                       VALUES (%s, 1, %s)
+                       ON CONFLICT (document_id) DO UPDATE
+                       SET revision = knowledge_document_revisions.revision + 1,
+                           updated_at = EXCLUDED.updated_at;
+                       """, (payload.document_id, now))
 
         # 4. Push to Qdrant cluster vector pipeline
         point = PointStruct(
@@ -269,10 +358,12 @@ def api_create_chunk(payload: ChunkCreatePayload):
         )
         main.qdrant_client.upsert(
             collection_name=main.QDRANT_COLLECTION,
-            points=[point]
+            points=[point],
+            wait=True,
         )
 
         conn.commit()
+        main.rag_system.search_engine.clear_document_cache()
         return {"status": "success", "chunk_id": new_chunk_id,
                 "message": "Chunk injected successfully across all index layers."}
     except Exception as e:
@@ -286,89 +377,53 @@ def api_create_chunk(payload: ChunkCreatePayload):
 @router.put("/api/chunks/update")
 def api_sync_chunk(payload: ChunkSyncPayload):
     import main
-
-    conn = get_db_connection()
-    cursor = conn.cursor()
+    if not main.rag_system or not main.qdrant_client:
+        raise HTTPException(
+            status_code=503,
+            detail={"message": "Knowledge update services are unavailable."},
+        )
+    answer = payload.answer.strip()
+    if not answer:
+        raise HTTPException(
+            status_code=422,
+            detail={"message": "Answer must not be empty."},
+        )
+    if payload.is_qa:
+        question = (payload.question or "").strip()
+        if not question:
+            raise HTTPException(
+                status_code=422,
+                detail={"message": "Question must not be empty for FAQ chunks."},
+            )
+        reconstructed_content = f"question: {question}\nanswer: {answer}"
+    else:
+        reconstructed_content = answer
 
     try:
-        if payload.is_qa and payload.question:
-            reconstructed_content = f"question: {payload.question.strip()}\nanswer: {payload.answer.strip()}"
-        else:
-            reconstructed_content = payload.answer.strip()
-
-        normalized_content = normalizer.normalize(reconstructed_content)
-
-        if not main.rag_system:
-            raise HTTPException(status_code=503, detail="RAG engine encoder is not active.")
-
-        new_vector = main.rag_system.search_engine.embed_documents_sync(
-            [normalized_content]
-        )[0]
-
-        cursor.execute("""
-                       SELECT c.document_id, c.chunk_index, d.title as doc_title
-                       FROM chunks c
-                                JOIN documents d ON c.document_id = d.id
-                       WHERE c.id = %s;
-                       """, (payload.chunk_id,))
-        chunk_record = cursor.fetchone()
-        if not chunk_record:
-            raise HTTPException(status_code=404, detail="Chunk target index missing.")
-
-        now = datetime.utcnow()
-        char_count = len(reconstructed_content)
-        token_count = len(normalized_content.split())
-
-        # 1. Update core tables
-        cursor.execute("""
-                       UPDATE chunks
-                       SET content     = %s,
-                           char_count  = %s,
-                           token_count = %s,
-                           updated_at  = %s
-                       WHERE id = %s;
-                       """, (reconstructed_content, char_count, token_count, now, payload.chunk_id))
-
-        cursor.execute("""
-                       UPDATE embeddings
-                       SET vector     = %s,
-                           updated_at = %s
-                       WHERE chunk_id = %s;
-                       """, (json.dumps(new_vector), now, payload.chunk_id))
-
-        # 2. Append history transaction to versions table tracking matrix
-        cursor.execute("""
-                       INSERT INTO chunk_versions (chunk_id, content, changed_by, created_at)
-                       VALUES (%s, %s, %s, %s);
-                       """, (payload.chunk_id, reconstructed_content, payload.changed_by, now))
-
-        # 3. Vector cluster state update
-        point = PointStruct(
-            id=int(payload.chunk_id),
-            vector=new_vector,
-            payload={
-                "chunk_id": int(payload.chunk_id),
-                "chunk_index": chunk_record["chunk_index"],
-                "document_id": chunk_record["document_id"],
-                "document": chunk_record["doc_title"],
-                "content": reconstructed_content,
-                "text": reconstructed_content
-            }
+        result = _knowledge_update_coordinator(main).update(
+            chunk_id=payload.chunk_id,
+            content=reconstructed_content,
+            normalized_content=normalizer.normalize(reconstructed_content),
+            changed_by=payload.changed_by or "Knowledge Manager",
         )
-        main.qdrant_client.upsert(
-            collection_name=main.QDRANT_COLLECTION,
-            points=[point]
-        )
-
-        conn.commit()
-        return {"status": "success", "message": "Updated successfully and log trace committed."}
-
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Atomic execution error: {str(e)}")
-    finally:
-        cursor.close()
-        conn.close()
+        return result.as_dict()
+    except KnowledgeChunkNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "Knowledge chunk was not found.",
+                "knowledge_update_id": exc.update_id,
+            },
+        ) from exc
+    except KnowledgeUpdateFailure as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Knowledge update did not complete.",
+                "knowledge_update_id": exc.update_id,
+                "repair_required": exc.repair_required,
+            },
+        ) from exc
 
 
 @router.delete("/api/chunks/delete/{chunk_id}")
@@ -379,22 +434,34 @@ def api_delete_chunk(chunk_id: int):
 
     try:
         # Check existence
-        cursor.execute("SELECT id FROM chunks WHERE id = %s;", (chunk_id,))
-        if not cursor.fetchone():
+        cursor.execute("SELECT id, document_id FROM chunks WHERE id = %s FOR UPDATE;", (chunk_id,))
+        chunk_record = cursor.fetchone()
+        if not chunk_record:
             raise HTTPException(status_code=404, detail="Chunk requested for removal does not exist.")
 
         # 1. Purge from relational layer (Cascades versioning logs automatically if foreign key is set correctly)
         cursor.execute("DELETE FROM embeddings WHERE chunk_id = %s;", (chunk_id,))
         cursor.execute("DELETE FROM chunk_versions WHERE chunk_id = %s;", (chunk_id,))
         cursor.execute("DELETE FROM chunks WHERE id = %s;", (chunk_id,))
+        cursor.execute("""
+                       INSERT INTO knowledge_document_revisions
+                           (document_id, revision, updated_at)
+                       VALUES (%s, 1, %s)
+                       ON CONFLICT (document_id) DO UPDATE
+                       SET revision = knowledge_document_revisions.revision + 1,
+                           updated_at = EXCLUDED.updated_at;
+                       """, (chunk_record["document_id"], datetime.utcnow()))
 
         # 2. Synchronize memory state with Qdrant collection cluster
         main.qdrant_client.delete(
             collection_name=main.QDRANT_COLLECTION,
-            points_selector=PointIdsList(points=[int(chunk_id)])
+            points_selector=PointIdsList(points=[int(chunk_id)]),
+            wait=True,
         )
 
         conn.commit()
+        if main.rag_system:
+            main.rag_system.search_engine.clear_document_cache()
         return {"status": "success", "message": "Chunk completely expunged across all semantic indices."}
     except Exception as e:
         conn.rollback()
@@ -452,74 +519,38 @@ def api_revert_chunk(payload: RevertPayload):
         if not version_rec:
             raise HTTPException(status_code=404, detail="Target historic state variant missing.")
 
-        target_content = version_rec["content"]
-        normalized_content = normalizer.normalize(target_content)
-
-        if not main.rag_system:
-            raise HTTPException(status_code=503, detail="RAG system vector module offline.")
-
-        new_vector = main.rag_system.search_engine.embed_documents_sync(
-            [normalized_content]
-        )[0]
-
-        cursor.execute("""
-                       SELECT c.chunk_index, d.title as doc_title, c.document_id
-                       FROM chunks c
-                                JOIN documents d ON c.document_id = d.id
-                       WHERE c.id = %s;
-                       """, (payload.chunk_id,))
-        chunk_record = cursor.fetchone()
-
-        now = datetime.utcnow()
-        char_count = len(target_content)
-        token_count = len(normalized_content.split())
-
-        # 1. Override state tracking nodes
-        cursor.execute("""
-                       UPDATE chunks
-                       SET content     = %s,
-                           char_count  = %s,
-                           token_count = %s,
-                           updated_at  = %s
-                       WHERE id = %s;
-                       """, (target_content, char_count, token_count, now, payload.chunk_id))
-
-        cursor.execute("""
-                       UPDATE embeddings
-                       SET vector     = %s,
-                           updated_at = %s
-                       WHERE chunk_id = %s;
-                       """, (json.dumps(new_vector), now, payload.chunk_id))
-
-        # 2. Track revert event itself as a fresh historical version milestone entry
-        cursor.execute("""
-                       INSERT INTO chunk_versions (chunk_id, content, changed_by, created_at)
-                       VALUES (%s, %s, %s, %s);
-                       """, (payload.chunk_id, target_content, f"Reverted by {payload.changed_by}", now))
-
-        # 3. Synchronize vector payload cluster state context
-        point = PointStruct(
-            id=int(payload.chunk_id),
-            vector=new_vector,
-            payload={
-                "chunk_id": int(payload.chunk_id),
-                "chunk_index": chunk_record["chunk_index"],
-                "document_id": chunk_record["document_id"],
-                "document": chunk_record["doc_title"],
-                "content": target_content,
-                "text": target_content
-            }
-        )
-        main.qdrant_client.upsert(
-            collection_name=main.QDRANT_COLLECTION,
-            points=[point]
-        )
-
-        conn.commit()
-        return {"status": "success", "message": "State successfully rolled back."}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Reversion Pipeline Error: {str(e)}")
+        target_content = str(version_rec["content"])
     finally:
         cursor.close()
         conn.close()
+
+    if not main.rag_system or not main.qdrant_client:
+        raise HTTPException(
+            status_code=503,
+            detail={"message": "Knowledge update services are unavailable."},
+        )
+    try:
+        result = _knowledge_update_coordinator(main).update(
+            chunk_id=payload.chunk_id,
+            content=target_content,
+            normalized_content=normalizer.normalize(target_content),
+            changed_by=f"Reverted by {payload.changed_by or 'Knowledge Manager'}",
+        )
+        return result.as_dict()
+    except KnowledgeChunkNotFound as exc:
+        raise HTTPException(
+            status_code=404,
+            detail={
+                "message": "Knowledge chunk was not found.",
+                "knowledge_update_id": exc.update_id,
+            },
+        ) from exc
+    except KnowledgeUpdateFailure as exc:
+        raise HTTPException(
+            status_code=503,
+            detail={
+                "message": "Knowledge revert did not complete.",
+                "knowledge_update_id": exc.update_id,
+                "repair_required": exc.repair_required,
+            },
+        ) from exc

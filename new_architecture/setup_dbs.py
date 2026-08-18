@@ -17,6 +17,7 @@ This script:
    - chat_sessions
    - tickets
    - chunk_versions
+   - knowledge_document_revisions
 
 Usage:
     python setup_dbs.py
@@ -214,22 +215,25 @@ async def create_tables(*, allow_production_reset: bool = False):
             "feedbacks",
             "tickets",
             "chunk_versions",  # Added for KB version control
+            "knowledge_document_revisions",
             "mass_answer_jobs",
         ]
 
-        # Note: chunk_versions won't be in Base.metadata.tables initially if not modelled in SQLAlchemy
+        # Note: KB runtime tables are not in Base.metadata.tables initially.
         for table_name in sorted(Base.metadata.tables.keys()):
             if table_name in expected_tables:
                 print(f"   ✓ {table_name}")
             else:
                 print(f"   ⚠ {table_name} (unexpected)")
         print(f"   ✓ chunk_versions (raw SQL initialization)")
+        print(f"   ✓ knowledge_document_revisions (runtime initialization)")
         print()
 
         # Verify we have exactly the expected tables (excluding the raw SQL one for the set check)
         actual_tables = set(Base.metadata.tables.keys())
         expected_orm_tables = set(expected_tables) - {
             "chunk_versions",
+            "knowledge_document_revisions",
             "mass_answer_jobs",
         }
 
@@ -526,11 +530,11 @@ async def verify_installation():
 
             print(f"✅ Tables: {table_count} tables found")
 
-            # Expected: 9 ORM tables + 2 raw SQL tables = 11
-            if table_count >= 11:
+            # Expected: 9 ORM tables + 3 runtime tables = 12
+            if table_count >= 12:
                 print(f"   ✓ Correct number of tables")
             else:
-                print(f"   ⚠️  Expected at least 11 tables, found {table_count}")
+                print(f"   ⚠️  Expected at least 12 tables, found {table_count}")
             print()
 
             # Test each table
@@ -544,6 +548,7 @@ async def verify_installation():
                 "chat_sessions",
                 "tickets",
                 "chunk_versions",  # Testing new KB ledger
+                "knowledge_document_revisions",
                 "mass_answer_jobs",
             ]
 
@@ -696,6 +701,7 @@ async def main(*, allow_production_reset: bool = False):
     print("║" + "  • chat_sessions".ljust(78) + "║")
     print("║" + "  • tickets".ljust(78) + "║")
     print("║" + "  • chunk_versions (KB Ledger)".ljust(78) + "║")
+    print("║" + "  • knowledge_document_revisions".ljust(78) + "║")
     print("║" + "  • mass_answer_jobs".ljust(78) + "║")
     print("║" + " " * 78 + "║")
     print("╚" + "═" * 78 + "╝")
@@ -745,6 +751,7 @@ async def main(*, allow_production_reset: bool = False):
     print("      • queries         - User queries and responses")
     print("      • chat_sessions   - Chat conversation sessions")
     print("      • chunk_versions  - Version tracking for KB modifications")
+    print("      • knowledge_document_revisions - Cross-worker cache revisions")
     print("      • mass_answer_jobs - Durable batch job metadata")
     print()
     print("    Next steps:")

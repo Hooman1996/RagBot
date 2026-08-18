@@ -51,6 +51,15 @@ CREATE TABLE IF NOT EXISTS chunk_versions (
 """
 
 
+KNOWLEDGE_DOCUMENT_REVISIONS_DDL = """
+CREATE TABLE IF NOT EXISTS knowledge_document_revisions (
+    document_id INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+    revision BIGINT NOT NULL DEFAULT 0,
+    updated_at TIMESTAMP WITHOUT TIME ZONE NOT NULL
+)
+"""
+
+
 MASS_ANSWER_JOBS_DDL = """
 CREATE TABLE IF NOT EXISTS mass_answer_jobs (
     id VARCHAR(36) PRIMARY KEY,
@@ -681,10 +690,14 @@ async def reset_postgres_schema(engine, metadata) -> None:
 
     async with engine.begin() as connection:
         await connection.execute(text("DROP TABLE IF EXISTS chunk_versions CASCADE"))
+        await connection.execute(
+            text("DROP TABLE IF EXISTS knowledge_document_revisions CASCADE")
+        )
         await connection.execute(text("DROP TABLE IF EXISTS mass_answer_jobs CASCADE"))
         await connection.run_sync(metadata.drop_all)
         await connection.run_sync(metadata.create_all)
         await connection.execute(text(CHUNK_VERSIONS_DDL))
+        await connection.execute(text(KNOWLEDGE_DOCUMENT_REVISIONS_DDL))
         await connection.execute(text(MASS_ANSWER_JOBS_DDL))
         await connection.execute(
             text(
