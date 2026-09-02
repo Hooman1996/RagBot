@@ -21,6 +21,19 @@ from utils.rag_utils import aggregate_results
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import InvalidRequestError
 from utils.request_instrumentation import current_trace
+from conversation_history import (
+    MAX_STATE_MESSAGES,
+    format_answer_prompt_history,
+    select_answer_prompt_history,
+    trim_agent_messages,
+)
+from pipeline_observer import (
+    PipelineStage,
+    PipelineStageResult,
+    emit_pipeline_stage_lazy,
+    stable_hash,
+)
+import time
 
 
 FAQ_FALLBACK_FRAGMENT = (
@@ -63,12 +76,8 @@ def extract_slots_from_text(text: str, slot_defs: List[Dict]) -> Dict[str, str]:
     return extracted
 
 
-MAX_STATE_MESSAGES = 10
-
 def trim_messages(messages: list) -> list:
-    if len(messages) > MAX_STATE_MESSAGES:
-        return messages[-MAX_STATE_MESSAGES:]
-    return messages
+    return trim_agent_messages(messages)
 
 
 # ---------- Node factory functions ----------
@@ -176,7 +185,8 @@ def make_handle_general(rag_system):
                 "selected_context_ids",
                 [result.doc_id for result in search_results],
             )
-        recent = state["messages"][-7:-1]
+        recent = select_answer_prompt_history(state["messages"])
+        context_started = time.perf_counter()
         if hasattr(rag_system, "blocking_runner"):
             aggregated, related, recent_text = (
                 await rag_system.blocking_runner.run(
@@ -215,6 +225,40 @@ def make_handle_general(rag_system):
                 }
                 for candidate in related
             ]
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RERANK,
+                status="SKIPPED",
+                input_data={
+                    "query": query,
+                    "candidates": related,
+                },
+                output_data={"candidates": related},
+                metrics={"reason": "NON_FAQ_OR_NO_CANDIDATES"},
+                duration_ms=0.0,
+            ))
+        selected_results = search_results if category == "FAQ" else search_results[:3]
+        selected_context = aggregated if category == "FAQ" else selected_results
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.CONTEXT_SELECTION,
+            input_data={
+                "category": category,
+                "candidate_chunk_ids": [
+                    str(getattr(item, "doc_id", index))
+                    for index, item in enumerate(search_results)
+                ],
+                "history_messages": recent,
+                "recent_history_text": recent_text,
+            },
+            output_data={
+                "selected_chunk_ids": [
+                    str(getattr(item, "doc_id", index))
+                    for index, item in enumerate(selected_results)
+                ],
+                "selected_context": selected_context,
+            },
+            metrics={"selected_context_hash": stable_hash(selected_context)},
+            duration_ms=(time.perf_counter() - context_started) * 1000,
+        ))
         answer = await rag_system.answer(
             user_question=query,
             context=aggregated if category == "FAQ" else search_results[:3],
@@ -230,6 +274,14 @@ def make_handle_general(rag_system):
             trace.set_diagnostic(
                 "fallback_reason", state.get("fallback_reason")
             )
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.GENERATION,
+            output_data={"answer": answer},
+            metrics={
+                "fallback_used": bool(state.get("fallback_reason")),
+                "fallback_reason": state.get("fallback_reason"),
+            },
+        ))
 
         state["last_answer"] = answer
         state["answer"] = None
@@ -246,7 +298,7 @@ def make_handle_chitchat(rag_system):
     async def node(state: AgentState) -> AgentState:
         query = state["messages"][-1]["content"]
         # recent = state["messages"][-6:]
-        recent = state["messages"][-7:-1]
+        recent = select_answer_prompt_history(state["messages"])
 
         # Generate answer using empty context to let the LLM talk freely
         answer = await rag_system.answer(
@@ -343,18 +395,7 @@ def make_add_assistant_message():
 
 # ---------- Helpers ----------
 def recent_history_to_text(messages: List[Dict[str, str]], max_chars: int = 3000) -> str:
-    lines = []
-    for m in messages:
-        prefix = "کاربر" if m["role"] == "user" else "دستیار"
-        lines.append(f"{prefix}: {m['content']}")
-
-    full_text = "\n".join(lines)
-
-    # If the history is too long, slice it to keep only the most recent characters
-    if len(full_text) > max_chars:
-        return "... " + full_text[-max_chars:]
-
-    return full_text
+    return format_answer_prompt_history(messages, max_chars=max_chars)
 
 
 # ---------- Graph builder ----------

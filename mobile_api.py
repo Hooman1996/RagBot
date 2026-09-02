@@ -3,6 +3,7 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import asyncio
 import time
+import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from utils.concurrency import run_with_limit
@@ -80,6 +81,19 @@ def get_services(request: Request):
 # CORE GATEWAY ENDPOINTS (No Auth Required)
 # ==========================================
 
+def _validate_mobile_session_id(session_id: str) -> None:
+    try:
+        parsed_session_id = uuid.UUID(session_id)
+    except ValueError as exc:
+        raise HTTPException(
+            status_code=400, detail="session_id must be a valid UUID."
+        ) from exc
+    if str(parsed_session_id) != session_id.lower():
+        raise HTTPException(
+            status_code=400, detail="session_id must be a valid UUID."
+        )
+
+
 @mobile_router.post("/v1/talk", response_model=TalkResponse)
 async def gateway_talk(req: TalkRequest, request: Request):
     async def operation():
@@ -109,6 +123,7 @@ async def gateway_talk(req: TalkRequest, request: Request):
 async def _gateway_talk(req: TalkRequest, request: Request):
     if not req.query or not req.session_id or not req.national_code:
         raise HTTPException(status_code=400, detail="session_id, query, and national_code are required.")
+    _validate_mobile_session_id(req.session_id)
 
     async with trace_span("authentication"):
         # The direct mobile route has no authentication dependency. A reverse
@@ -161,11 +176,10 @@ async def _gateway_talk(req: TalkRequest, request: Request):
                 use_history=True,
                 persist_agent_state=True,
                 include_related_questions=True,
+                apply_mobile_empty_answer_fallback=True,
             )
         )
         answer = result.answer
-        if not answer:
-            answer = "متاسفانه پاسخی دریافت نشد."
 
         mark_event("answer_generation_finished")
         post_generation_started = time.perf_counter_ns()
@@ -182,9 +196,9 @@ async def _gateway_talk(req: TalkRequest, request: Request):
 
         # Extract Session Metadata Meta Attributes
         # FAQ related questions are already reranked once by the agent graph.
-        import main
+        from document_category import get_document_category
         current_category = (
-            main.get_document_category(req.documents[0])
+            get_document_category(req.documents[0])
             if req.documents
             else "general"
         )
@@ -242,11 +256,20 @@ async def gateway_history(
     # SCENARIO A: Only national_code provided -> Return all active sessions
     if not session_id:
         sessions_dict = await blocking_runner.run(
-            chat_manager.get_user_sessions, user_id
+            chat_manager.get_user_sessions, user_id, True
         )
+        sessions = [
+            {
+                "id": int(session["id"]),
+                "mobile_session_id": session.get("uuid"),
+                "content": session.get("content"),
+                "created_at": session.get("created_at"),
+            }
+            for session in sessions_dict.values()
+        ] if sessions_dict else []
         return {
             "national_code": national_code,
-            "sessions": list(sessions_dict.values()) if sessions_dict else []
+            "sessions": sessions,
         }
 
     # SCENARIO B: session_id is provided -> Return specific message thread

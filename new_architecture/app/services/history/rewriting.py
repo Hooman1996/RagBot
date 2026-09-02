@@ -6,6 +6,12 @@ import re
 from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
 from utils.persian_normalization import normalize_persian_text
+from conversation_history import format_rewrite_history
+from pipeline_observer import (
+    PipelineStage,
+    PipelineStageResult,
+    emit_pipeline_stage_lazy,
+)
 
 class HistoryRewritingService:
 
@@ -46,11 +52,7 @@ class HistoryRewritingService:
             dropped_ai_msg=dropped_ai_msg
         )
 
-        print("Current summary: ", current_summary)
-
         new_summary = await self.rag_system.generate_text(prompt)
-
-        print("new summary:", new_summary)
 
         return new_summary
 
@@ -101,46 +103,7 @@ class HistoryRewritingService:
             meta = meta_raw
 
         messages = meta.get("agent_state", {}).get("messages", [])
-        if not messages:
-            return "[بدون مکالمه قبلی]"
-
-        # 1. Global Deduplication
-        unique_messages = []
-        seen_texts = set()
-
-        for msg in messages:
-            role = msg.get("role", "").lower()
-            text = msg.get("content", "").strip()
-
-            if not text or role not in ["user", "assistant", "ai", "model"]:
-                continue
-
-            # If we have EVER seen this exact text in this session, skip it completely.
-            # This fixes LangGraph/LangChain cumulative state duplication.
-            if text in seen_texts:
-                continue
-
-            seen_texts.add(text)
-            speaker = "AI" if role in ["assistant", "ai", "model"] else "User"
-            unique_messages.append(f"{speaker}: {text}")
-
-        if not unique_messages:
-            return "[بدون مکالمه قبلی]"
-
-        # 2. Fix Database Reversal (If your DB returns Newest-First)
-        # If the very first unique message in the list is an AI message,
-        # it usually means the database returned the list backwards (ORDER BY DESC).
-        if unique_messages[0].startswith("AI:"):
-            unique_messages.reverse()
-
-        # 3. Slice for the last N turns (1 turn = User + AI = 2 messages)
-        message_limit = max_turns * 2
-
-        # We slice from the end to get the most recent valid history
-        recent_lines = unique_messages[-message_limit:]
-
-        # 4. Return the final string (Oldest at top, Newest at bottom)
-        return "\n".join(recent_lines)
+        return format_rewrite_history(messages, max_turns=max_turns)
 
 
     def get_user_query_summary(self, session_id: str, max_queries: int = 5) -> str:
@@ -243,16 +206,67 @@ class HistoryRewritingService:
         return summary, history_prompt_string, meta
 
     async def rewrite_query(self, current_query: str, current_summary: str) -> str:
+        started = time.perf_counter()
         current_query = normalize_persian_text(current_query)
         if not current_summary or current_summary == "[بدون مکالمه قبلی]":
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.REWRITE,
+                input_data={
+                    "history_used": current_summary or "",
+                    "original_query": current_query,
+                },
+                output_data={"rewritten_query": current_query},
+                metrics={
+                    "model": getattr(self.rag_system, "model_id", None),
+                    "temperature": 0.0,
+                    "top_p": None,
+                    "seed": None,
+                    "max_tokens": getattr(
+                        __import__(
+                            "utils.performance_config",
+                            fromlist=["PERFORMANCE_SETTINGS"],
+                        ).PERFORMANCE_SETTINGS,
+                        "rag_rewrite_max_tokens",
+                    ),
+                    "generation_skipped": True,
+                    "fallback_used": False,
+                },
+                duration_ms=(time.perf_counter() - started) * 1000,
+            ))
             return current_query
         rewrite_prompt = self.config.QUERY_REWRITE_PROMPT.format(
             current_history=current_summary, current_query=current_query
         )
         final_query = await self.rag_system.generate_text(rewrite_prompt)
-        return normalize_persian_text(
-            extract_rewritten_query(final_query, current_query)
+        extracted, fallback_mode = extract_rewritten_query_detailed(
+            final_query, current_query
         )
+        rewritten = normalize_persian_text(extracted)
+        from utils.performance_config import PERFORMANCE_SETTINGS
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.REWRITE,
+            input_data={
+                "history_used": current_summary,
+                "original_query": current_query,
+                "prompt": rewrite_prompt,
+            },
+            output_data={
+                "raw_model_output": final_query,
+                "rewritten_query": rewritten,
+            },
+            metrics={
+                "model": getattr(self.rag_system, "model_id", None),
+                "system_message": "You are a helpful assistant.",
+                "temperature": 0.0,
+                "top_p": None,
+                "seed": None,
+                "max_tokens": PERFORMANCE_SETTINGS.rag_rewrite_max_tokens,
+                "fallback_used": fallback_mode is not None,
+                "fallback_reason": fallback_mode,
+            },
+            duration_ms=(time.perf_counter() - started) * 1000,
+        ))
+        return rewritten
 
     
 
@@ -262,18 +276,24 @@ def extract_rewritten_query(llm_output: str, original_query: str) -> str:
     Falls back to the original query if the LLM failed to use tags.
     """
     # Regex to find everything between <rewrite> and </rewrite>
+    return extract_rewritten_query_detailed(llm_output, original_query)[0]
+
+
+def extract_rewritten_query_detailed(
+    llm_output: str, original_query: str
+) -> tuple[str, str | None]:
     match = re.search(r'<rewrite>(.*?)</rewrite>', llm_output, re.DOTALL | re.IGNORECASE)
 
     if match:
         cleaned_query = match.group(1).strip()
-        return cleaned_query
+        return cleaned_query, None
 
     # Fallback: If the LLM hallucinated or forgot the tags, check if it wrote text after </thought_process>
     if "</thought_process>" in llm_output:
         parts = llm_output.split("</thought_process>")
         fallback_text = parts[-1].replace("<rewrite>", "").replace("</rewrite>", "").strip()
         if fallback_text:
-            return fallback_text
+            return fallback_text, "THOUGHT_PROCESS_FALLBACK"
 
     # Ultimate Fallback: Return original query so the RAG pipeline doesn't crash
-    return original_query.strip()
+    return original_query.strip(), "REWRITE_PARSE_FALLBACK"

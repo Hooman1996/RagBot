@@ -11,6 +11,7 @@ import threading
 import uuid
 import logging
 import time
+from pathlib import Path
 from dotenv import load_dotenv
 
 # Load variables from .env into os.environ
@@ -44,6 +45,7 @@ from utils.RagSystem import RAGSystem
 from intent_classifier import IntentClassifier
 from agent_service import AgentService
 from answering_service import AnsweringService, AnswerRequestContext
+from conversation_history import ProductionHistoryProvider
 from mass_answer_service import MassAnswerProcessor
 from mass_answer_jobs import MassAnswerJobManager
 from mass_answer_files import (
@@ -70,6 +72,11 @@ from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
+from document_category import get_document_category
+from evaluation_system.backend.app.config import (
+    get_settings as get_evaluation_settings,
+)
+from evaluation_system.backend.app.ragbot_auth import establish_ragbot_user
 
 class Config:
     """Configuration"""
@@ -193,25 +200,12 @@ request_limiter = None
 tei_http_client = None
 tei_sync_http_client = None
 llm_client = None
+evaluation_redis = None
 ocr_inference_lock = threading.Lock()
 
 # db_manager = DatabaseManager(host="localhost", port=5432, dbname="hihelp_db", user="postgres", password="postgres")
 db_manager = DatabaseManager(host=os.getenv("POSTGRES_HOST"), port=os.getenv("POSTGRES_PORT"), dbname=os.getenv("POSTGRES_DB"),
                              user=os.getenv("POSTGRES_USER"), password=os.getenv("POSTGRES_PASSWORD"))
-
-
-def get_document_category(doc_name: str) -> str:
-    """Categorizes documents to guide downstream domain-specific RAG prompts."""
-    if "قرارداد" in doc_name:
-        return "قرارداد ها"
-    elif "ابلاغیه" in doc_name:
-        return "ابلاغیه ها"
-    elif "FAQ" in doc_name:
-        return "FAQ"
-    else:
-        import hashlib
-        h = hashlib.md5(doc_name.encode()).hexdigest()
-        return "قرارداد ها" if int(h[0], 16) < 8 else "ابلاغیه ها"
 
 
 # ----------------------------------------------------------------------
@@ -224,12 +218,14 @@ async def lifespan(app: FastAPI):
     global intent_classifier, scenarios_db, agent_service, answering_service, mass_answer_processor, mass_answer_job_manager, chat_manager
     global text_processor, qdrant_client, blocking_runner, request_limiter
     global tei_http_client, tei_sync_http_client, llm_client
+    global evaluation_redis
 
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
     request_limiter = AdmissionLimiter(
         REQUEST_CONCURRENCY_LIMIT, name="answering"
     )
     app.state.ready = False
+    app.state.ragbot_authenticated_user = None
     try:
         text_processor = await blocking_runner.run(
             PersianTextProcessor, use_stemming=False
@@ -364,6 +360,9 @@ async def lifespan(app: FastAPI):
             chat_manager=chat_manager,
             blocking_runner=blocking_runner,
             category_resolver=get_document_category,
+            history_provider=ProductionHistoryProvider(
+                db_manager, blocking_runner
+            ),
         )
 
         answering_service = AnsweringService(
@@ -374,6 +373,7 @@ async def lifespan(app: FastAPI):
             blocking_runner=blocking_runner,
             category_resolver=get_document_category,
             selection_validator=db_manager.filter_available_document_titles,
+            history_provider=agent_service.history_provider,
         )
         mass_answer_processor = MassAnswerProcessor(
             answering_service=answering_service,
@@ -396,6 +396,15 @@ async def lifespan(app: FastAPI):
         app.state.history_rewriting_service = history_rewriting_service
         app.state.blocking_runner = blocking_runner
         app.state.request_limiter = request_limiter
+        evaluation_settings = get_evaluation_settings()
+        if evaluation_settings.enabled and evaluation_settings.use_celery:
+            from redis.asyncio import Redis
+
+            evaluation_redis = Redis.from_url(
+                evaluation_settings.redis_url,
+                decode_responses=False,
+            )
+        app.state.redis = evaluation_redis
         app.state.ready = True
         yield
     finally:
@@ -411,6 +420,14 @@ async def lifespan(app: FastAPI):
 
         if mass_answer_job_manager is not None:
             await cleanup(mass_answer_job_manager.aclose)
+        if evaluation_redis is not None:
+            await cleanup(evaluation_redis.aclose)
+        if get_evaluation_settings().enabled:
+            from evaluation_system.backend.app.db.session import (
+                engine as evaluation_engine,
+            )
+
+            await cleanup(evaluation_engine.dispose)
         if rag_system is not None:
             await cleanup(rag_system.aclose)
         if llm_client is not None:
@@ -442,6 +459,8 @@ async def lifespan(app: FastAPI):
             "history_rewriting_service",
             "blocking_runner",
             "request_limiter",
+            "redis",
+            "ragbot_authenticated_user",
         ):
             if hasattr(app.state, name):
                 delattr(app.state, name)
@@ -454,6 +473,7 @@ async def lifespan(app: FastAPI):
         db_connections = None
         blocking_runner = None
         request_limiter = None
+        evaluation_redis = None
         agent_service = None
         answering_service = None
         mass_answer_processor = None
@@ -522,6 +542,19 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 app.include_router(kb_router)
 app.include_router(mobile_router)
 
+from evaluation_system.backend.app.integration import install_evaluation_routes
+
+install_evaluation_routes(
+    app,
+    get_evaluation_settings(),
+    frontend_dist=(
+        Path(__file__).resolve().parent
+        / "evaluation_system"
+        / "frontend"
+        / "dist"
+    ),
+)
+
 
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---
 @app.exception_handler(BankException)
@@ -577,7 +610,7 @@ class MobileLoginRequest(BaseModel):
 # Web Interface Endpoints - Administration & Portal Authentication
 # ----------------------------------------------------------------------
 @app.post("/api/login")
-async def login(req: LoginRequest):
+async def login(req: LoginRequest, request: Request):
     global user
     user = await blocking_runner.run(
         authentication_service.authenticate,
@@ -585,6 +618,7 @@ async def login(req: LoginRequest):
         req.password,
         wait_for_completion_on_cancel=True,
     )
+    establish_ragbot_user(request, user)
     if user:
         user["success"] = True
         return user

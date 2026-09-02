@@ -33,6 +33,11 @@ from utils.service_errors import (
     ServiceUnavailableError,
 )
 from utils.request_instrumentation import current_trace, trace_span
+from pipeline_observer import (
+    PipelineStage,
+    PipelineStageResult,
+    emit_pipeline_stage_lazy,
+)
 from utils.tei_embedding_client import (
     TeiEmbeddingClient,
     build_document_payload,
@@ -564,6 +569,7 @@ class PersianHybridSearch:
     # ------------------------------------------------------------------
     async def search(self, query: str, top_k: int | None = None, rerank: bool = False,
                       allowed_docs: list = None) -> list:
+        search_started = time.perf_counter()
         if not allowed_docs:
             raise ValueError("allowed_docs must be provided for filtered search.")
         top_k = top_k or PERFORMANCE_SETTINGS.rag_retrieval_top_k
@@ -577,6 +583,21 @@ class PersianHybridSearch:
             self._get_or_build_bm25, allowed_docs
         )
         if not chunk_dict:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RETRIEVAL,
+                input_data={
+                    "retrieval_query": query,
+                    "expanded_query": expanded_query,
+                    "allowed_docs": list(allowed_docs),
+                    "top_k": top_k,
+                },
+                output_data={"candidates": []},
+                metrics={
+                    "semantic_candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+                    "reason": "NO_CHUNKS",
+                },
+                duration_ms=(time.perf_counter() - search_started) * 1000,
+            ))
             return []
         query_tokens = await self._blocking_runner.run(
             self._process_query, expanded_query
@@ -598,6 +619,22 @@ class PersianHybridSearch:
 
         candidate_ids = list(set(bm25_top_ids + semantic_top_ids))
         if not candidate_ids:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RETRIEVAL,
+                input_data={
+                    "retrieval_query": query,
+                    "expanded_query": expanded_query,
+                    "semantic_query": semantic_query,
+                    "allowed_docs": list(allowed_docs),
+                    "top_k": top_k,
+                },
+                output_data={"candidates": []},
+                metrics={
+                    "semantic_candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+                    "reason": "NO_CANDIDATES",
+                },
+                duration_ms=(time.perf_counter() - search_started) * 1000,
+            ))
             return []
 
         RRF_K = 60
@@ -636,6 +673,37 @@ class PersianHybridSearch:
                     for result in search_results[:10]
                 ],
             )
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.RETRIEVAL,
+            input_data={
+                "retrieval_query": query,
+                "expanded_query": expanded_query,
+                "semantic_query": semantic_query,
+                "allowed_docs": list(allowed_docs),
+                "top_k": top_k,
+            },
+            output_data={
+                "candidates": [
+                    {
+                        "chunk_id": result.doc_id,
+                        "rank": rank,
+                        "retrieval_score": result.score,
+                        "bm25_score": result.bm25_score,
+                        "semantic_score": result.semantic_score,
+                        "content": result.content,
+                        "metadata": result.metadata or {},
+                    }
+                    for rank, result in enumerate(search_results, start=1)
+                ]
+            },
+            metrics={
+                "semantic_candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+                "rrf_k": RRF_K,
+                "embedding_dimension": 1024,
+                "embedding_prompt_name": "query",
+            },
+            duration_ms=(time.perf_counter() - search_started) * 1000,
+        ))
         return search_results
 
     @staticmethod
@@ -653,6 +721,7 @@ class PersianHybridSearch:
         candidates: list[dict],
         threshold: float,
     ) -> list[dict]:
+        rerank_started = time.perf_counter()
         normalized_query = normalize_persian_text(query)
         texts = [
             normalize_persian_text(candidate.get("question", ""))
@@ -696,7 +765,8 @@ class PersianHybridSearch:
         ranked_candidates = []
         trace_rankings = []
         seen_indexes = set()
-        for ranking in rankings:
+        output_rows = []
+        for output_rank, ranking in enumerate(rankings, start=1):
             if not isinstance(ranking, dict):
                 raise ServiceProtocolError(
                     "Reranking service returned an invalid response"
@@ -729,6 +799,14 @@ class PersianHybridSearch:
                     "accepted": bool(score >= threshold),
                 }
             )
+            output_rows.append({
+                "candidate_id": str(candidates[index].get("_trace_id", index)),
+                "input_rank": index + 1,
+                "output_rank": output_rank,
+                "score": float(score),
+                "accepted": bool(score >= threshold),
+                "candidate": candidates[index],
+            })
             if score >= threshold:
                 ranked_candidates.append(candidates[index])
 
@@ -736,5 +814,20 @@ class PersianHybridSearch:
         if trace is not None:
             trace.set_diagnostic("rerank_top", trace_rankings[:10])
             trace.set_diagnostic("rerank_threshold", threshold)
+
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.RERANK,
+            input_data={
+                "query": query,
+                "normalized_query": normalized_query,
+                "candidates": [
+                    {"input_rank": rank, "candidate": candidate}
+                    for rank, candidate in enumerate(candidates, start=1)
+                ],
+            },
+            output_data={"rankings": output_rows},
+            metrics={"threshold": threshold},
+            duration_ms=(time.perf_counter() - rerank_started) * 1000,
+        ))
 
         return ranked_candidates[:5]

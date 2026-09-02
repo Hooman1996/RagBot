@@ -377,7 +377,28 @@ class DatabaseManager:
             (session_uuid,), fetch="one"
         )
 
-    def get_user_sessions(self, user_id: int) -> list:
+    def get_user_sessions(
+            self, user_id: int,
+            include_first_user_content: bool = False) -> list:
+        if include_first_user_content:
+            return self._execute("""
+            SELECT s.id, s.uuid, s.user_id, s.title, s.description,
+                   s.model_name, s.temperature, s.query_count, s.total_tokens,
+                   s.status, s.is_pinned, s.meta_data,
+                   first_user.content,
+                   s.created_at, s.updated_at, s.last_activity_at
+            FROM   chat_sessions AS s
+            LEFT JOIN LATERAL (
+                SELECT q.query_text AS content
+                FROM   queries AS q
+                WHERE  q.chat_session_id = s.id
+                ORDER  BY q.created_at ASC, q.id ASC
+                LIMIT  1
+            ) AS first_user ON TRUE
+            WHERE  s.user_id = %s AND s.status != 'deleted'
+            ORDER  BY s.is_pinned DESC, s.last_activity_at DESC;
+            """, (user_id,), fetch="all")
+
         return self._execute("""
         SELECT id, uuid, user_id, title, description,
                model_name, temperature, query_count, total_tokens,
@@ -819,10 +840,19 @@ class ChatManager:
             raise RuntimeError("Failed to create chat session")
         return self._format_session(row)
 
-    def get_user_sessions(self, user_id: int) -> dict:
+    def get_user_sessions(
+            self, user_id: int,
+            include_first_user_content: bool = False) -> dict:
         """Returns {session_id_str: session_dict} mapping."""
-        rows = self.db.get_user_sessions(user_id)
-        return {str(r["id"]): self._format_session(r) for r in rows}
+        rows = self.db.get_user_sessions(
+            user_id, include_first_user_content
+        )
+        return {
+            str(r["id"]): self._format_session(
+                r, include_first_user_content=include_first_user_content
+            )
+            for r in rows
+        }
 
     def get_session(self, session_id: str) -> dict | None:
         row = self.db.get_session_by_id(int(session_id))
@@ -882,13 +912,15 @@ class ChatManager:
     # ── Helpers ────────────────────────────────────────────────
 
     @staticmethod
-    def _format_session(row: dict) -> dict:
+    def _format_session(
+            row: dict,
+            include_first_user_content: bool = False) -> dict:
         def _iso(val):
             if val is None:
                 return None
             return val.isoformat() if isinstance(val, datetime) else str(val)
 
-        return {
+        result = {
             "id":               str(row["id"]),
             "uuid":             row.get("uuid"),
             "title":            row.get("title") or "New Chat",
@@ -904,6 +936,9 @@ class ChatManager:
             "updated_at":       _iso(row.get("updated_at")),
             "last_activity_at": _iso(row.get("last_activity_at")),
         }
+        if include_first_user_content:
+            result["content"] = row.get("content")
+        return result
 
     def toggle_pin(self, session_id: str) -> dict:
         """Toggle pin status and return updated session."""

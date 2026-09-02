@@ -30,6 +30,12 @@ import torch
 import torch.nn as nn
 
 from utils.persian_normalization import normalize_persian_text
+from pipeline_observer import (
+    PipelineStage,
+    PipelineStageResult,
+    emit_pipeline_stage_lazy,
+)
+import time
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -218,31 +224,11 @@ class IntentClassifier:
               "scenario_id": "chitchat" | None
             }
         """
-        # Empty / whitespace → treat as actionable to avoid silent drops
-        if not query or not query.strip():
-            return {"type": "general", "scenario_id": None}
-
-        # ── Encode ────────────────────────────────────────────────────────────
-        preprocessed_query = normalize_persian_text(query)
-        if not preprocessed_query:
-            return {"type": "general", "scenario_id": None}
-        embedding = await self._encode(preprocessed_query)            # (1024,)
-        if self.blocking_runner is not None:
-            class_id, _confidence, _p_act, _p_chat = (
-                await self.blocking_runner.run(
-                    self._classify_embedding, embedding
-                )
-            )
-        else:
-            class_id, _confidence, _p_act, _p_chat = await asyncio.to_thread(
-                self._classify_embedding, embedding
-            )
-
-        # ── Map to output format ──────────────────────────────────────────────
-        if class_id == LABEL_CHITCHAT:
-            return {"type": "chitchat", "scenario_id": "chitchat"}
-        else:
-            return {"type": "general", "scenario_id": None}
+        detailed = await self._classify_detailed(query)
+        return {
+            "type": detailed["type"],
+            "scenario_id": detailed["scenario_id"],
+        }
 
     async def classify_detailed(self, query: str) -> Dict:
         """
@@ -260,8 +246,12 @@ class IntentClassifier:
               "route_to_rag"    : bool
             }
         """
+        return await self._classify_detailed(query)
+
+    async def _classify_detailed(self, query: str) -> Dict:
+        started = time.perf_counter()
         if not query or not query.strip():
-            return {
+            result = {
                 "type"        : "general",
                 "scenario_id" : None,
                 "class_id"    : LABEL_ACTIONABLE,
@@ -271,10 +261,18 @@ class IntentClassifier:
                 "route_to_rag": True,
                 "preprocessed_query": "",
             }
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.INTENT,
+                input_data={"classifier_input": query},
+                output_data=result,
+                metrics={"effective_threshold": self.threshold},
+                duration_ms=(time.perf_counter() - started) * 1000,
+            ))
+            return result
 
         preprocessed_query = normalize_persian_text(query)
         if not preprocessed_query:
-            return {
+            result = {
                 "type": "general",
                 "scenario_id": None,
                 "class_id": LABEL_ACTIONABLE,
@@ -284,6 +282,14 @@ class IntentClassifier:
                 "route_to_rag": True,
                 "preprocessed_query": "",
             }
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.INTENT,
+                input_data={"classifier_input": query},
+                output_data=result,
+                metrics={"effective_threshold": self.threshold},
+                duration_ms=(time.perf_counter() - started) * 1000,
+            ))
+            return result
         embedding = await self._encode(preprocessed_query)
         if self.blocking_runner is not None:
             class_id, confidence, p_act, p_chat = (
@@ -297,7 +303,7 @@ class IntentClassifier:
             )
 
         is_chitchat = class_id == LABEL_CHITCHAT
-        return {
+        result = {
             "type"        : "chitchat" if is_chitchat else "general",
             "scenario_id" : "chitchat" if is_chitchat else None,
             "class_id"    : class_id,
@@ -307,6 +313,18 @@ class IntentClassifier:
             "route_to_rag": not is_chitchat,
             "preprocessed_query": preprocessed_query,
         }
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.INTENT,
+            input_data={"classifier_input": query},
+            output_data=result,
+            metrics={
+                "effective_threshold": self.threshold,
+                "embedding_dimension": JINA_DIM,
+                "embedding_policy": "classification",
+            },
+            duration_ms=(time.perf_counter() - started) * 1000,
+        ))
+        return result
 
     def _classify_embedding(self, embedding):
         """Run the synchronous Torch forward pass outside the event loop."""
