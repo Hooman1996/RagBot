@@ -28,6 +28,39 @@ def _positive_float(name: str, default: float) -> float:
     return value
 
 
+def _nonnegative_int(name: str, default: int) -> int:
+    raw = os.getenv(name, str(default))
+    try:
+        value = int(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be an integer") from exc
+    if value < 0:
+        raise ValueError(f"{name} must be at least 0")
+    return value
+
+
+def _nonnegative_float(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default))
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not value >= 0:
+        raise ValueError(f"{name} must be at least 0")
+    return value
+
+
+def _strict_probability(name: str, default: float) -> float:
+    raw = os.getenv(name, str(default))
+    try:
+        value = float(raw)
+    except ValueError as exc:
+        raise ValueError(f"{name} must be a number") from exc
+    if not 0 < value <= 1:
+        raise ValueError(f"{name} must be greater than 0 and at most 1")
+    return value
+
+
 def _probability(name: str, default: float) -> float:
     raw = os.getenv(name, str(default))
     try:
@@ -78,6 +111,15 @@ class PerformanceSettings:
     rag_max_new_tokens: int
     rag_chitchat_max_new_tokens: int
     rag_rewrite_max_tokens: int
+    rag_answer_temperature: float
+    rag_answer_top_p: float
+    rag_answer_seed: int
+    rag_chitchat_temperature: float
+    rag_chitchat_top_p: float
+    rag_chitchat_seed: int
+    rag_rewrite_temperature: float
+    rag_rewrite_top_p: float
+    rag_rewrite_seed: int
     mass_answer_row_concurrency: int
     mass_answer_row_timeout_seconds: float
     mass_answer_direct_max_rows: int
@@ -166,6 +208,23 @@ def load_performance_settings() -> PerformanceSettings:
         rag_rewrite_max_tokens=_positive_int(
             "RAG_REWRITE_MAX_TOKENS", 1000
         ),
+        rag_answer_temperature=_nonnegative_float(
+            "RAG_ANSWER_TEMPERATURE", 0.0
+        ),
+        rag_answer_top_p=_strict_probability("RAG_ANSWER_TOP_P", 1.0),
+        rag_answer_seed=_nonnegative_int("RAG_ANSWER_SEED", 42),
+        rag_chitchat_temperature=_nonnegative_float(
+            "RAG_CHITCHAT_TEMPERATURE", 0.0
+        ),
+        rag_chitchat_top_p=_strict_probability(
+            "RAG_CHITCHAT_TOP_P", 1.0
+        ),
+        rag_chitchat_seed=_nonnegative_int("RAG_CHITCHAT_SEED", 42),
+        rag_rewrite_temperature=_nonnegative_float(
+            "RAG_REWRITE_TEMPERATURE", 0.0
+        ),
+        rag_rewrite_top_p=_strict_probability("RAG_REWRITE_TOP_P", 1.0),
+        rag_rewrite_seed=_nonnegative_int("RAG_REWRITE_SEED", 42),
         mass_answer_row_concurrency=_positive_int(
             "MASS_ANSWER_ROW_CONCURRENCY", 4
         ),

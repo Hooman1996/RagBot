@@ -7,6 +7,7 @@ from transformers import AutoModelForCausalLM, AutoTokenizer
 import time
 from utils.persian_normalization import normalize_persian_text
 from conversation_history import format_rewrite_history
+from utils.performance_config import PERFORMANCE_SETTINGS
 from pipeline_observer import (
     PipelineStage,
     PipelineStageResult,
@@ -218,16 +219,15 @@ class HistoryRewritingService:
                 output_data={"rewritten_query": current_query},
                 metrics={
                     "model": getattr(self.rag_system, "model_id", None),
-                    "temperature": 0.0,
-                    "top_p": None,
-                    "seed": None,
-                    "max_tokens": getattr(
-                        __import__(
-                            "utils.performance_config",
-                            fromlist=["PERFORMANCE_SETTINGS"],
-                        ).PERFORMANCE_SETTINGS,
-                        "rag_rewrite_max_tokens",
+                    "temperature": PERFORMANCE_SETTINGS.rag_rewrite_temperature,
+                    "top_p": PERFORMANCE_SETTINGS.rag_rewrite_top_p,
+                    "seed": PERFORMANCE_SETTINGS.rag_rewrite_seed,
+                    "generation_temperature": (
+                        PERFORMANCE_SETTINGS.rag_rewrite_temperature
                     ),
+                    "generation_top_p": PERFORMANCE_SETTINGS.rag_rewrite_top_p,
+                    "generation_seed": PERFORMANCE_SETTINGS.rag_rewrite_seed,
+                    "max_tokens": PERFORMANCE_SETTINGS.rag_rewrite_max_tokens,
                     "generation_skipped": True,
                     "fallback_used": False,
                 },
@@ -242,7 +242,6 @@ class HistoryRewritingService:
             final_query, current_query
         )
         rewritten = normalize_persian_text(extracted)
-        from utils.performance_config import PERFORMANCE_SETTINGS
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.REWRITE,
             input_data={
@@ -257,9 +256,14 @@ class HistoryRewritingService:
             metrics={
                 "model": getattr(self.rag_system, "model_id", None),
                 "system_message": "You are a helpful assistant.",
-                "temperature": 0.0,
-                "top_p": None,
-                "seed": None,
+                "temperature": PERFORMANCE_SETTINGS.rag_rewrite_temperature,
+                "top_p": PERFORMANCE_SETTINGS.rag_rewrite_top_p,
+                "seed": PERFORMANCE_SETTINGS.rag_rewrite_seed,
+                "generation_temperature": (
+                    PERFORMANCE_SETTINGS.rag_rewrite_temperature
+                ),
+                "generation_top_p": PERFORMANCE_SETTINGS.rag_rewrite_top_p,
+                "generation_seed": PERFORMANCE_SETTINGS.rag_rewrite_seed,
                 "max_tokens": PERFORMANCE_SETTINGS.rag_rewrite_max_tokens,
                 "fallback_used": fallback_mode is not None,
                 "fallback_reason": fallback_mode,

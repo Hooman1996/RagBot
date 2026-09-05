@@ -47,7 +47,9 @@ def build_config_snapshot(
         },
         "rewrite": {
             "prompt_hash": _sha(rewrite_prompt), "prompt_version": None,
-            "temperature": 0.0, "top_p": None, "seed": None,
+            "temperature": PERFORMANCE_SETTINGS.rag_rewrite_temperature,
+            "top_p": PERFORMANCE_SETTINGS.rag_rewrite_top_p,
+            "seed": PERFORMANCE_SETTINGS.rag_rewrite_seed,
             "max_tokens": PERFORMANCE_SETTINGS.rag_rewrite_max_tokens,
         },
         "embedding": {
@@ -71,8 +73,15 @@ def build_config_snapshot(
         },
         "generation": {
             "model": getattr(rag, "model_id", os.getenv("LLM_MODEL")),
-            "temperature": 1.0, "top_p": 0.95, "seed": None,
+            "temperature": PERFORMANCE_SETTINGS.rag_answer_temperature,
+            "top_p": PERFORMANCE_SETTINGS.rag_answer_top_p,
+            "seed": PERFORMANCE_SETTINGS.rag_answer_seed,
             "max_tokens": PERFORMANCE_SETTINGS.rag_max_new_tokens,
+            "chitchat_temperature": (
+                PERFORMANCE_SETTINGS.rag_chitchat_temperature
+            ),
+            "chitchat_top_p": PERFORMANCE_SETTINGS.rag_chitchat_top_p,
+            "chitchat_seed": PERFORMANCE_SETTINGS.rag_chitchat_seed,
             "chitchat_max_tokens": PERFORMANCE_SETTINGS.rag_chitchat_max_new_tokens,
             "prompt_version": None,
             "answer_prompt_source_hash": _sha(answer_prompt_source),
