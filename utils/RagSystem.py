@@ -235,13 +235,10 @@ class RAGSystem:
         """
             Converts search results into deeply nested XML for precise LLM parsing.
             """
-        sorted_results = sorted(
-            results,
-            key=lambda result: (-result.score, str(result.doc_id)),
-        )
+        ordered_results = list(results)
         formatted_documents = []
 
-        for index, result in enumerate(sorted_results, start=1):
+        for index, result in enumerate(ordered_results, start=1):
             raw_content = result.content
 
             # 1. Extract Question

@@ -68,8 +68,16 @@ def build_config_snapshot(
         },
         "rerank": {
             "model": os.getenv("RERANKER_MODEL"),
-            "threshold": PERFORMANCE_SETTINGS.rag_related_questions_rerank_threshold,
-            "scope": "faq_related_questions",
+            "enabled": PERFORMANCE_SETTINGS.rag_context_rerank_enabled,
+            "top_k": PERFORMANCE_SETTINGS.rag_context_rerank_top_k,
+            "scope": "answer_context",
+            "raw_scores": False,
+            "related_questions": {
+                "threshold": (
+                    PERFORMANCE_SETTINGS.rag_related_questions_rerank_threshold
+                ),
+                "scope": "faq_related_questions",
+            },
         },
         "generation": {
             "model": getattr(rag, "model_id", os.getenv("LLM_MODEL")),

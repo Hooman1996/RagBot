@@ -4,7 +4,7 @@ import math
 import threading
 import time
 from typing import List, Dict, Tuple, Optional, Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tqdm import tqdm
 import re
 
@@ -55,6 +55,9 @@ class SearchResult:
     bm25_score: float
     semantic_score: float
     metadata: Optional[Dict] = None
+    original_rrf_rank: int | None = None
+    reranker_score: float | None = None
+    reranker_rank: int | None = None
 
 
 class PersianTextProcessor:
@@ -686,8 +689,9 @@ class PersianHybridSearch:
                 bm25_score=round(hybrid_scores[cid]["bm25"], 6),
                 semantic_score=round(hybrid_scores[cid]["semantic"], 6),
                 metadata={"document_name": chunk_dict[cid].get("document_name", "")},
+                original_rrf_rank=original_rrf_rank,
             )
-            for cid in sorted_ids
+            for original_rrf_rank, cid in enumerate(sorted_ids, start=1)
         ]
         trace = current_trace()
         if trace is not None:
@@ -717,6 +721,7 @@ class PersianHybridSearch:
                     {
                         "chunk_id": result.doc_id,
                         "rank": rank,
+                        "original_rrf_rank": result.original_rrf_rank,
                         "retrieval_score": result.score,
                         "bm25_score": result.bm25_score,
                         "semantic_score": result.semantic_score,
@@ -745,6 +750,199 @@ class PersianHybridSearch:
         )[:50]
         return scores, candidates
 
+
+    async def rerank_search_results(
+        self,
+        query: str,
+        candidates: list[SearchResult],
+        top_k: int,
+    ) -> list[SearchResult]:
+        """Rerank full answer chunks once while preserving first-stage scores."""
+
+        if top_k < 1:
+            raise ValueError("top_k must be at least 1")
+        rerank_started = time.perf_counter()
+        normalized_query = normalize_persian_text(query)
+        texts = [
+            normalize_persian_text(candidate.content)
+            for candidate in candidates
+        ]
+        candidate_rows = [
+            {
+                "chunk_id": str(candidate.doc_id),
+                "original_rrf_rank": (
+                    candidate.original_rrf_rank or input_rank
+                ),
+                "hybrid_score": candidate.score,
+                "bm25_score": candidate.bm25_score,
+                "semantic_score": candidate.semantic_score,
+            }
+            for input_rank, candidate in enumerate(candidates, start=1)
+        ]
+
+        if not candidates:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RERANK,
+                input_data={"candidates": []},
+                output_data={"rankings": []},
+                metrics={
+                    "purpose": "answer_context",
+                    "candidate_count": 0,
+                    "selected_count": 0,
+                    "top_k": top_k,
+                    "raw_scores": False,
+                },
+                duration_ms=(time.perf_counter() - rerank_started) * 1000,
+            ))
+            return []
+
+        self._ensure_open()
+        self._tei_reranker_active = getattr(
+            self, "_tei_reranker_active", 0
+        ) + 1
+        try:
+            try:
+                async with trace_span("reranker"):
+                    response = await self._http.post(
+                        f"{self.tei_rerank_url}/rerank",
+                        json={
+                            "query": normalized_query,
+                            "texts": texts,
+                            "raw_scores": False,
+                        },
+                    )
+                    response.raise_for_status()
+            except httpx.PoolTimeout as exc:
+                self._tei_pool_timeout_total = getattr(
+                    self, "_tei_pool_timeout_total", 0
+                ) + 1
+                raise ServiceTimeoutError(
+                    "Reranking HTTP pool timed out"
+                ) from exc
+            except httpx.TimeoutException as exc:
+                raise ServiceTimeoutError(
+                    "Reranking service timed out"
+                ) from exc
+            except httpx.HTTPError as exc:
+                raise ServiceUnavailableError(
+                    "Reranking service is unavailable"
+                ) from exc
+
+            try:
+                rankings = response.json()
+            except ValueError as exc:
+                raise ServiceProtocolError(
+                    "Reranking service returned an invalid response"
+                ) from exc
+            if not isinstance(rankings, list) or len(rankings) != len(candidates):
+                raise ServiceProtocolError(
+                    "Reranking service returned an incomplete response"
+                )
+
+            seen_indexes = set()
+            scored_candidates = []
+            for ranking in rankings:
+                if not isinstance(ranking, dict):
+                    raise ServiceProtocolError(
+                        "Reranking service returned an invalid response"
+                    )
+                index = ranking.get("index")
+                score = ranking.get("score")
+                if (
+                    isinstance(index, bool)
+                    or not isinstance(index, int)
+                    or index < 0
+                    or index >= len(candidates)
+                    or index in seen_indexes
+                ):
+                    raise ServiceProtocolError(
+                        "Reranking service returned an invalid response"
+                    )
+                if (
+                    isinstance(score, bool)
+                    or not isinstance(score, (int, float))
+                    or not math.isfinite(score)
+                ):
+                    raise ServiceProtocolError(
+                        "Reranking service returned an invalid response"
+                    )
+                seen_indexes.add(index)
+                candidate = candidates[index]
+                scored_candidates.append((
+                    candidate,
+                    float(score),
+                    candidate.original_rrf_rank or index + 1,
+                ))
+        except Exception as exc:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RERANK,
+                status="ERROR",
+                input_data={"candidates": candidate_rows},
+                metrics={
+                    "purpose": "answer_context",
+                    "candidate_count": len(candidates),
+                    "top_k": top_k,
+                    "raw_scores": False,
+                },
+                duration_ms=(time.perf_counter() - rerank_started) * 1000,
+                error_code=getattr(exc, "error_code", type(exc).__name__),
+                error_data={"error_type": type(exc).__name__},
+            ))
+            raise
+        finally:
+            self._tei_reranker_active -= 1
+
+        scored_candidates.sort(key=lambda item: (
+            -item[1],
+            item[2],
+            str(item[0].doc_id),
+        ))
+        ranked_candidates = [
+            replace(
+                candidate,
+                original_rrf_rank=original_rrf_rank,
+                reranker_score=score,
+                reranker_rank=reranker_rank,
+            )
+            for reranker_rank, (
+                candidate,
+                score,
+                original_rrf_rank,
+            ) in enumerate(scored_candidates, start=1)
+        ]
+        selected_count = min(top_k, len(ranked_candidates))
+        ranking_rows = [
+            {
+                "chunk_id": str(candidate.doc_id),
+                "original_rrf_rank": candidate.original_rrf_rank,
+                "hybrid_score": candidate.score,
+                "bm25_score": candidate.bm25_score,
+                "semantic_score": candidate.semantic_score,
+                "reranker_score": candidate.reranker_score,
+                "reranker_rank": candidate.reranker_rank,
+                "selected": bool(candidate.reranker_rank <= selected_count),
+            }
+            for candidate in ranked_candidates
+        ]
+        trace = current_trace()
+        if trace is not None:
+            trace.set_diagnostic(
+                "context_rerank_top", ranking_rows[:selected_count]
+            )
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.RERANK,
+            input_data={"candidates": candidate_rows},
+            output_data={"rankings": ranking_rows},
+            metrics={
+                "purpose": "answer_context",
+                "candidate_count": len(candidates),
+                "selected_count": selected_count,
+                "top_k": top_k,
+                "raw_scores": False,
+            },
+            duration_ms=(time.perf_counter() - rerank_started) * 1000,
+        ))
+        return ranked_candidates[:selected_count]
 
     async def rerank(
         self,
@@ -843,21 +1041,34 @@ class PersianHybridSearch:
 
         trace = current_trace()
         if trace is not None:
-            trace.set_diagnostic("rerank_top", trace_rankings[:10])
-            trace.set_diagnostic("rerank_threshold", threshold)
+            trace.set_diagnostic(
+                "related_questions_rerank_top", trace_rankings[:10]
+            )
+            trace.set_diagnostic(
+                "related_questions_rerank_threshold", threshold
+            )
 
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.RERANK,
             input_data={
-                "query": query,
-                "normalized_query": normalized_query,
-                "candidates": [
-                    {"input_rank": rank, "candidate": candidate}
-                    for rank, candidate in enumerate(candidates, start=1)
-                ],
+                "auxiliary_related_questions": {
+                    "query": query,
+                    "normalized_query": normalized_query,
+                    "candidates": [
+                        {"input_rank": rank, "candidate": candidate}
+                        for rank, candidate in enumerate(candidates, start=1)
+                    ],
+                },
             },
-            output_data={"rankings": output_rows},
-            metrics={"threshold": threshold},
+            output_data={
+                "auxiliary_related_questions": {"rankings": output_rows}
+            },
+            metrics={
+                "auxiliary_related_questions": {
+                    "purpose": "related_questions",
+                    "threshold": threshold,
+                }
+            },
             duration_ms=(time.perf_counter() - rerank_started) * 1000,
         ))
 

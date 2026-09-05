@@ -179,27 +179,58 @@ def make_handle_general(rag_system):
         state["fallback_reason"] = (
             None if search_results else "NO_RETRIEVAL_RESULTS"
         )
+        category = state.get("doc_category")
+        if PERFORMANCE_SETTINGS.rag_context_rerank_enabled:
+            reranked_results = (
+                await rag_system.search_engine.rerank_search_results(
+                    query,
+                    search_results,
+                    top_k=PERFORMANCE_SETTINGS.rag_context_rerank_top_k,
+                )
+            )
+        else:
+            reranked_results = search_results
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RERANK,
+                status="SKIPPED",
+                input_data={
+                    "candidate_chunk_ids": [
+                        str(result.doc_id) for result in search_results
+                    ]
+                },
+                output_data={"rankings": []},
+                metrics={
+                    "purpose": "answer_context",
+                    "reason": "CONTEXT_RERANK_DISABLED",
+                },
+                duration_ms=0.0,
+            ))
+
+        selected_results = (
+            reranked_results
+            if category == "FAQ"
+            else reranked_results[:3]
+        )
         trace = current_trace()
         if trace is not None:
             trace.set_diagnostic(
                 "selected_context_ids",
-                [result.doc_id for result in search_results],
+                [result.doc_id for result in selected_results],
             )
         recent = select_answer_prompt_history(state["messages"])
         context_started = time.perf_counter()
         if hasattr(rag_system, "blocking_runner"):
             aggregated, related, recent_text = (
                 await rag_system.blocking_runner.run(
-                    prepare_context, search_results, recent
+                    prepare_context, selected_results, recent
                 )
             )
         else:
             aggregated, related, recent_text = prepare_context(
-                search_results, recent
+                selected_results, recent
             )
 
         state["related_questions"] = related
-        category = state.get("doc_category")
         if category == "FAQ" and related:
             reranked_related = await rag_system.search_engine.rerank(
                 query,
@@ -225,18 +256,6 @@ def make_handle_general(rag_system):
                 }
                 for candidate in related
             ]
-            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-                stage=PipelineStage.RERANK,
-                status="SKIPPED",
-                input_data={
-                    "query": query,
-                    "candidates": related,
-                },
-                output_data={"candidates": related},
-                metrics={"reason": "NON_FAQ_OR_NO_CANDIDATES"},
-                duration_ms=0.0,
-            ))
-        selected_results = search_results if category == "FAQ" else search_results[:3]
         selected_context = aggregated if category == "FAQ" else selected_results
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.CONTEXT_SELECTION,
@@ -254,6 +273,10 @@ def make_handle_general(rag_system):
                     str(getattr(item, "doc_id", index))
                     for index, item in enumerate(selected_results)
                 ],
+                "selected_context_ids": [
+                    str(getattr(item, "doc_id", index))
+                    for index, item in enumerate(selected_results)
+                ],
                 "selected_context": selected_context,
             },
             metrics={"selected_context_hash": stable_hash(selected_context)},
@@ -261,7 +284,7 @@ def make_handle_general(rag_system):
         ))
         answer = await rag_system.answer(
             user_question=query,
-            context=aggregated if category == "FAQ" else search_results[:3],
+            context=aggregated if category == "FAQ" else selected_results,
             recent_history=recent_text,
             current_summary="", tone="friendly", response_type="normal",
             enable_history=False, category=category,

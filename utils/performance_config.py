@@ -28,6 +28,18 @@ def _positive_float(name: str, default: float) -> float:
     return value
 
 
+def _boolean(name: str, default: bool) -> bool:
+    raw = os.getenv(name)
+    if raw is None:
+        return default
+    normalized = raw.strip().lower()
+    if normalized in {"1", "true", "yes", "on"}:
+        return True
+    if normalized in {"0", "false", "no", "off"}:
+        return False
+    raise ValueError(f"{name} must be a boolean")
+
+
 def _nonnegative_int(name: str, default: int) -> int:
     raw = os.getenv(name, str(default))
     try:
@@ -106,6 +118,8 @@ class PerformanceSettings:
     qdrant_concurrency: int
     rag_retrieval_top_k: int
     rag_semantic_candidate_limit: int
+    rag_context_rerank_enabled: bool
+    rag_context_rerank_top_k: int
     rag_related_questions_rerank_threshold: float
     mobile_related_questions_rerank_threshold: float
     rag_max_new_tokens: int
@@ -195,6 +209,12 @@ def load_performance_settings() -> PerformanceSettings:
         rag_semantic_candidate_limit=_positive_int(
             "RAG_SEMANTIC_CANDIDATE_LIMIT", 50
         ),
+        rag_context_rerank_enabled=_boolean(
+            "RAG_CONTEXT_RERANK_ENABLED", True
+        ),
+        rag_context_rerank_top_k=_positive_int(
+            "RAG_CONTEXT_RERANK_TOP_K", 10
+        ),
         rag_related_questions_rerank_threshold=_probability(
             "RAG_RELATED_QUESTIONS_RERANK_THRESHOLD", 0.1
         ),
@@ -270,6 +290,11 @@ def load_performance_settings() -> PerformanceSettings:
         raise ValueError(
             "RAG_RETRIEVAL_TOP_K cannot exceed "
             "RAG_SEMANTIC_CANDIDATE_LIMIT"
+        )
+    if settings.rag_context_rerank_top_k > settings.rag_retrieval_top_k:
+        raise ValueError(
+            "RAG_CONTEXT_RERANK_TOP_K cannot exceed "
+            "RAG_RETRIEVAL_TOP_K"
         )
     return settings
 
