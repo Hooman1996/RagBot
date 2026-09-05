@@ -1,6 +1,1 @@
-from .embedding import EmbeddingService
-
-__all__ = [
-    # Core RAG services
-    "EmbeddingService"
-]
+"""Embedding policies are provided by :mod:`utils.tei_embedding_client`."""

@@ -9,7 +9,6 @@ from .authentication import AuthenticationService
 from .chunking import ChunkingService
 from .db_connection import DatabaseConnections
 from .document import DocumentUploadService
-from .embedding import EmbeddingService
 from .feedback import FeedbackService
 # from .llm import LLMService
 # from .ocr import OCRService
@@ -20,7 +19,6 @@ from .feedback import FeedbackService
 __all__ = [
     # Core RAG services
     "ChunkingService",
-    "EmbeddingService",
     # "LLMService",
     # "PreprocessingService",
     # "RetrievalService",
