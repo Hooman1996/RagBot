@@ -1,9 +1,128 @@
+# ==========================================
+# APP SETTINGS (FastAPI / Uvicorn)
+# ==========================================
+ENVIRONMENT="development"
+API_HOST="0.0.0.0"
+API_PORT="8080"
+
+# ==========================================
+# VECTOR DATABASE (Qdrant)
+# ==========================================
+QDRANT_URL="http://10.0.1.7:6333"
+QDRANT_HOST="10.0.1.7"
+QDRANT_PORT="6333"
+QDRANT_API_KEY="<PROVIDE_BY_INFRA>"
+QDRANT_COLLECTION="<PROVIDE_BY_INFRA>"
+QDRANT_VECTOR_SIZE="1024"
+QDRANT_HTTPS="False"
+
+# ==========================================
+# DATABASE CONFIGURATION
+# ==========================================
+POSTGRES_HOST="10.4.8.2"
+POSTGRES_PORT="5432"
+POSTGRES_DB="chatbot"
+POSTGRES_USER="<PROVIDE_BY_INFRA>"
+POSTGRES_PASSWORD="<PROVIDE_BY_INFRA>"
+
+DEFAULT_DB_HOST="10.4.8.2"
+DEFAULT_DB_PORT="5432"
+DEFAULT_DB_USER="<PROVIDE_BY_INFRA>"
+DEFAULT_DB_PASSWORD="<PROVIDE_BY_INFRA>"
+DEFAULT_DB_NAME="<PROVIDE_BY_INFRA>"
+
+# ==========================================
+# OBJECT STORAGE (MinIO)
+# ==========================================
+MINIO_ENDPOINT="10.0.1.44:9057"
+MINIO_ACCESS_KEY="<PROVIDE_BY_INFRA>"
+MINIO_SECRET_KEY="<PROVIDE_BY_INFRA>"
+MINIO_SECURE="False"
+MINIO_BUCKET="<PROVIDE_BY_INFRA>"
+
+# ==========================================
+# MODEL AND DATA PATHS
+# ==========================================
+EMBEDDING_MODEL="/u01/models/hub/models--jinaai--jina-embeddings-v5-text-small-retrieval"
+QUERY_EMBEDDING_MODEL="/u01/models/hub/models--jinaai--jina-embeddings-v5-text-small-retrieval"
+LLM_MODEL="gemma-4-12B-it"
+RERANKER_MODEL="/u01/models/hub/BAAI--bge-reranker-v2-m3"
+KNOWLEDGE_BASE_CSV="/u01/chat-bot-data/General_FAQ.csv"
+DATA_INSERTION_DIRECTORY="/u01/chat-bot-data/data_insertion_chunks"
+
+# ==========================================
+# INFERENCE SERVICE ENDPOINTS
+# ==========================================
+VLLM_URL="http://localhost:8000/v1"
+TEI_EMBED_URL="http://localhost:7997"
+TEI_RERANK_URL="http://localhost:7998"
+
+# ==========================================
+# APPLICATION CONCURRENCY AND TIMEOUTS
+# ==========================================
+APPLICATION_REQUEST_TIMEOUT_SECONDS="50"
+REQUEST_CONCURRENCY_LIMIT="256"
+REQUEST_ADMISSION_TIMEOUT_SECONDS="45"
+BLOCKING_CONCURRENCY_LIMIT="48"
+
+TEI_HTTP_MAX_CONNECTIONS="256"
+TEI_HTTP_MAX_KEEPALIVE_CONNECTIONS="128"
+TEI_HTTP_KEEPALIVE_EXPIRY_SECONDS="30"
+TEI_HTTP_CONNECT_TIMEOUT_SECONDS="3"
+TEI_HTTP_READ_TIMEOUT_SECONDS="15"
+TEI_HTTP_WRITE_TIMEOUT_SECONDS="5"
+TEI_HTTP_POOL_TIMEOUT_SECONDS="15"
+
+VLLM_HTTP_MAX_CONNECTIONS="256"
+VLLM_HTTP_MAX_KEEPALIVE_CONNECTIONS="128"
+VLLM_HTTP_KEEPALIVE_EXPIRY_SECONDS="30"
+VLLM_HTTP_CONNECT_TIMEOUT_SECONDS="3"
+VLLM_HTTP_READ_TIMEOUT_SECONDS="60"
+VLLM_HTTP_WRITE_TIMEOUT_SECONDS="5"
+VLLM_HTTP_POOL_TIMEOUT_SECONDS="15"
+
+QDRANT_CONCURRENCY="32"
+
+# ==========================================
+# RETRIEVAL AND GENERATION LIMITS
+# ==========================================
+RAG_RETRIEVAL_TOP_K="10"
+RAG_SEMANTIC_CANDIDATE_LIMIT="30"
+RAG_RELATED_QUESTIONS_RERANK_THRESHOLD="0.1"
+MOBILE_RELATED_QUESTIONS_RERANK_THRESHOLD="0.5"
+
+RAG_MAX_NEW_TOKENS="500"
+RAG_CHITCHAT_MAX_NEW_TOKENS="96"
+RAG_REWRITE_MAX_TOKENS="128"
+
+# ==========================================
+# EVALUATION CONTROL PLANE
+# ==========================================
+EVAL_ENABLED="true"
+EVAL_API_HOST="127.0.0.1"
+EVAL_API_PORT="8090"
+EVAL_REDIS_URL="<PROVIDE_BY_INFRA>"
+EVAL_USE_CELERY="true"
+EVAL_CELERY_QUEUE="ragbot-evaluation"
+EVAL_ALLOW_DB_INIT="true"
+EVAL_SESSION_CONCURRENCY="1"
+EVAL_REPEAT_MAX="100"
+EVAL_CELERY_POOL="solo"
+EVAL_CELERY_CONCURRENCY="1"
+EVAL_MAX_UPLOAD_BYTES="20971520"
+EVAL_MAX_DATASET_ROWS="50000"
+
+# ==========================================
+# DETERMINISTIC LLM GENERATION
+# ==========================================
 RAG_ANSWER_TEMPERATURE=0.0
 RAG_ANSWER_TOP_P=1.0
 RAG_ANSWER_SEED=42
+
 RAG_CHITCHAT_TEMPERATURE=0.0
 RAG_CHITCHAT_TOP_P=1.0
 RAG_CHITCHAT_SEED=42
+
 RAG_REWRITE_TEMPERATURE=0.0
 RAG_REWRITE_TOP_P=1.0
 RAG_REWRITE_SEED=42

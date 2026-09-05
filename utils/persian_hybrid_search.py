@@ -525,8 +525,21 @@ class PersianHybridSearch:
             self._qdrant_semaphore.release()
             if trace is not None:
                 trace.mark("qdrant_end")
-        return {str(hit.payload["chunk_id"]): hit.score
-                for hit in results.points if "chunk_id" in hit.payload}
+        semantic_results = sorted(
+            (
+                hit
+                for hit in results.points
+                if "chunk_id" in hit.payload
+            ),
+            key=lambda hit: (
+                -hit.score,
+                str(hit.payload["chunk_id"]),
+            ),
+        )
+        return {
+            str(hit.payload["chunk_id"]): hit.score
+            for hit in semantic_results
+        }
 
 
 
@@ -617,7 +630,9 @@ class PersianHybridSearch:
         )
         semantic_top_ids = list(semantic_scores_map.keys())
 
-        candidate_ids = list(set(bm25_top_ids + semantic_top_ids))
+        candidate_ids = list(dict.fromkeys(
+            bm25_top_ids + semantic_top_ids
+        ))
         if not candidate_ids:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.RETRIEVAL,
@@ -638,17 +653,32 @@ class PersianHybridSearch:
             return []
 
         RRF_K = 60
+        bm25_rank = {
+            cid: rank for rank, cid in enumerate(bm25_top_ids, start=1)
+        }
+        semantic_rank = {
+            cid: rank for rank, cid in enumerate(semantic_top_ids, start=1)
+        }
+        bm25_scores_map = dict(bm25_candidates)
         hybrid_scores = {}
         for cid in candidate_ids:
-            rank_b = bm25_top_ids.index(cid) + 1 if cid in bm25_top_ids else 61
-            rank_s = semantic_top_ids.index(cid) + 1 if cid in semantic_top_ids else 61
+            rank_b = bm25_rank.get(cid, 61)
+            rank_s = semantic_rank.get(cid, 61)
             hybrid_scores[cid] = {
                 "hybrid": (1.0 / (RRF_K + rank_b)) + (1.0 / (RRF_K + rank_s)),
-                "bm25": next((s for c, s in bm25_candidates if c == cid), 0.0),
+                "bm25": bm25_scores_map.get(cid, 0.0),
                 "semantic": semantic_scores_map.get(cid, 0.0),
             }
 
-        sorted_ids = sorted(hybrid_scores.keys(), key=lambda c: hybrid_scores[c]["hybrid"], reverse=True)[:top_k]
+        sorted_ids = sorted(
+            hybrid_scores,
+            key=lambda cid: (
+                -hybrid_scores[cid]["hybrid"],
+                -hybrid_scores[cid]["semantic"],
+                -hybrid_scores[cid]["bm25"],
+                str(cid),
+            ),
+        )[:top_k]
         search_results = [
             SearchResult(
                 doc_id=cid, content=chunk_dict[cid]["text"],
@@ -710,7 +740,8 @@ class PersianHybridSearch:
     def _score_bm25(bm25, chunk_ids, query_tokens):
         scores = bm25.get_scores(query_tokens)
         candidates = sorted(
-            zip(chunk_ids, scores), key=lambda item: item[1], reverse=True
+            zip(chunk_ids, scores),
+            key=lambda item: (-item[1], str(item[0])),
         )[:50]
         return scores, candidates
 
