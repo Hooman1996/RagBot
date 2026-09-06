@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "aliases": [
+    {
+      "pattern": "\\bانگشتم\\b",
+      "replacement": "اثر انگشت من سنسور زیستی"
+    },
+    {
+      "pattern": "\\bرمزم\\b",
+      "replacement": "رمز من"
+    },
+    {
+      "pattern": "\\bاس ام اس\\b",
+      "replacement": "پیامک"
+    },
+    {
+      "pattern": "\\bرمزمو\\b",
+      "replacement": "رمز من رو"
+    },
+    {
+      "pattern": "\\bقسطمو\\b",
+      "replacement": "قسط م رو"
+    },
+    {
+      "pattern": "\\bواممو\\b",
+      "replacement": "وام من رو"
+    },
+    {
+      "pattern": "\\bحسابمو\\b",
+      "replacement": "حساب من رو"
+    },
+    {
+      "pattern": "\\bکارتش\\b",
+      "replacement": "کارت اش رو"
+    }
+  ]
+}

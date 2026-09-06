@@ -72,13 +72,16 @@ class Processor:
 
 
 class SharedHistoryRuleTests(unittest.TestCase):
-    def test_rewrite_rules_are_shared_exactly(self):
+    def test_rewrite_history_preserves_repeated_text_and_role(self):
         messages = [
             {"role": "user", "content": "same"},
             {"role": "assistant", "content": "same"},
             {"role": "assistant", "content": "answer"},
         ]
-        self.assertEqual(format_rewrite_history(messages), "User: same\nAI: answer")
+        self.assertEqual(
+            format_rewrite_history(messages),
+            "User: same\nAI: same\nAI: answer",
+        )
 
     def test_prompt_selection_and_formatting_are_single_shared_functions(self):
         messages = [{"role": "user", "content": str(index)} for index in range(9)]

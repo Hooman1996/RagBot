@@ -364,6 +364,13 @@ def _specs() -> dict[str, VariableSpec]:
         "QDRANT_CONCURRENCY": VariableSpec(
             kind="int", default="4", minimum=1, component="Qdrant client", restart="FastAPI"
         ),
+        "RAG_QUERY_CANONICALIZATION_ENABLED": VariableSpec(
+            kind="bool",
+            default="true",
+            required=both,
+            component="Retrieval query preparation",
+            restart="FastAPI",
+        ),
         "RAG_RETRIEVAL_TOP_K": VariableSpec(
             kind="int", default="10", minimum=1, component="Retrieval", restart="FastAPI"
         ),

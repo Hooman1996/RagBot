@@ -84,8 +84,7 @@ class HistoryRewritingService:
 
     def get_formatted_history_string(self, current_chat_id: Optional[int] = None, max_turns: int = 3) -> str:
         """
-        Retrieves history, uses a global set to obliterate cumulative DB duplicates,
-        and ensures correct Oldest -> Newest chronological order.
+        Retrieve and format the most recent history in authoritative order.
         """
         if not current_chat_id:
             return "[بدون مکالمه قبلی]"

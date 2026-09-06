@@ -27,7 +27,7 @@ function Intent({ stage }: { stage: StageResult }) {
 
 function Rewrite({ stage }: { stage: StageResult }) {
   const input = asRecord(stage.input_data); const output = asRecord(stage.output_data); const metrics = asRecord(stage.metrics);
-  return <div className="artifact-columns"><section><h4>پرسش اصلی</h4><TextBlock value={input.original_query ?? input.current_query} /></section><section><h4>تاریخچه استفاده‌شده</h4><TextBlock value={input.history_used ?? input.history} /></section><section><h4>پرسش بازنویسی‌شده</h4><TextBlock value={output.rewritten_query ?? output.query} /></section><section><h4>پارامترهای مؤثر</h4><TextBlock value={metrics} code /></section></div>;
+  return <div className="artifact-columns"><section><h4>پرسش نرمال‌شده</h4><TextBlock value={input.normalized_query ?? input.original_query ?? input.current_query} /></section><section><h4>پرسش کانونی بازیابی</h4><TextBlock value={input.canonical_retrieval_query ?? input.original_query ?? input.current_query} /></section><section><h4>تاریخچه استفاده‌شده</h4><TextBlock value={input.history_used ?? input.history} /></section><section><h4>پرسش نهایی بازیابی</h4><TextBlock value={output.final_retrieval_query ?? output.rewritten_query ?? output.query} /></section><section><h4>پارامترهای مؤثر</h4><TextBlock value={metrics} code /></section></div>;
 }
 
 function candidateId(value: Record<string, unknown>, fallback: number): string {

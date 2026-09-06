@@ -10,6 +10,11 @@ from pathlib import Path
 from typing import Any
 
 from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.retrieval_query_canonicalizer import (
+    RETRIEVAL_QUERY_ALIASES_PATH,
+    RETRIEVAL_QUERY_ALIASES_SCHEMA_VERSION,
+    RETRIEVAL_QUERY_ALIASES_SHA256,
+)
 
 
 def _sha(value: str | None) -> str | None:
@@ -54,6 +59,14 @@ def build_config_snapshot(
         "normalizer": {
             "identity": "PersianTextProcessor.normalize+normalize_persian_text",
             "version": None,
+        },
+        "query_canonicalization": {
+            "RAG_QUERY_CANONICALIZATION_ENABLED": (
+                PERFORMANCE_SETTINGS.rag_query_canonicalization_enabled
+            ),
+            "artifact_basename": RETRIEVAL_QUERY_ALIASES_PATH.name,
+            "schema_version": RETRIEVAL_QUERY_ALIASES_SCHEMA_VERSION,
+            "artifact_sha256": RETRIEVAL_QUERY_ALIASES_SHA256,
         },
         "rewrite": {
             "prompt_hash": _sha(rewrite_prompt), "prompt_version": None,

@@ -12,6 +12,7 @@ from utils.service_errors import InvalidRequestError
 from utils.persian_normalization import normalize_persian_text, query_fingerprint
 from utils.request_instrumentation import current_trace
 from conversation_history import (
+    NO_CONVERSATION_HISTORY,
     PRODUCTION_EXECUTION_POLICY,
     ConversationHistoryProvider,
     TurnExecutionPolicy,
@@ -19,6 +20,7 @@ from conversation_history import (
     enforce_history_policy,
     format_rewrite_history,
 )
+from utils.retrieval_query_canonicalizer import canonicalize_retrieval_query
 from pipeline_observer import (
     PipelineObserver,
     PipelineStage,
@@ -47,6 +49,8 @@ class AnswerRequestContext:
 class AnswerResult:
     original_query: str
     normalized_query: str
+    canonical_retrieval_query: str
+    final_retrieval_query: str
     rewritten_query: str
     intent: str
     answer: str
@@ -168,7 +172,15 @@ class AnsweringService:
             duration_ms=timings.get("intent_classification"),
         ))
 
-        rewritten_query = normalized_query
+        canonical_retrieval_query = normalized_query
+        if intent == "general":
+            canonical_retrieval_query = canonicalize_retrieval_query(
+                normalized_query
+            )
+
+        rewritten_query = canonical_retrieval_query
+        final_retrieval_query = canonical_retrieval_query
+        rewrite_used = False
         history_messages: list[dict[str, str]] = []
         provider = history_provider or self.history_provider
         enforce_history_policy(provider, execution_policy)
@@ -199,22 +211,62 @@ class AnsweringService:
                     )
                 )
                 history = format_rewrite_history(history_messages, max_turns=3)
-            rewritten_query = await self._timed(
-                timings,
-                "rewrite",
-                self.history_rewriting_service.rewrite_query(
-                    current_query=normalized_query,
-                    current_summary=history,
-                ),
-            )
-            rewritten_query = normalize_persian_text(rewritten_query)
+            if history and history.strip() != NO_CONVERSATION_HISTORY:
+                rewritten_query = await self._timed(
+                    timings,
+                    "rewrite",
+                    self.history_rewriting_service.rewrite_query(
+                        current_query=canonical_retrieval_query,
+                        current_summary=history,
+                    ),
+                )
+                rewritten_query = normalize_persian_text(rewritten_query)
+                final_retrieval_query = rewritten_query
+                rewrite_used = True
+                emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                    stage=PipelineStage.REWRITE,
+                    input_data={
+                        "normalized_query": normalized_query,
+                        "canonical_retrieval_query": canonical_retrieval_query,
+                    },
+                    output_data={
+                        "rewritten_query": rewritten_query,
+                        "final_retrieval_query": final_retrieval_query,
+                    },
+                    metrics={"rewrite_used": True},
+                    duration_ms=timings.get("rewrite"),
+                ))
+            else:
+                emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                    stage=PipelineStage.REWRITE,
+                    status="SKIPPED",
+                    input_data={
+                        "normalized_query": normalized_query,
+                        "canonical_retrieval_query": canonical_retrieval_query,
+                    },
+                    output_data={
+                        "rewritten_query": canonical_retrieval_query,
+                        "final_retrieval_query": canonical_retrieval_query,
+                    },
+                    metrics={
+                        "rewrite_used": False,
+                        "reason": "NO_PRIOR_CONVERSATION",
+                    },
+                    duration_ms=0.0,
+                ))
         elif intent == "chitchat":
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.REWRITE,
                 status="SKIPPED",
-                input_data={"original_query": normalized_query},
-                output_data={"rewritten_query": normalized_query},
-                metrics={"reason": "CHITCHAT"},
+                input_data={
+                    "normalized_query": normalized_query,
+                    "canonical_retrieval_query": canonical_retrieval_query,
+                },
+                output_data={
+                    "rewritten_query": normalized_query,
+                    "final_retrieval_query": normalized_query,
+                },
+                metrics={"rewrite_used": False, "reason": "CHITCHAT"},
                 duration_ms=0.0,
             ))
             for skipped_stage in (
@@ -230,14 +282,40 @@ class AnsweringService:
                     metrics={"reason": "CHITCHAT"},
                     duration_ms=0.0,
                 ))
+        else:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.REWRITE,
+                status="SKIPPED",
+                input_data={
+                    "normalized_query": normalized_query,
+                    "canonical_retrieval_query": canonical_retrieval_query,
+                },
+                output_data={
+                    "rewritten_query": canonical_retrieval_query,
+                    "final_retrieval_query": canonical_retrieval_query,
+                },
+                metrics={
+                    "rewrite_used": False,
+                    "reason": "HISTORY_DISABLED",
+                },
+                duration_ms=0.0,
+            ))
 
         if trace is not None:
             trace.set_diagnostic(
-                "rewrite_used", rewritten_query != normalized_query
+                "rewrite_used", rewrite_used
+            )
+            trace.set_diagnostic(
+                "canonical_query_fingerprint",
+                query_fingerprint(canonical_retrieval_query),
             )
             trace.set_diagnostic(
                 "rewritten_query_fingerprint",
                 query_fingerprint(rewritten_query),
+            )
+            trace.set_diagnostic(
+                "final_retrieval_query_fingerprint",
+                query_fingerprint(final_retrieval_query),
             )
 
         requested_documents = list(request.selected_documents)
@@ -273,7 +351,7 @@ class AnsweringService:
                 session_id=conversation_key,
                 user_message=original_query,
                 selected_docs=documents,
-                retrieval_query=rewritten_query,
+                retrieval_query=final_retrieval_query,
                 preclassified_intent=intent_data,
                 doc_category=category,
                 history_provider=provider,
@@ -283,7 +361,7 @@ class AnsweringService:
             turn = await self.agent_service.process_stateless_message(
                 user_message=original_query,
                 selected_docs=documents,
-                retrieval_query=rewritten_query,
+                retrieval_query=final_retrieval_query,
                 preclassified_intent=intent_data,
                 doc_category=category,
             )
@@ -310,6 +388,8 @@ class AnsweringService:
         return AnswerResult(
             original_query=original_query,
             normalized_query=normalized_query,
+            canonical_retrieval_query=canonical_retrieval_query,
+            final_retrieval_query=final_retrieval_query,
             rewritten_query=rewritten_query,
             intent=intent,
             answer=answer,

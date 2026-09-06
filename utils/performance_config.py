@@ -116,6 +116,7 @@ class PerformanceSettings:
     vllm_http_write_timeout_seconds: float
     vllm_http_pool_timeout_seconds: float
     qdrant_concurrency: int
+    rag_query_canonicalization_enabled: bool
     rag_retrieval_top_k: int
     rag_semantic_candidate_limit: int
     rag_context_rerank_enabled: bool
@@ -205,6 +206,9 @@ def load_performance_settings() -> PerformanceSettings:
             "VLLM_HTTP_POOL_TIMEOUT_SECONDS", 3.0
         ),
         qdrant_concurrency=_positive_int("QDRANT_CONCURRENCY", 4),
+        rag_query_canonicalization_enabled=_boolean(
+            "RAG_QUERY_CANONICALIZATION_ENABLED", True
+        ),
         rag_retrieval_top_k=_positive_int("RAG_RETRIEVAL_TOP_K", 10),
         rag_semantic_candidate_limit=_positive_int(
             "RAG_SEMANTIC_CANDIDATE_LIMIT", 50

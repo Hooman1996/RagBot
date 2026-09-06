@@ -119,7 +119,12 @@ class PersianTextProcessor:
         except Exception:
             return text.split()
 
-    def stem(self, tokens: List[str]) -> List[str]:
+    def stem(
+        self,
+        tokens: List[str],
+        *,
+        apply_document_overrides: bool = False,
+    ) -> List[str]:
         if not self.use_stemming:
             return tokens
 
@@ -132,8 +137,9 @@ class PersianTextProcessor:
             'سایت', 'اکانت', 'فرمت', 'چت', 'ربات', 'کد', 'اینترنت'
         }
 
-        # 2. Slang overrides applied BEFORE any stemming
-        slang_overrides = {
+        # Preserve legacy BM25 document tokenization. Retrieval-query aliases
+        # are applied only by retrieval_query_canonicalizer before search.
+        document_token_overrides = {
             "انگشتم": "انگشت من",
             "رمزمو": "رمز من رو",
             "قسطمو": "قسط م رو",
@@ -149,9 +155,8 @@ class PersianTextProcessor:
         ]
 
         for token in tokens:
-            # Check slang dictionary first
-            if token in slang_overrides:
-                stemmed.append(slang_overrides[token])
+            if apply_document_overrides and token in document_token_overrides:
+                stemmed.append(document_token_overrides[token])
                 continue
 
             # If it's a known root word, protect it
@@ -201,13 +206,22 @@ class PersianTextProcessor:
             cleaned.append(token)
         return cleaned
 
-    def process(self, text: str, remove_stopwords: bool = True, apply_stemming: bool = True) -> List[str]:
+    def process(
+        self,
+        text: str,
+        remove_stopwords: bool = True,
+        apply_stemming: bool = True,
+        apply_document_overrides: bool = False,
+    ) -> List[str]:
         text = self.normalize(text)
         tokens = self.tokenize(text)
         if remove_stopwords:
             tokens = self.remove_stopwords(tokens)
         if apply_stemming and self.use_stemming:
-            tokens = self.stem(tokens)
+            tokens = self.stem(
+                tokens,
+                apply_document_overrides=apply_document_overrides,
+            )
         tokens = self.clean_tokens(tokens)
         return tokens
 
@@ -419,27 +433,6 @@ class PersianHybridSearch:
         """Discard process-local BM25 corpora after ingestion or reset."""
         return self._bm25_cache.clear()
 
-    def _expand_query_intent(self, query: str) -> str:
-        """
-        Rewrites/Expands short colloquial phrases to align with documentation terminology.
-        """
-        query_clean = query.strip()
-
-        # Rule-based intent expansion mapping
-        intent_map = {
-            r"\bانگشتم\b": "اثر انگشت من سنسور زیستی",
-            # r"ثبت\s+نمی[‌ ]*شه": "عدم ثبت خطای فعال سازی",
-            r"\bرمزم\b": "رمز من",
-            r"\bاس ام اس\b": "پیامک",
-            # r"\bقسطم\b": "پرداخت اقسط وام",
-            # r"\bوامم\b": "تسهیلات وام"
-        }
-
-        for pattern, expansion in intent_map.items():
-            query_clean = re.sub(pattern, expansion, query_clean)
-
-        return query_clean
-
     # ------------------------------------------------------------------
     #  Fetch chunks for the given document names
     # ------------------------------------------------------------------
@@ -468,7 +461,10 @@ class PersianHybridSearch:
         for cid, info in chunk_dict.items():
             corpus_texts.append(info["text"])
             chunk_ids.append(cid)
-            tokenised.append(self.processor.process(info["text"]))
+            tokenised.append(self.processor.process(
+                info["text"],
+                apply_document_overrides=True,
+            ))
         bm25 = BM25Okapi(tokenised)
         return bm25, chunk_ids, corpus_texts
 
@@ -564,7 +560,10 @@ class PersianHybridSearch:
 
     def _process_query(self, query: str) -> list[str]:
         with self._processor_lock:
-            return self.processor.process(query)
+            return self.processor.process(
+                query,
+                apply_document_overrides=False,
+            )
 
     def _normalise_query(self, query: str) -> str:
         with self._processor_lock:
@@ -590,10 +589,6 @@ class PersianHybridSearch:
             raise ValueError("allowed_docs must be provided for filtered search.")
         top_k = top_k or PERFORMANCE_SETTINGS.rag_retrieval_top_k
 
-        expanded_query = normalize_persian_text(
-            self._expand_query_intent(query)
-        )
-
         # CPU-bound Persian NLP + BM25 lookup — off the event loop
         bm25, bm25_chunk_ids, chunk_dict = await self._blocking_runner.run(
             self._get_or_build_bm25, allowed_docs
@@ -603,7 +598,6 @@ class PersianHybridSearch:
                 stage=PipelineStage.RETRIEVAL,
                 input_data={
                     "retrieval_query": query,
-                    "expanded_query": expanded_query,
                     "allowed_docs": list(allowed_docs),
                     "top_k": top_k,
                 },
@@ -616,7 +610,7 @@ class PersianHybridSearch:
             ))
             return []
         query_tokens = await self._blocking_runner.run(
-            self._process_query, expanded_query
+            self._process_query, query
         )
         bm25_scores, bm25_candidates = await self._blocking_runner.run(
             self._score_bm25, bm25, bm25_chunk_ids, query_tokens
@@ -624,7 +618,7 @@ class PersianHybridSearch:
         bm25_top_ids = [cid for cid, score in bm25_candidates if score > 0]
 
         semantic_query = await self._blocking_runner.run(
-            self._normalise_query, expanded_query
+            self._normalise_query, query
         )
         semantic_scores_map = await self._semantic_search(
             semantic_query,
@@ -641,7 +635,6 @@ class PersianHybridSearch:
                 stage=PipelineStage.RETRIEVAL,
                 input_data={
                     "retrieval_query": query,
-                    "expanded_query": expanded_query,
                     "semantic_query": semantic_query,
                     "allowed_docs": list(allowed_docs),
                     "top_k": top_k,
@@ -711,7 +704,6 @@ class PersianHybridSearch:
             stage=PipelineStage.RETRIEVAL,
             input_data={
                 "retrieval_query": query,
-                "expanded_query": expanded_query,
                 "semantic_query": semantic_query,
                 "allowed_docs": list(allowed_docs),
                 "top_k": top_k,

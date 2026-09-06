@@ -144,10 +144,9 @@ def messages_from_turn_records(turns: list[Any]) -> list[dict[str, str]]:
 def format_rewrite_history(
     messages: list[dict[str, Any]], max_turns: int = 3
 ) -> str:
-    """Format rewrite history with the exact production dedup/reversal rules."""
+    """Format the most recent valid messages in authoritative chronology."""
 
-    unique_messages: list[str] = []
-    seen_texts: set[str] = set()
+    formatted_messages: list[str] = []
     for message in messages:
         if not isinstance(message, dict):
             continue
@@ -155,17 +154,17 @@ def format_rewrite_history(
         text = str(message.get("content", "")).strip()
         if not text or role not in {"user", "assistant", "ai", "model"}:
             continue
-        if text in seen_texts:
-            continue
-        seen_texts.add(text)
         speaker = "AI" if role in {"assistant", "ai", "model"} else "User"
-        unique_messages.append(f"{speaker}: {text}")
+        formatted_messages.append(f"{speaker}: {text}")
 
-    if not unique_messages:
+    if not formatted_messages:
         return NO_CONVERSATION_HISTORY
-    if unique_messages[0].startswith("AI:"):
-        unique_messages.reverse()
-    return "\n".join(unique_messages[-(max_turns * 2) :])
+    recent_messages = (
+        formatted_messages[-(max_turns * 2) :]
+        if max_turns
+        else formatted_messages
+    )
+    return "\n".join(recent_messages)
 
 
 def select_answer_prompt_history(

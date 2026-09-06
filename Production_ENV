@@ -91,6 +91,7 @@ QDRANT_CONCURRENCY="32"
 # ==========================================
 # RETRIEVAL AND GENERATION LIMITS
 # ==========================================
+RAG_QUERY_CANONICALIZATION_ENABLED="true"
 RAG_RETRIEVAL_TOP_K="50"
 RAG_SEMANTIC_CANDIDATE_LIMIT="50"
 RAG_CONTEXT_RERANK_ENABLED="true"
