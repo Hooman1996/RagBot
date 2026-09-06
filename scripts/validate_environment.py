@@ -208,6 +208,38 @@ def _specs() -> dict[str, VariableSpec]:
             component="TEI reranker client",
             restart="FastAPI",
         ),
+        "INTENT_CLASSIFIER_MODEL_PATH": VariableSpec(
+            kind="path",
+            required=both,
+            component="Intent classifier",
+            restart="FastAPI",
+        ),
+        "INTENT_CLASSIFIER_THRESHOLD": VariableSpec(
+            kind="float",
+            required=both,
+            minimum=0.0000001,
+            maximum=0.9999999,
+            component="Intent classifier",
+            restart="FastAPI",
+        ),
+        "INTENT_CLASSIFIER_DEVICE": VariableSpec(
+            required=both,
+            allowed=("cpu", "cuda"),
+            component="Intent classifier",
+            restart="FastAPI",
+        ),
+        "INTENT_CLASSIFIER_REQUIRED": VariableSpec(
+            kind="bool",
+            required=both,
+            component="Intent classifier",
+            restart="FastAPI",
+        ),
+        "INTENT_CLASSIFIER_EXPECTED_SHA256": VariableSpec(
+            kind="sha256",
+            required=both,
+            component="Intent classifier",
+            restart="FastAPI",
+        ),
         "EMBEDDING_MODEL": VariableSpec(
             component="Legacy model metadata",
             restart="FastAPI",
@@ -558,6 +590,10 @@ def _validate_value(name: str, value: str, spec: VariableSpec) -> str | None:
         elif spec.kind == "path":
             if "\x00" in value:
                 return "must be a valid file-system path"
+            parsed = 0
+        elif spec.kind == "sha256":
+            if not re.fullmatch(r"[0-9a-fA-F]{64}", value):
+                return "must be a 64-character hexadecimal SHA256"
             parsed = 0
         else:
             parsed = 0

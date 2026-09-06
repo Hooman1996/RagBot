@@ -40,7 +40,17 @@ def build_config_snapshot(
         answer_prompt_source = None
     return {
         "schema_version": "evaluation-config-v1",
-        "intent": {"threshold": getattr(classifier, "threshold", None)},
+        "intent": {
+            "model_path_basename": getattr(classifier, "model_path_basename", None),
+            "checkpoint_sha256": getattr(classifier, "checkpoint_sha256", None),
+            "threshold": getattr(classifier, "threshold", None),
+            "device": str(getattr(classifier, "device", "")) or None,
+            "embedding_dimension": getattr(classifier, "embedding_dimension", None),
+            "embedding_role": getattr(classifier, "embedding_role", None),
+            "embedding_prompt_name": getattr(
+                classifier, "embedding_prompt_name", None
+            ),
+        },
         "normalizer": {
             "identity": "PersianTextProcessor.normalize+normalize_persian_text",
             "version": None,

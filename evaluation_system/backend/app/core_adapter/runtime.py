@@ -13,7 +13,7 @@ from qdrant_client import QdrantClient
 from agent_service import AgentService
 from answering_service import AnsweringService
 from document_category import get_document_category
-from intent_classifier import IntentClassifier
+from intent_classifier_factory import build_intent_classifier
 from new_architecture.app.services.history.database import DatabaseManager
 from new_architecture.app.services.history.rewriting import HistoryRewritingService
 from utils.RagSystem import RAGSystem
@@ -103,7 +103,7 @@ async def canonical_turn_runtime():
         with open("scenarios.json", "r", encoding="utf-8") as stream:
             scenarios = {item["id"]: item for item in json.load(stream)["scenarios"]}
         classifier = await blocking.run(
-            IntentClassifier,
+            build_intent_classifier,
             embedding_model=rag.search_engine._encode_query,
             scenarios_path="scenarios.json",
             blocking_runner=blocking,

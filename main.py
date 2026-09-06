@@ -42,7 +42,7 @@ from new_architecture.knowledge_sources import build_datasource_listing
 
 # AI & Domain Service Layers
 from utils.RagSystem import RAGSystem
-from intent_classifier import IntentClassifier
+from intent_classifier_factory import build_intent_classifier
 from agent_service import AgentService
 from answering_service import AnsweringService, AnswerRequestContext
 from conversation_history import ProductionHistoryProvider
@@ -345,7 +345,7 @@ async def lifespan(app: FastAPI):
 
         scenarios_db = await blocking_runner.run(load_scenarios)
         intent_classifier = await blocking_runner.run(
-            IntentClassifier,
+            build_intent_classifier,
             embedding_model=rag_system.search_engine._encode_query,
             scenarios_path="scenarios.json",
             blocking_runner=blocking_runner,

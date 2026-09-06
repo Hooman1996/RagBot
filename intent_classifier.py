@@ -1,203 +1,168 @@
-"""
-intent_classifier.py
-====================
-Drop-in production replacement for the previous IntentClassifier.
+"""Deterministic binary intent guardrail using retrieval-query embeddings."""
 
-What changed vs. the old version
-─────────────────────────────────
-  • Neural network: 1024→512→128→32→2  (CrossEntropy, 2 logits)
-                    replaces 1024→128→1 (Sigmoid, 1 logit)
-  • Checkpoint key: "model_state_dict"  (saved by chitchat_guardrail.py)
-                    replaces "model_state"
-  • Embedding task: task="classification"  (Jina v5 classification LoRA adapter)
-                    replaces no task tag
-  • Label mapping:  0 = ACTIONABLE_INTENT  |  1 = CHIT-CHAT
-                    (stored inside the checkpoint under "label_map")
+from __future__ import annotations
 
-Public interface:
-  await classifier.classify(query) → {"type": "general"|"chitchat", "scenario_id": str|None}
-"""
-
-import os
 import asyncio
-import threading
+import hashlib
 import json
-from collections.abc import Awaitable, Callable
-from typing import Dict, List, Optional, Sequence
+import os
+import re
+import threading
+import time
+from collections.abc import Awaitable, Callable, Sequence
+from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
 import torch.nn as nn
 
+from pipeline_observer import PipelineStage, PipelineStageResult, emit_pipeline_stage_lazy
 from utils.persian_normalization import normalize_persian_text
-from pipeline_observer import (
-    PipelineStage,
-    PipelineStageResult,
-    emit_pipeline_stage_lazy,
-)
-import time
 
 
-# ─────────────────────────────────────────────────────────────────────────────
-# Constants  (must match chitchat_guardrail.py exactly)
-# ─────────────────────────────────────────────────────────────────────────────
+JINA_DIM = 1024
+LABEL_ACTIONABLE = 0
+LABEL_CHITCHAT = 1
+EXPECTED_LABEL_MAP = {"0": "ACTIONABLE_INTENT", "1": "CHITCHAT"}
+EXPECTED_ARCHITECTURE = "1024-512-128-32-2"
+EXPECTED_EMBEDDING_ROLE = "retrieval_query"
+EXPECTED_EMBEDDING_PROMPT = "query"
 
-JINA_DIM         = 1024
-LABEL_ACTIONABLE = 0    # → route to RAG pipeline  → type="general"
-LABEL_CHITCHAT   = 1    # → skip RAG pipeline       → type="chitchat"
-
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Neural network architecture
-# Must be identical to ChitChatGuardrail in chitchat_guardrail.py so that
-# torch.load() + load_state_dict() succeed.
-# ─────────────────────────────────────────────────────────────────────────────
 
 class _GuardrailNet(nn.Module):
-    """
-    Internal MLP.  Do not instantiate directly — use IntentClassifier.
-
-    Architecture : 1024 → 512 → 128 → 32 → 2
-    Output logits: [:, 0] = ACTIONABLE_INTENT  |  [:, 1] = CHIT-CHAT
-    """
+    """Fixed 1024 -> 512 -> 128 -> 32 -> 2 CrossEntropy MLP."""
 
     def __init__(self, dropout_shallow: float = 0.2, dropout_deep: float = 0.4):
         super().__init__()
         self.net = nn.Sequential(
-            # Block 1: 1024 → 512
             nn.Linear(JINA_DIM, 512),
             nn.BatchNorm1d(512),
             nn.GELU(),
             nn.Dropout(dropout_shallow),
-
-            # Block 2: 512 → 128
             nn.Linear(512, 128),
             nn.BatchNorm1d(128),
             nn.GELU(),
             nn.Dropout(dropout_deep),
-
-            # Block 3: 128 → 32
             nn.Linear(128, 32),
             nn.BatchNorm1d(32),
             nn.GELU(),
             nn.Dropout(dropout_deep),
-
-            # Output: 32 → 2 logits
             nn.Linear(32, 2),
         )
 
-    def forward(self, x: torch.Tensor) -> torch.Tensor:
-        return self.net(x)
+    def forward(self, features: torch.Tensor) -> torch.Tensor:
+        return self.net(features)
 
-
-# ─────────────────────────────────────────────────────────────────────────────
-# Public class
-# ─────────────────────────────────────────────────────────────────────────────
 
 class IntentClassifier:
-    """
-    Classifies a user query into:
-        type        : "general"  → proceed to RAG pipeline
-                    | "chitchat" → skip RAG, return polite deflection
-        scenario_id : "chitchat" when type=="chitchat", else None
-
-    Usage
-    ─────
-        from intent_classifier import IntentClassifier
-
-        classifier = IntentClassifier(embedding_model=async_tei_embed)
-
-        result = await classifier.classify("موجودی حسابم چنده؟")
-        # → {"type": "general", "scenario_id": None}
-
-        result = await classifier.classify("سلام، خوبی؟")
-        # → {"type": "chitchat", "scenario_id": "chitchat"}
-    """
+    """Route label 0 to RAG and label 1 to the chitchat handler."""
 
     def __init__(
         self,
-        embedding_model      : Optional[Callable[[str], Awaitable[Sequence[float]]]] = None,
-        scenarios_path       : str            = "scenarios.json",
-        similarity_threshold : float          = 0.875,
-        classifier_model_path: Optional[str]  = "chitchat_guardrail_finetuned.pt",
-        device               : Optional[str]  = None,             # None = auto-detect
-        blocking_runner       = None,
-    ):
+        embedding_model: Callable[[str], Awaitable[Sequence[float]]] | None = None,
+        scenarios_path: str = "scenarios.json",
+        *,
+        classifier_model_path: str | None,
+        similarity_threshold: float,
+        device: str,
+        required: bool,
+        expected_sha256: str | None,
+        blocking_runner=None,
+    ) -> None:
         if not callable(embedding_model):
             raise TypeError("embedding_model must be an async embedding callable")
+        if not 0.0 < similarity_threshold < 1.0:
+            raise ValueError("similarity_threshold must be between 0 and 1")
+        if not isinstance(device, str) or not device.strip():
+            raise ValueError("device must be an explicit non-empty string")
+
         self.embedding_model = embedding_model
         self.blocking_runner = blocking_runner
         self._inference_lock = threading.Lock()
-
-        if not 0.0 < similarity_threshold < 1.0:
-            raise ValueError("similarity_threshold must be between 0 and 1")
-        # Route to chit-chat only when its softmax probability clears the
-        # validation-selected boundary. Ambiguous predictions stay in the safer
-        # banking/RAG route.
-        self.threshold = similarity_threshold
-
-        # Scenarios are still loaded so existing code that reads self.scenarios
-        # keeps working, even though scenario-based routing is currently disabled.
-        self.scenarios          = self._load_scenarios(scenarios_path)
-        self.scenario_embeddings: Dict[str, np.ndarray] = {}
-
-        # ── Device ────────────────────────────────────────────────────────────
-        if device is not None:
-            self.device = torch.device(device)
-        else:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
-        # ── Build classifier network ──────────────────────────────────────────
+        self.threshold = float(similarity_threshold)
+        self.required = bool(required)
+        self.device = torch.device(device)
+        self.model_path = str(classifier_model_path) if classifier_model_path else None
+        self.model_path_basename = Path(self.model_path).name if self.model_path else None
+        self.checkpoint_sha256: str | None = None
+        self.embedding_dimension = JINA_DIM
+        self.embedding_role = EXPECTED_EMBEDDING_ROLE
+        self.embedding_prompt_name = EXPECTED_EMBEDDING_PROMPT
+        self.scenarios = self._load_scenarios(scenarios_path)
+        self.scenario_embeddings: dict[str, np.ndarray] = {}
+        self._checkpoint_loaded = False
         self.classifier = _GuardrailNet()
 
-        # ── Load checkpoint ───────────────────────────────────────────────────
-        if classifier_model_path and os.path.exists(classifier_model_path):
+        normalized_sha = expected_sha256.strip().lower() if expected_sha256 else None
+        if normalized_sha and not re.fullmatch(r"[0-9a-f]{64}", normalized_sha):
+            raise ValueError("expected_sha256 must be a 64-character SHA256")
+        if self.required and not normalized_sha:
+            raise ValueError("expected_sha256 is required when classifier is required")
+
+        if self.model_path and os.path.isfile(self.model_path):
+            self.checkpoint_sha256 = self._sha256_file(Path(self.model_path))
+            if normalized_sha and self.checkpoint_sha256 != normalized_sha:
+                raise ValueError("Intent classifier checkpoint SHA256 mismatch")
             checkpoint = torch.load(
-                classifier_model_path,
-                map_location=self.device,
-                weights_only=True,          # safe loading — no arbitrary code exec
+                self.model_path, map_location=self.device, weights_only=True
+            )
+            if not isinstance(checkpoint, dict) or "model_state_dict" not in checkpoint:
+                raise ValueError("Intent classifier checkpoint lacks model_state_dict")
+            self._validate_checkpoint_metadata(checkpoint)
+            self.classifier.load_state_dict(checkpoint["model_state_dict"], strict=True)
+            self._checkpoint_loaded = True
+        elif self.required:
+            raise FileNotFoundError(
+                f"Required intent classifier checkpoint not found: {self.model_path}"
             )
 
-            # Checkpoint saved by chitchat_guardrail.py is always a dict with
-            # "model_state_dict".  Guard against old-format checkpoints too.
-            if isinstance(checkpoint, dict):
-                if "model_state_dict" in checkpoint:
-                    state_dict = checkpoint["model_state_dict"]
-                elif "model_state" in checkpoint:
-                    # legacy key from the previous classifier version
-                    state_dict = checkpoint["model_state"]
-                    print("⚠️  Loaded legacy checkpoint key 'model_state'. "
-                          "Re-train with chitchat_guardrail.py for best results.")
-                else:
-                    state_dict = checkpoint
-            else:
-                state_dict = checkpoint
-
-            self.classifier.load_state_dict(state_dict)
-            print(f"✓ Classifier loaded from '{classifier_model_path}' onto {self.device}")
-        else:
-            print(f"⚠️  Classifier checkpoint not found at '{classifier_model_path}'. "
-                  "Running without a trained model — all queries will be routed to RAG.")
-
-        # Move to device and lock into eval mode
         self.classifier.to(self.device)
         self.classifier.eval()
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Private helpers
-    # ─────────────────────────────────────────────────────────────────────────
+    @staticmethod
+    def _sha256_file(path: Path) -> str:
+        digest = hashlib.sha256()
+        with path.open("rb") as stream:
+            for block in iter(lambda: stream.read(1024 * 1024), b""):
+                digest.update(block)
+        return digest.hexdigest()
 
-    def _load_scenarios(self, path: str) -> List[Dict]:
+    def _validate_checkpoint_metadata(self, checkpoint: dict[str, Any]) -> None:
+        checks = {
+            "architecture": EXPECTED_ARCHITECTURE,
+            "embedding_dimension": JINA_DIM,
+            "embedding_role": EXPECTED_EMBEDDING_ROLE,
+            "embedding_prompt_name": EXPECTED_EMBEDDING_PROMPT,
+            "embedding_normalize": True,
+            "normalizer": "normalize_persian_text",
+        }
+        for key, expected in checks.items():
+            if checkpoint.get(key) != expected:
+                raise ValueError(
+                    f"Intent classifier checkpoint {key} must be {expected!r}"
+                )
+        label_map = {
+            str(key): value for key, value in checkpoint.get("label_map", {}).items()
+        }
+        if label_map != EXPECTED_LABEL_MAP:
+            raise ValueError("Intent classifier checkpoint label_map is incompatible")
+        selected_threshold = checkpoint.get("selected_threshold")
+        if not isinstance(selected_threshold, (int, float)) or not np.isclose(
+            float(selected_threshold), self.threshold, rtol=0.0, atol=1e-12
+        ):
+            raise ValueError(
+                "Configured intent threshold does not match checkpoint metadata"
+            )
+
+    @staticmethod
+    def _load_scenarios(path: str) -> list[dict[str, Any]]:
         if not os.path.exists(path):
             return []
-        with open(path, "r", encoding="utf-8") as f:
-            data = json.load(f)
-        return data.get("scenarios", [])
+        with open(path, "r", encoding="utf-8") as stream:
+            return json.load(stream).get("scenarios", [])
 
     async def _encode(self, query: str) -> np.ndarray:
-        """
-        Encode a single query through the configured TEI embedding callable.
-        """
         embedding = np.asarray(await self.embedding_model(query), dtype=np.float32)
         if embedding.shape != (JINA_DIM,):
             raise ValueError(
@@ -206,145 +171,97 @@ class IntentClassifier:
             )
         return embedding
 
-    # ─────────────────────────────────────────────────────────────────────────
-    # Public API
-    # ─────────────────────────────────────────────────────────────────────────
-
-    async def classify(self, query: str) -> Dict[str, Optional[str]]:
-        """
-        Classify a raw user query.
-
-        Args:
-            query : raw Persian (or mixed) user utterance
-
-        Returns:
-            {
-              "type"       : "general"  — route to RAG pipeline
-                           | "chitchat" — skip RAG, handle with polite deflection
-              "scenario_id": "chitchat" | None
-            }
-        """
+    async def classify(self, query: str) -> dict[str, str | None]:
         detailed = await self._classify_detailed(query)
-        return {
-            "type": detailed["type"],
-            "scenario_id": detailed["scenario_id"],
-        }
+        return {"type": detailed["type"], "scenario_id": detailed["scenario_id"]}
 
-    async def classify_detailed(self, query: str) -> Dict:
-        """
-        Extended version of classify() that also returns confidence scores.
-        Use this for logging, debugging, or threshold tuning.
-
-        Returns:
-            {
-              "type"            : "general" | "chitchat"
-              "scenario_id"     : "chitchat" | None
-              "class_id"        : 0 | 1
-              "confidence"      : float  — probability of the predicted class
-              "p_actionable"    : float  — probability of ACTIONABLE_INTENT
-              "p_chitchat"      : float  — probability of CHIT-CHAT
-              "route_to_rag"    : bool
-            }
-        """
+    async def classify_detailed(self, query: str) -> dict[str, Any]:
         return await self._classify_detailed(query)
 
-    async def _classify_detailed(self, query: str) -> Dict:
+    async def _classify_detailed(self, query: str) -> dict[str, Any]:
         started = time.perf_counter()
-        if not query or not query.strip():
-            result = {
-                "type"        : "general",
-                "scenario_id" : None,
-                "class_id"    : LABEL_ACTIONABLE,
-                "confidence"  : 1.0,
-                "p_actionable": 1.0,
-                "p_chitchat"  : 0.0,
-                "route_to_rag": True,
-                "preprocessed_query": "",
-            }
-            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-                stage=PipelineStage.INTENT,
-                input_data={"classifier_input": query},
-                output_data=result,
-                metrics={"effective_threshold": self.threshold},
-                duration_ms=(time.perf_counter() - started) * 1000,
-            ))
+        preprocessed_query = normalize_persian_text(query) if query else ""
+        if not preprocessed_query:
+            result = self._actionable_result(preprocessed_query)
+            self._emit_trace(started, query, result)
             return result
 
-        preprocessed_query = normalize_persian_text(query)
-        if not preprocessed_query:
-            result = {
-                "type": "general",
-                "scenario_id": None,
-                "class_id": LABEL_ACTIONABLE,
-                "confidence": 1.0,
-                "p_actionable": 1.0,
-                "p_chitchat": 0.0,
-                "route_to_rag": True,
-                "preprocessed_query": "",
-            }
-            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-                stage=PipelineStage.INTENT,
-                input_data={"classifier_input": query},
-                output_data=result,
-                metrics={"effective_threshold": self.threshold},
-                duration_ms=(time.perf_counter() - started) * 1000,
-            ))
-            return result
         embedding = await self._encode(preprocessed_query)
         if self.blocking_runner is not None:
-            class_id, confidence, p_act, p_chat = (
-                await self.blocking_runner.run(
-                    self._classify_embedding, embedding
-                )
-            )
+            values = await self.blocking_runner.run(self._classify_embedding, embedding)
         else:
-            class_id, confidence, p_act, p_chat = await asyncio.to_thread(
-                self._classify_embedding, embedding
-            )
-
+            values = await asyncio.to_thread(self._classify_embedding, embedding)
+        class_id, confidence, p_actionable, p_chitchat = values
         is_chitchat = class_id == LABEL_CHITCHAT
         result = {
-            "type"        : "chitchat" if is_chitchat else "general",
-            "scenario_id" : "chitchat" if is_chitchat else None,
-            "class_id"    : class_id,
-            "confidence"  : confidence,
-            "p_actionable": p_act,
-            "p_chitchat"  : p_chat,
+            "type": "chitchat" if is_chitchat else "general",
+            "scenario_id": "chitchat" if is_chitchat else None,
+            "class_id": class_id,
+            "selected_class": EXPECTED_LABEL_MAP[str(class_id)],
+            "confidence": confidence,
+            "p_actionable": p_actionable,
+            "p_chitchat": p_chitchat,
             "route_to_rag": not is_chitchat,
             "preprocessed_query": preprocessed_query,
+            "effective_threshold": self.threshold,
         }
-        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-            stage=PipelineStage.INTENT,
-            input_data={"classifier_input": query},
-            output_data=result,
-            metrics={
-                "effective_threshold": self.threshold,
-                "embedding_dimension": JINA_DIM,
-                "embedding_policy": "classification",
-            },
-            duration_ms=(time.perf_counter() - started) * 1000,
-        ))
+        self._emit_trace(started, query, result)
         return result
 
-    def _classify_embedding(self, embedding):
-        """Run the synchronous Torch forward pass outside the event loop."""
-        with self._inference_lock:
-            x = (
-                torch.tensor(embedding, dtype=torch.float32)
-                .to(self.device)
-                .unsqueeze(0)
+    def _actionable_result(self, preprocessed_query: str) -> dict[str, Any]:
+        return {
+            "type": "general",
+            "scenario_id": None,
+            "class_id": LABEL_ACTIONABLE,
+            "selected_class": EXPECTED_LABEL_MAP[str(LABEL_ACTIONABLE)],
+            "confidence": 1.0,
+            "p_actionable": 1.0,
+            "p_chitchat": 0.0,
+            "route_to_rag": True,
+            "preprocessed_query": preprocessed_query,
+            "effective_threshold": self.threshold,
+        }
+
+    def _emit_trace(
+        self, started: float, raw_query: str | None, result: dict[str, Any]
+    ) -> None:
+        emit_pipeline_stage_lazy(
+            lambda: PipelineStageResult(
+                stage=PipelineStage.INTENT,
+                input_data={"classifier_input": raw_query},
+                output_data=result,
+                metrics={
+                    "effective_threshold": self.threshold,
+                    "embedding_dimension": JINA_DIM,
+                    "embedding_role": EXPECTED_EMBEDDING_ROLE,
+                    "embedding_prompt_name": EXPECTED_EMBEDDING_PROMPT,
+                },
+                duration_ms=(time.perf_counter() - started) * 1000,
             )
+        )
+
+    def _classify_embedding(
+        self, embedding: np.ndarray
+    ) -> tuple[int, float, float, float]:
+        """Run a locked, eval-mode, no-grad Torch forward pass."""
+        if not self._checkpoint_loaded:
+            return LABEL_ACTIONABLE, 1.0, 1.0, 0.0
+        with self._inference_lock:
+            features = torch.as_tensor(
+                embedding, dtype=torch.float32, device=self.device
+            ).unsqueeze(0)
             with torch.no_grad():
-                logits = self.classifier(x)
-                probs = torch.softmax(logits, dim=1).squeeze()
+                probabilities = torch.softmax(
+                    self.classifier(features), dim=1
+                ).squeeze(0)
+            p_actionable = float(probabilities[LABEL_ACTIONABLE].item())
+            p_chitchat = float(probabilities[LABEL_CHITCHAT].item())
             class_id = (
-                LABEL_CHITCHAT
-                if float(probs[LABEL_CHITCHAT].item()) >= self.threshold
-                else LABEL_ACTIONABLE
+                LABEL_CHITCHAT if p_chitchat >= self.threshold else LABEL_ACTIONABLE
             )
             return (
                 class_id,
-                float(probs[class_id].item()),
-                float(probs[LABEL_ACTIONABLE].item()),
-                float(probs[LABEL_CHITCHAT].item()),
+                p_chitchat if class_id == LABEL_CHITCHAT else p_actionable,
+                p_actionable,
+                p_chitchat,
             )
