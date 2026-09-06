@@ -1,0 +1,215 @@
+{
+  "dataset": {
+    "path": "/root/projects/faq/training/intent_classifier/data/intent_classifier_finetune.csv",
+    "audit": {
+      "source_rows": 51750,
+      "empty_rows_excluded": 0,
+      "invalid_label_rows_excluded": 0,
+      "exact_duplicate_groups": 0,
+      "exact_duplicate_rows": 0,
+      "normalized_duplicate_groups": 1762,
+      "normalized_duplicate_rows_removed": 2393,
+      "conflicting_normalized_groups_excluded": 0,
+      "conflicting_normalized_samples_excluded": 0,
+      "existing_split_normalized_leakage_groups": 0,
+      "clean_rows": 49357
+    },
+    "clean_class_counts": {
+      "actionable": 23482,
+      "chitchat": 25875
+    },
+    "split_counts": {
+      "train": 39320,
+      "validation": 5013,
+      "test": 5024
+    },
+    "split_source": "existing_leakage_free_split",
+    "split_class_counts": {
+      "train": {
+        "0": 18619,
+        "1": 20701
+      },
+      "validation": {
+        "0": 2432,
+        "1": 2581
+      },
+      "test": {
+        "0": 2431,
+        "1": 2593
+      }
+    }
+  },
+  "training_seed": 42,
+  "dataset_fingerprint": "7dd26fbc69d1e29612daf89d13eed774ed0cc24021ea6c2563f67ce8fe1d2276",
+  "training_timestamp": "2026-09-06T06:39:12.812827+00:00",
+  "epochs_completed": 6,
+  "history": [
+    {
+      "epoch": 1,
+      "train_loss": 0.1212736760528563,
+      "validation_accuracy": 0.9980051865150609,
+      "validation_macro_f1": 0.9980036516488809,
+      "validation_actionable_recall": 1.0,
+      "selected_threshold": 0.7930683493614197,
+      "actionable_recall_constraint_met": true
+    },
+    {
+      "epoch": 2,
+      "train_loss": 0.01700606281042008,
+      "validation_accuracy": 1.0,
+      "validation_macro_f1": 1.0,
+      "validation_actionable_recall": 1.0,
+      "selected_threshold": 0.9489644765853882,
+      "actionable_recall_constraint_met": true
+    },
+    {
+      "epoch": 3,
+      "train_loss": 0.007401243417162831,
+      "validation_accuracy": 1.0,
+      "validation_macro_f1": 1.0,
+      "validation_actionable_recall": 1.0,
+      "selected_threshold": 0.9686146974563599,
+      "actionable_recall_constraint_met": true
+    },
+    {
+      "epoch": 4,
+      "train_loss": 0.004441375404005133,
+      "validation_accuracy": 1.0,
+      "validation_macro_f1": 1.0,
+      "validation_actionable_recall": 1.0,
+      "selected_threshold": 0.9772391319274902,
+      "actionable_recall_constraint_met": true
+    },
+    {
+      "epoch": 5,
+      "train_loss": 0.0028890057147166947,
+      "validation_accuracy": 1.0,
+      "validation_macro_f1": 1.0,
+      "validation_actionable_recall": 1.0,
+      "selected_threshold": 0.9875636100769043,
+      "actionable_recall_constraint_met": true
+    },
+    {
+      "epoch": 6,
+      "train_loss": 0.0021662737104316014,
+      "validation_accuracy": 1.0,
+      "validation_macro_f1": 1.0,
+      "validation_actionable_recall": 1.0,
+      "selected_threshold": 0.988457977771759,
+      "actionable_recall_constraint_met": true
+    }
+  ],
+  "selected_threshold": 0.9489644765853882,
+  "actionable_recall_constraint_met": true,
+  "validation_metrics": {
+    "count": 5013,
+    "accuracy": 1.0,
+    "macro_precision": 1.0,
+    "macro_recall": 1.0,
+    "macro_f1": 1.0,
+    "per_class": {
+      "banking": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 2432
+      },
+      "chitchat_nonbanking": {
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0,
+        "support": 2581
+      }
+    },
+    "confusion_matrix": [
+      [
+        2432,
+        0
+      ],
+      [
+        0,
+        2581
+      ]
+    ],
+    "banking_misrouted_to_chitchat": 0,
+    "banking_misrouted_to_chitchat_rate": 0.0,
+    "nonbanking_misrouted_to_banking": 0,
+    "nonbanking_misrouted_to_banking_rate": 0.0,
+    "threshold": 0.9489644765853882,
+    "actionable": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 2432
+    },
+    "chitchat": {
+      "precision": 1.0,
+      "recall": 1.0,
+      "f1": 1.0,
+      "support": 2581
+    }
+  },
+  "test_metrics": {
+    "count": 5024,
+    "accuracy": 0.9998009554140127,
+    "macro_precision": 0.9997944078947368,
+    "macro_recall": 0.9998071731585036,
+    "macro_f1": 0.9998007507935365,
+    "per_class": {
+      "banking": {
+        "precision": 0.9995888157894737,
+        "recall": 1.0,
+        "f1": 0.9997943656179313,
+        "support": 2431
+      },
+      "chitchat_nonbanking": {
+        "precision": 1.0,
+        "recall": 0.9996143463170073,
+        "f1": 0.9998071359691417,
+        "support": 2593
+      }
+    },
+    "confusion_matrix": [
+      [
+        2431,
+        0
+      ],
+      [
+        1,
+        2592
+      ]
+    ],
+    "banking_misrouted_to_chitchat": 0,
+    "banking_misrouted_to_chitchat_rate": 0.0,
+    "nonbanking_misrouted_to_banking": 1,
+    "nonbanking_misrouted_to_banking_rate": 0.0003856536829926726,
+    "threshold": 0.9489644765853882,
+    "actionable": {
+      "precision": 0.9995888157894737,
+      "recall": 1.0,
+      "f1": 0.9997943656179313,
+      "support": 2431
+    },
+    "chitchat": {
+      "precision": 1.0,
+      "recall": 0.9996143463170073,
+      "f1": 0.9998071359691417,
+      "support": 2593
+    }
+  },
+  "checkpoint_path": "/root/projects/faq/training/artifacts/intent_guardrail_jina_retrieval_query_v1.pt",
+  "checkpoint_sha256": "b1fc70b44eb7b1e1b050d87b137adcd669fd05e44d89cee0046e0f727244c87a",
+  "embedding_policy": {
+    "source": "TEI retrieval-query",
+    "cache_policy": "retrieval_query_v1",
+    "dimension": 1024,
+    "role": "retrieval_query",
+    "prompt_name": "query",
+    "normalize": true,
+    "normalizer": "normalize_persian_text",
+    "client": "TeiEmbeddingClient.embed_query",
+    "payload_builder": "build_query_payload",
+    "embedding_model": "/root/models/models--jinaai--jina-embeddings-v5-text-small-retrieval",
+    "tei_endpoint_identity": "http://localhost:7997/embed"
+  }
+}
