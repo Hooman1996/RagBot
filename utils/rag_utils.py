@@ -6,6 +6,69 @@ import re
 from collections import defaultdict
 from typing import List, Dict
 
+from utils.persian_normalization import normalize_persian_text
+
+
+_QUESTION_PATTERN = re.compile(
+    r"(?:^|\n)\s*question\s*:\s*"
+    r"(.+?)(?=(?:\n\s*)?answer\s*\d*\s*:|"
+    r"(?:\n\s*)?question\s+category\s*:|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_CATEGORY_PATTERN = re.compile(
+    r"question\s+category\s*:\s*"
+    r"(.+?)(?=\s*[.،؛|]?\s*sub\s*_\s*category\s*:|$)",
+    re.IGNORECASE | re.DOTALL,
+)
+_SUBCATEGORY_PATTERN = re.compile(
+    r"sub\s*_\s*category\s*:\s*(.*?)\s*$",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _clean_category_field(value: str) -> str:
+    return value.strip().strip(" .،؛:|«»")
+
+
+def parse_faq_relevance_fields(content: str) -> dict[str, str]:
+    """Extract only the FAQ fields used to judge retrieval relevance."""
+
+    value = str(content or "")
+    question_match = _QUESTION_PATTERN.search(value)
+    category_match = _CATEGORY_PATTERN.search(value)
+    subcategory_match = _SUBCATEGORY_PATTERN.search(value)
+    return {
+        "question": question_match.group(1).strip() if question_match else "",
+        "main_category": (
+            _clean_category_field(category_match.group(1))
+            if category_match
+            else ""
+        ),
+        "sub_category": (
+            _clean_category_field(subcategory_match.group(1))
+            if subcategory_match
+            else ""
+        ),
+    }
+
+
+def build_faq_rerank_text(content: str) -> str:
+    """Build normalized BGE scoring text without including an FAQ answer."""
+
+    fields = parse_faq_relevance_fields(content)
+    lines = []
+    for label, key in (
+        ("سوال", "question"),
+        ("دسته‌بندی", "main_category"),
+        ("زیردسته", "sub_category"),
+    ):
+        normalized_value = normalize_persian_text(fields[key])
+        if normalized_value:
+            lines.append(f"{label}: {normalized_value}")
+    if lines:
+        return "\n".join(lines)
+    return normalize_persian_text(content)
+
 def parse_content(content: str) -> dict:
     """Extract question, answers and category from a chunk text."""
     question_match = re.search(r'question\s*:\s*(.+?)(?=answer\s*\d*\s*:|question category\s*:|$)', content, re.DOTALL)

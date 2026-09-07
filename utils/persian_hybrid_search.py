@@ -44,6 +44,7 @@ from utils.tei_embedding_client import (
     validate_embedding_response,
 )
 from utils.persian_normalization import normalize_persian_text
+from utils.rag_utils import build_faq_rerank_text
 from utils.revision_cache import RevisionAwareCache
 
 @dataclass
@@ -749,28 +750,37 @@ class PersianHybridSearch:
         candidates: list[SearchResult],
         top_k: int,
     ) -> list[SearchResult]:
-        """Rerank full answer chunks once while preserving first-stage scores."""
+        """Rerank FAQ intent fields once while preserving full answer chunks."""
 
         if top_k < 1:
             raise ValueError("top_k must be at least 1")
         rerank_started = time.perf_counter()
         normalized_query = normalize_persian_text(query)
         texts = [
-            normalize_persian_text(candidate.content)
+            build_faq_rerank_text(candidate.content)
             for candidate in candidates
         ]
-        candidate_rows = [
-            {
-                "chunk_id": str(candidate.doc_id),
-                "original_rrf_rank": (
-                    candidate.original_rrf_rank or input_rank
-                ),
-                "hybrid_score": candidate.score,
-                "bm25_score": candidate.bm25_score,
-                "semantic_score": candidate.semantic_score,
-            }
-            for input_rank, candidate in enumerate(candidates, start=1)
-        ]
+        rerank_text_by_candidate_id = {
+            id(candidate): rerank_text
+            for candidate, rerank_text in zip(candidates, texts)
+        }
+
+        def candidate_rows() -> list[dict]:
+            return [
+                {
+                    "chunk_id": str(candidate.doc_id),
+                    "original_rrf_rank": (
+                        candidate.original_rrf_rank or input_rank
+                    ),
+                    "hybrid_score": candidate.score,
+                    "bm25_score": candidate.bm25_score,
+                    "semantic_score": candidate.semantic_score,
+                    "rerank_text": rerank_text,
+                }
+                for input_rank, (candidate, rerank_text) in enumerate(
+                    zip(candidates, texts), start=1
+                )
+            ]
 
         if not candidates:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
@@ -869,7 +879,7 @@ class PersianHybridSearch:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.RERANK,
                 status="ERROR",
-                input_data={"candidates": candidate_rows},
+                input_data={"candidates": candidate_rows()},
                 metrics={
                     "purpose": "answer_context",
                     "candidate_count": len(candidates),
@@ -902,6 +912,10 @@ class PersianHybridSearch:
                 original_rrf_rank,
             ) in enumerate(scored_candidates, start=1)
         ]
+        ranked_texts = [
+            rerank_text_by_candidate_id[id(candidate)]
+            for candidate, _score, _original_rrf_rank in scored_candidates
+        ]
         selected_count = min(top_k, len(ranked_candidates))
         ranking_rows = [
             {
@@ -923,16 +937,17 @@ class PersianHybridSearch:
             )
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.RERANK,
-            input_data={"candidates": candidate_rows},
+            input_data={"candidates": candidate_rows()},
             output_data={
                 "rankings": [
                     {
                         **ranking,
+                        "rerank_text": rerank_text,
                         "content": candidate.content,
                         "metadata": candidate.metadata or {},
                     }
-                    for candidate, ranking in zip(
-                        ranked_candidates, ranking_rows
+                    for candidate, ranking, rerank_text in zip(
+                        ranked_candidates, ranking_rows, ranked_texts
                     )
                 ]
             },

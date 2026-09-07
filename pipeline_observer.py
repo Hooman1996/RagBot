@@ -457,7 +457,10 @@ class TerminalPipelineObserver:
                 if value is not None:
                     lines.append(f"{label:<16}: {value}")
             lines.append("")
-            lines.append("CONTENT:")
+            lines.append("BGE INPUT:")
+            lines.append(f"   {str(candidate.get('rerank_text') or '')}")
+            lines.append("")
+            lines.append("ORIGINAL CONTENT:")
             lines.append(f"   {self._chunk_preview(str(candidate.get('content') or ''))}")
             lines.append(_SUBRULE)
 
