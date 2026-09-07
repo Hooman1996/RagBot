@@ -243,7 +243,7 @@ def upgrade():
         sa.ForeignKeyConstraint(["run_turn_id"], ["evaluation.run_turns.id"], ondelete="CASCADE", name="fk_stage_results_run_turn"),
         sa.UniqueConstraint("run_turn_id", "stage_name", name="uq_stage_results_stage"),
         sa.UniqueConstraint("run_turn_id", "stage_order", name="uq_stage_results_order"),
-        sa.CheckConstraint("stage_name in ('NORMALIZATION','INTENT','REWRITE','RETRIEVAL','RERANK','CONTEXT_SELECTION','PROMPT_BUILD','GENERATION')", name="ck_stage_results_name"),
+        sa.CheckConstraint("stage_name in ('NORMALIZATION','HISTORY','REWRITE','INTENT','RETRIEVAL','RERANK','CONTEXT_SELECTION','PROMPT_BUILD','GENERATION')", name="ck_stage_results_name"),
         sa.CheckConstraint("stage_order >= 0", name="ck_stage_results_order"),
         sa.CheckConstraint("duration_ms is null or duration_ms >= 0", name="ck_stage_results_duration"),
         sa.CheckConstraint("input_hash is null or length(input_hash) = 64", name="ck_stage_results_input_hash"),

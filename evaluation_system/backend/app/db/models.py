@@ -354,7 +354,7 @@ class StageResult(EvaluationBase):
         UniqueConstraint("run_turn_id", "stage_name", name="uq_stage_results_stage"),
         UniqueConstraint("run_turn_id", "stage_order", name="uq_stage_results_order"),
         CheckConstraint(
-            "stage_name in ('NORMALIZATION','INTENT','REWRITE','RETRIEVAL','RERANK','CONTEXT_SELECTION','PROMPT_BUILD','GENERATION')",
+            "stage_name in ('NORMALIZATION','HISTORY','REWRITE','INTENT','RETRIEVAL','RERANK','CONTEXT_SELECTION','PROMPT_BUILD','GENERATION')",
             name="ck_stage_results_name",
         ),
         CheckConstraint("stage_order >= 0", name="ck_stage_results_order"),
