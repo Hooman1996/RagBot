@@ -8,6 +8,7 @@ import time
 from utils.persian_normalization import normalize_persian_text
 from conversation_history import format_rewrite_history
 from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.service_errors import ModelContextLengthError
 from pipeline_observer import (
     PipelineStage,
     PipelineStageResult,
@@ -236,7 +237,27 @@ class HistoryRewritingService:
         rewrite_prompt = self.config.QUERY_REWRITE_PROMPT.format(
             current_history=current_summary, current_query=current_query
         )
-        final_query = await self.rag_system.generate_text(rewrite_prompt)
+        try:
+            final_query = await self.rag_system.generate_text(rewrite_prompt)
+        except ModelContextLengthError:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.REWRITE,
+                status="FALLBACK",
+                input_data={
+                    "history_used": current_summary,
+                    "original_query": current_query,
+                },
+                output_data={"rewritten_query": current_query},
+                metrics={
+                    "model": getattr(self.rag_system, "model_id", None),
+                    "fallback_used": True,
+                    "fallback_reason": "REWRITE_CONTEXT_LIMIT",
+                },
+                duration_ms=(time.perf_counter() - started) * 1000,
+                error_code="MODEL_CONTEXT_LIMIT",
+                error_data={"error_type": "ModelContextLengthError"},
+            ))
+            return current_query
         extracted, fallback_mode = extract_rewritten_query_detailed(
             final_query, current_query
         )

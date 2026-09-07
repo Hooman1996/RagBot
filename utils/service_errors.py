@@ -30,6 +30,10 @@ class ServiceProtocolError(ServiceError, ValueError):
     status_code = 502
 
 
+class ModelContextLengthError(ServiceProtocolError):
+    error_code = "MODEL_CONTEXT_LIMIT"
+
+
 class ServiceOverloadedError(ServiceError):
     error_code = "SERVICE_BUSY"
     status_code = 503

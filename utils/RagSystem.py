@@ -21,6 +21,8 @@ import httpx
 from utils.concurrency import BoundedBlockingRunner
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import (
+    ModelContextLengthError,
+    ServiceProtocolError,
     ServiceTimeoutError,
     ServiceUnavailableError,
 )
@@ -208,7 +210,20 @@ class RAGSystem:
         except APITimeoutError as exc:
             self._vllm_timeout_total += 1
             raise ServiceTimeoutError("Language model service timed out") from exc
-        except (APIConnectionError, APIStatusError) as exc:
+        except APIStatusError as exc:
+            body = exc.body if isinstance(exc.body, dict) else {}
+            if exc.status_code == 400 and body.get("param") == "input_tokens":
+                raise ModelContextLengthError(
+                    "Language model context limit exceeded"
+                ) from exc
+            if 400 <= exc.status_code < 500:
+                raise ServiceProtocolError(
+                    "Language model rejected the request"
+                ) from exc
+            raise ServiceUnavailableError(
+                "Language model service is unavailable"
+            ) from exc
+        except APIConnectionError as exc:
             raise ServiceUnavailableError(
                 "Language model service is unavailable"
             ) from exc
