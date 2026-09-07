@@ -9,6 +9,7 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from new_architecture.app.config import Config
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.retrieval_query_canonicalizer import (
     RETRIEVAL_QUERY_ALIASES_PATH,
@@ -40,9 +41,18 @@ def build_config_snapshot(
     rewriter = getattr(answering_service, "history_rewriting_service", None)
     rewrite_prompt = getattr(getattr(rewriter, "config", None), "QUERY_REWRITE_PROMPT", None)
     try:
-        answer_prompt_source = inspect.getsource(type(rag).answer) if rag is not None else None
+        answer_method_source = inspect.getsource(type(rag).answer) if rag is not None else None
     except (OSError, TypeError):
-        answer_prompt_source = None
+        answer_method_source = None
+    answer_prompt_source = "\n".join(filter(None, (
+        answer_method_source,
+        Config.CHITCHAT_SYSTEM_PROMPT,
+        Config.CHITCHAT_USER_PROMPT,
+        Config.DOCUMENT_RAG_SYSTEM_PROMPT,
+        Config.DOCUMENT_RAG_USER_PROMPT,
+        Config.GENERAL_RAG_SYSTEM_PROMPT,
+        Config.GENERAL_RAG_USER_PROMPT,
+    )))
     return {
         "schema_version": "evaluation-config-v1",
         "intent": {

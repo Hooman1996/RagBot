@@ -488,19 +488,25 @@ class TerminalPipelineObserver:
         generation: PipelineStageResult | None,
     ) -> None:
         self._section(lines, "[10] GENERATION PROMPT", self._duration(prompt))
-        prompt_text = str(self._output(prompt, "prompt", ""))
+        system_message = str(self._output(prompt, "system_message", ""))
+        user_prompt = str(self._output(prompt, "user_prompt", ""))
         model = self._metric(generation, "model")
-        lines.append(f"Prompt chars : {len(prompt_text)}")
+        lines.append(f"System prompt chars : {len(system_message)}")
+        lines.append(f"User prompt chars   : {len(user_prompt)}")
         if model is not None:
-            lines.append(f"Model        : {model}")
+            lines.append(f"Model               : {model}")
         if not self.settings.displays("prompt"):
             return
-        system_message = self._output(prompt, "system_message")
-        lines.extend(["", "----- BEGIN FINAL LLM PROMPT -----"])
-        if system_message is not None:
-            lines.extend(["[SYSTEM]", str(system_message), "", "[USER]"])
-        lines.append(prompt_text)
-        lines.append("----- END FINAL LLM PROMPT -------")
+        lines.extend([
+            "",
+            "----- BEGIN SYSTEM PROMPT -----",
+            system_message,
+            "----- END SYSTEM PROMPT -------",
+            "",
+            "----- BEGIN USER PROMPT -------",
+            user_prompt,
+            "----- END USER PROMPT ---------",
+        ])
 
     def _render_timings(self, lines: list[str], result: Any) -> None:
         lines.extend([_RULE, "TIMINGS", _RULE])

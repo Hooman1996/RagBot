@@ -6,6 +6,8 @@ import types
 import unittest
 from pathlib import Path
 
+from utils.service_errors import ModelContextLengthError
+
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -207,6 +209,25 @@ class RewritingContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(rewritten, "standalone rewrite")
         self.assertEqual(summary, "<rewrite>standalone rewrite</rewrite>")
         self.assertEqual(len(rag.calls), 2)
+
+    async def test_rewrite_context_limit_falls_back_to_original_query(self):
+        class Rag:
+            model_id = "/app/model"
+
+            async def generate_text(self, _prompt):
+                raise ModelContextLengthError(
+                    "Language model context limit exceeded"
+                )
+
+        service = self.module.HistoryRewritingService.__new__(
+            self.module.HistoryRewritingService
+        )
+        service.rag_system = Rag()
+        service.config = sys.modules["new_architecture.app.config"].Config()
+
+        rewritten = await service.rewrite_query("original", "history")
+
+        self.assertEqual(rewritten, "original")
 
 
 class AgentServiceContractTests(unittest.IsolatedAsyncioTestCase):
