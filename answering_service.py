@@ -146,50 +146,19 @@ class AnsweringService:
                 query_fingerprint(normalized_query),
             )
 
-        classify_detailed = getattr(
-            self.intent_classifier, "classify_detailed", None
-        ) or self.intent_classifier.classify
-        classified = await self._timed(
-            timings,
-            "intent_classification",
-            classify_detailed(normalized_query),
-        )
-        intent_details = dict(classified)
-        intent_data = {
-            "type": classified.get("type") or "general",
-            "scenario_id": classified.get("scenario_id"),
-        }
-        intent = str(intent_data.get("type") or "general")
-        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-            stage=PipelineStage.INTENT,
-            input_data={"classifier_input": normalized_query},
-            output_data=intent_details,
-            metrics={
-                "effective_threshold": getattr(
-                    self.intent_classifier, "threshold", None
-                )
-            },
-            duration_ms=timings.get("intent_classification"),
-        ))
-
-        canonical_retrieval_query = normalized_query
-        if intent == "general":
-            canonical_retrieval_query = canonicalize_retrieval_query(
-                normalized_query
-            )
-
-        rewritten_query = canonical_retrieval_query
-        final_retrieval_query = canonical_retrieval_query
-        rewrite_used = False
-        history_messages: list[dict[str, str]] = []
         provider = history_provider or self.history_provider
-        enforce_history_policy(provider, execution_policy)
         conversation_key = (
             request.conversation_key
             if request.conversation_key is not None
             else request.session_id
         )
-        if request.use_history and intent != "chitchat":
+        enforce_history_policy(provider, execution_policy)
+
+        history_messages: list[dict[str, str]] = []
+        history = NO_CONVERSATION_HISTORY
+        rewritten_query = normalized_query
+        rewrite_used = False
+        if request.use_history:
             if conversation_key is None:
                 raise ValueError("session_id is required when history is enabled")
             if provider is None:
@@ -211,42 +180,42 @@ class AnsweringService:
                     )
                 )
                 history = format_rewrite_history(history_messages, max_turns=3)
-            if history and history.strip() != NO_CONVERSATION_HISTORY:
-                rewritten_query = await self._timed(
+
+            history_text = str(history or "").strip()
+            real_history_exists = bool(
+                history_text and history_text != NO_CONVERSATION_HISTORY
+            )
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.HISTORY,
+                output_data={"real_history_exists": real_history_exists},
+                metrics={
+                    "history_message_count": len(history_messages),
+                    "source": "provider" if provider is not None else "fallback",
+                },
+                duration_ms=timings.get("history"),
+            ))
+            if real_history_exists:
+                rewrite_result = await self._timed(
                     timings,
                     "rewrite",
                     self.history_rewriting_service.rewrite_query(
-                        current_query=canonical_retrieval_query,
+                        current_query=normalized_query,
                         current_summary=history,
                     ),
                 )
-                rewritten_query = normalize_persian_text(rewritten_query)
-                final_retrieval_query = rewritten_query
                 rewrite_used = True
-                emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-                    stage=PipelineStage.REWRITE,
-                    input_data={
-                        "normalized_query": normalized_query,
-                        "canonical_retrieval_query": canonical_retrieval_query,
-                    },
-                    output_data={
-                        "rewritten_query": rewritten_query,
-                        "final_retrieval_query": final_retrieval_query,
-                    },
-                    metrics={"rewrite_used": True},
-                    duration_ms=timings.get("rewrite"),
-                ))
+                normalized_rewrite = normalize_persian_text(
+                    str(rewrite_result or "").strip()
+                )
+                rewritten_query = normalized_rewrite or normalized_query
             else:
                 emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                     stage=PipelineStage.REWRITE,
                     status="SKIPPED",
-                    input_data={
-                        "normalized_query": normalized_query,
-                        "canonical_retrieval_query": canonical_retrieval_query,
-                    },
+                    input_data={"normalized_query": normalized_query},
                     output_data={
-                        "rewritten_query": canonical_retrieval_query,
-                        "final_retrieval_query": canonical_retrieval_query,
+                        "rewritten_query": normalized_query,
+                        "classification_query": normalized_query,
                     },
                     metrics={
                         "rewrite_used": False,
@@ -254,21 +223,67 @@ class AnsweringService:
                     },
                     duration_ms=0.0,
                 ))
-        elif intent == "chitchat":
+        else:
+            real_history_exists = False
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.HISTORY,
+                status="SKIPPED",
+                output_data={"real_history_exists": False},
+                metrics={"reason": "HISTORY_DISABLED"},
+                duration_ms=0.0,
+            ))
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.REWRITE,
                 status="SKIPPED",
-                input_data={
-                    "normalized_query": normalized_query,
-                    "canonical_retrieval_query": canonical_retrieval_query,
-                },
+                input_data={"normalized_query": normalized_query},
                 output_data={
                     "rewritten_query": normalized_query,
-                    "final_retrieval_query": normalized_query,
+                    "classification_query": normalized_query,
                 },
-                metrics={"rewrite_used": False, "reason": "CHITCHAT"},
+                metrics={
+                    "rewrite_used": False,
+                    "reason": "HISTORY_DISABLED",
+                },
                 duration_ms=0.0,
             ))
+
+        classification_query = (
+            rewritten_query if rewrite_used else normalized_query
+        )
+        classify_detailed = getattr(
+            self.intent_classifier, "classify_detailed", None
+        ) or self.intent_classifier.classify
+        classified = await self._timed(
+            timings,
+            "intent_classification",
+            classify_detailed(classification_query),
+        )
+        intent_details = dict(classified)
+        intent_data = {
+            "type": classified.get("type") or "general",
+            "scenario_id": classified.get("scenario_id"),
+        }
+        intent = str(intent_data.get("type") or "general")
+        emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+            stage=PipelineStage.INTENT,
+            input_data={"classifier_input": classification_query},
+            output_data=intent_details,
+            metrics={
+                "effective_threshold": getattr(
+                    self.intent_classifier, "threshold", None
+                )
+            },
+            duration_ms=timings.get("intent_classification"),
+        ))
+
+        canonical_retrieval_query = classification_query
+        if intent == "general":
+            canonical_retrieval_query = canonicalize_retrieval_query(
+                classification_query
+            )
+        final_retrieval_query = canonical_retrieval_query
+
+        if intent == "chitchat":
             for skipped_stage in (
                 PipelineStage.RETRIEVAL,
                 PipelineStage.RERANK,
@@ -277,29 +292,11 @@ class AnsweringService:
                 emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                     stage=skipped_stage,
                     status="SKIPPED",
-                    input_data={"query": normalized_query},
+                    input_data={"query": final_retrieval_query},
                     output_data={"candidates": []},
                     metrics={"reason": "CHITCHAT"},
                     duration_ms=0.0,
                 ))
-        else:
-            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
-                stage=PipelineStage.REWRITE,
-                status="SKIPPED",
-                input_data={
-                    "normalized_query": normalized_query,
-                    "canonical_retrieval_query": canonical_retrieval_query,
-                },
-                output_data={
-                    "rewritten_query": canonical_retrieval_query,
-                    "final_retrieval_query": canonical_retrieval_query,
-                },
-                metrics={
-                    "rewrite_used": False,
-                    "reason": "HISTORY_DISABLED",
-                },
-                duration_ms=0.0,
-            ))
 
         if trace is not None:
             trace.set_diagnostic(

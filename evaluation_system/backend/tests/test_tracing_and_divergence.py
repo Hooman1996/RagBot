@@ -21,7 +21,7 @@ class TraceTests(unittest.TestCase):
         self.assertEqual(
             {stage.value for stage in PipelineStage},
             {
-                "NORMALIZATION", "INTENT", "REWRITE", "RETRIEVAL",
+                "NORMALIZATION", "HISTORY", "REWRITE", "INTENT", "RETRIEVAL",
                 "RERANK", "CONTEXT_SELECTION", "PROMPT_BUILD", "GENERATION",
             },
         )

@@ -24,19 +24,30 @@ class ImmediateRunner:
 
 
 class HistoryProvider:
-    def __init__(self, namespace, messages):
+    def __init__(self, namespace, messages, events=None):
         self.namespace = namespace
         self.messages = messages
+        self.events = events
         self.keys = []
 
     async def load_rewrite_messages(self, key):
         self.keys.append(key)
+        if self.events is not None:
+            self.events.append((self.namespace, "history"))
         return self.messages
 
 
 class Classifier:
     threshold = 0.875
+
+    def __init__(self, events=None):
+        self.events = events
+        self.queries = []
+
     async def classify_detailed(self, query):
+        self.queries.append(query)
+        if self.events is not None:
+            self.events.append(("shared", "classify"))
         return {
             "type": "general",
             "scenario_id": None,
@@ -47,7 +58,14 @@ class Classifier:
 
 
 class Rewriter:
+    def __init__(self, events=None):
+        self.events = events
+        self.calls = []
+
     async def rewrite_query(self, current_query, current_summary):
+        self.calls.append((current_query, current_summary))
+        if self.events is not None:
+            self.events.append(("shared", "rewrite"))
         return f"{current_query}|{current_summary}"
 
 
@@ -149,15 +167,18 @@ class CoreParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(production.keys, [])
 
     async def test_production_and_evaluation_use_same_executor_dependencies(self):
+        events = []
         agent = Agent()
+        classifier = Classifier(events)
+        rewriter = Rewriter(events)
         service = AnsweringService(
-            agent_service=agent, intent_classifier=Classifier(),
-            history_rewriting_service=Rewriter(), text_processor=Processor(),
+            agent_service=agent, intent_classifier=classifier,
+            history_rewriting_service=rewriter, text_processor=Processor(),
             blocking_runner=ImmediateRunner(), category_resolver=lambda _doc: "FAQ",
         )
         messages = [{"role": "user", "content": "Q1"}, {"role": "assistant", "content": "A1"}]
-        production = HistoryProvider("production", messages)
-        evaluation = HistoryProvider("evaluation", messages)
+        production = HistoryProvider("production", messages, events)
+        evaluation = HistoryProvider("evaluation", messages, events)
         source_session_id = "REAL_LOOKING_SESSION_12345"
         evaluation_key = object()
         common = AnswerRequestContext(
@@ -179,6 +200,20 @@ class CoreParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertNotIn(source_session_id, evaluation.keys)
         self.assertEqual(agent.calls[0]["retrieval_query"], agent.calls[1]["retrieval_query"])
         self.assertIs(agent.calls[1]["execution_policy"], EVALUATION_EXECUTION_POLICY)
+        expected_classifier_input = "Q2|User: Q1 AI: A1"
+        self.assertEqual(classifier.queries, [
+            expected_classifier_input,
+            expected_classifier_input,
+        ])
+        self.assertEqual(len(rewriter.calls), 2)
+        self.assertEqual(events, [
+            ("production", "history"),
+            ("shared", "rewrite"),
+            ("shared", "classify"),
+            ("evaluation", "history"),
+            ("shared", "rewrite"),
+            ("shared", "classify"),
+        ])
         self.assertEqual(production_result.intent_details["confidence"], 0.91)
         self.assertEqual(evaluation_result.intent_details["confidence"], 0.91)
 

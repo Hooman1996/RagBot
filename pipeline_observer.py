@@ -19,8 +19,9 @@ from typing import Any, Iterator, Protocol, runtime_checkable
 
 class PipelineStage(StrEnum):
     NORMALIZATION = "NORMALIZATION"
-    INTENT = "INTENT"
+    HISTORY = "HISTORY"
     REWRITE = "REWRITE"
+    INTENT = "INTENT"
     RETRIEVAL = "RETRIEVAL"
     RERANK = "RERANK"
     CONTEXT_SELECTION = "CONTEXT_SELECTION"
@@ -30,13 +31,14 @@ class PipelineStage(StrEnum):
 
 STAGE_ORDER: dict[PipelineStage, int] = {
     PipelineStage.NORMALIZATION: 10,
-    PipelineStage.INTENT: 20,
+    PipelineStage.HISTORY: 20,
     PipelineStage.REWRITE: 30,
-    PipelineStage.RETRIEVAL: 40,
-    PipelineStage.RERANK: 50,
-    PipelineStage.CONTEXT_SELECTION: 60,
-    PipelineStage.PROMPT_BUILD: 70,
-    PipelineStage.GENERATION: 80,
+    PipelineStage.INTENT: 40,
+    PipelineStage.RETRIEVAL: 50,
+    PipelineStage.RERANK: 60,
+    PipelineStage.CONTEXT_SELECTION: 70,
+    PipelineStage.PROMPT_BUILD: 80,
+    PipelineStage.GENERATION: 90,
 }
 
 
