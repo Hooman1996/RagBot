@@ -392,6 +392,49 @@ def _specs() -> dict[str, VariableSpec]:
         "RAG_REWRITE_MAX_TOKENS": VariableSpec(
             kind="int", default="1000", minimum=1, component="vLLM generation", restart="FastAPI"
         ),
+        # Opt-in, terminal-only pipeline inspection.
+        "RAG_PIPELINE_DEBUG": VariableSpec(
+            kind="bool", default="false", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_QUERY": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_NORMALIZATION": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_HISTORY": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_REWRITE": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_INTENT": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_RETRIEVAL": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_RERANK": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_CONTEXT": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_PROMPT": VariableSpec(
+            kind="bool", default="false", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_ANSWER": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_TIMINGS": VariableSpec(
+            kind="bool", default="true", component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_CHUNK_MAX_CHARS": VariableSpec(
+            kind="int", default="1200", minimum=0, component="Terminal debugger", restart="FastAPI"
+        ),
+        "RAG_PIPELINE_DEBUG_FULL_CHUNKS": VariableSpec(
+            kind="bool", default="false", component="Terminal debugger", restart="FastAPI"
+        ),
         # Inactive SQLAlchemy pool.
         "SQLALCHEMY_POOL_SIZE": VariableSpec(
             kind="int", default="5", minimum=1, component="Legacy SQLAlchemy pool", restart="legacy command only", usage="legacy or inactive"

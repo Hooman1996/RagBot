@@ -31,6 +31,7 @@ from pipeline_observer import (
     PipelineStage,
     PipelineStageResult,
     emit_pipeline_stage_lazy,
+    pipeline_hashes_enabled,
     stable_hash,
 )
 import time
@@ -279,7 +280,11 @@ def make_handle_general(rag_system):
                 ],
                 "selected_context": selected_context,
             },
-            metrics={"selected_context_hash": stable_hash(selected_context)},
+            metrics=(
+                {"selected_context_hash": stable_hash(selected_context)}
+                if pipeline_hashes_enabled()
+                else {}
+            ),
             duration_ms=(time.perf_counter() - context_started) * 1000,
         ))
         answer = await rag_system.answer(

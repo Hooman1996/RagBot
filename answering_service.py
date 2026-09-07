@@ -11,6 +11,10 @@ from utils.request_instrumentation import trace_span
 from utils.service_errors import InvalidRequestError
 from utils.persian_normalization import normalize_persian_text, query_fingerprint
 from utils.request_instrumentation import current_trace
+from utils.performance_config import (
+    PIPELINE_DEBUG_SETTINGS,
+    PipelineDebugSettings,
+)
 from conversation_history import (
     NO_CONVERSATION_HISTORY,
     PRODUCTION_EXECUTION_POLICY,
@@ -25,7 +29,9 @@ from pipeline_observer import (
     PipelineObserver,
     PipelineStage,
     PipelineStageResult,
+    TerminalPipelineObserver,
     bind_pipeline_observer,
+    combine_pipeline_observers,
     emit_pipeline_stage_lazy,
     stable_hash,
 )
@@ -79,6 +85,7 @@ class AnsweringService:
         category_resolver: Callable[[str], str],
         selection_validator: Callable[[list[str]], list[str]] | None = None,
         history_provider: ConversationHistoryProvider | None = None,
+        pipeline_debug_settings: PipelineDebugSettings | None = None,
     ):
         self.agent_service = agent_service
         self.intent_classifier = intent_classifier
@@ -88,6 +95,11 @@ class AnsweringService:
         self.category_resolver = category_resolver
         self.selection_validator = selection_validator
         self.history_provider = history_provider
+        self.pipeline_debug_settings = (
+            pipeline_debug_settings
+            if pipeline_debug_settings is not None
+            else PIPELINE_DEBUG_SETTINGS
+        )
 
     async def answer(
         self,
@@ -97,15 +109,51 @@ class AnsweringService:
         observer: PipelineObserver | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
     ) -> AnswerResult:
-        with bind_pipeline_observer(observer):
-            operation = self._answer(
-                request,
-                history_provider=history_provider,
-                execution_policy=execution_policy,
+        terminal_observer = self._terminal_observer(request)
+        active_observer = combine_pipeline_observers(observer, terminal_observer)
+        try:
+            with bind_pipeline_observer(active_observer):
+                operation = self._answer(
+                    request,
+                    history_provider=history_provider,
+                    execution_policy=execution_policy,
+                )
+                if request.timeout_seconds is None:
+                    result = await operation
+                else:
+                    result = await asyncio.wait_for(
+                        operation, timeout=request.timeout_seconds
+                    )
+        except BaseException as exc:
+            if terminal_observer is not None:
+                terminal_observer.finish(error=exc)
+            raise
+        if terminal_observer is not None:
+            terminal_observer.finish(result=result)
+        return result
+
+    def _terminal_observer(
+        self, request: AnswerRequestContext
+    ) -> TerminalPipelineObserver | None:
+        if not self.pipeline_debug_settings.enabled:
+            return None
+        try:
+            trace = current_trace()
+            conversation_key = (
+                request.conversation_key
+                if request.conversation_key is not None
+                else request.session_id
             )
-            if request.timeout_seconds is None:
-                return await operation
-            return await asyncio.wait_for(operation, timeout=request.timeout_seconds)
+            return TerminalPipelineObserver(
+                self.pipeline_debug_settings,
+                raw_query=str(request.original_query),
+                session_id=conversation_key,
+                channel=request.channel,
+                use_history=request.use_history,
+                request_id=trace.request_id if trace is not None else None,
+            )
+        except BaseException:
+            return None
 
     async def _answer(
         self,
@@ -185,9 +233,16 @@ class AnsweringService:
             real_history_exists = bool(
                 history_text and history_text != NO_CONVERSATION_HISTORY
             )
+            history_messages_used = (
+                history_messages[-6:] if history_messages else []
+            )
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.HISTORY,
-                output_data={"real_history_exists": real_history_exists},
+                output_data={
+                    "real_history_exists": real_history_exists,
+                    "messages_used": history_messages_used,
+                    "formatted_history": history_text,
+                },
                 metrics={
                     "history_message_count": len(history_messages),
                     "source": "provider" if provider is not None else "fallback",
@@ -228,7 +283,11 @@ class AnsweringService:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.HISTORY,
                 status="SKIPPED",
-                output_data={"real_history_exists": False},
+                output_data={
+                    "real_history_exists": False,
+                    "messages_used": [],
+                    "formatted_history": "",
+                },
                 metrics={"reason": "HISTORY_DISABLED"},
                 duration_ms=0.0,
             ))
@@ -264,10 +323,20 @@ class AnsweringService:
             "scenario_id": classified.get("scenario_id"),
         }
         intent = str(intent_data.get("type") or "general")
+        canonical_retrieval_query = classification_query
+        if intent == "general":
+            canonical_retrieval_query = canonicalize_retrieval_query(
+                classification_query
+            )
+        final_retrieval_query = canonical_retrieval_query
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.INTENT,
             input_data={"classifier_input": classification_query},
-            output_data=intent_details,
+            output_data={
+                **intent_details,
+                "canonical_retrieval_query": canonical_retrieval_query,
+                "final_retrieval_query": final_retrieval_query,
+            },
             metrics={
                 "effective_threshold": getattr(
                     self.intent_classifier, "threshold", None
@@ -275,13 +344,6 @@ class AnsweringService:
             },
             duration_ms=timings.get("intent_classification"),
         ))
-
-        canonical_retrieval_query = classification_query
-        if intent == "general":
-            canonical_retrieval_query = canonicalize_retrieval_query(
-                classification_query
-            )
-        final_retrieval_query = canonical_retrieval_query
 
         if intent == "chitchat":
             for skipped_stage in (

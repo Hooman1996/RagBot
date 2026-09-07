@@ -924,7 +924,18 @@ class PersianHybridSearch:
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.RERANK,
             input_data={"candidates": candidate_rows},
-            output_data={"rankings": ranking_rows},
+            output_data={
+                "rankings": [
+                    {
+                        **ranking,
+                        "content": candidate.content,
+                        "metadata": candidate.metadata or {},
+                    }
+                    for candidate, ranking in zip(
+                        ranked_candidates, ranking_rows
+                    )
+                ]
+            },
             metrics={
                 "purpose": "answer_context",
                 "candidate_count": len(candidates),

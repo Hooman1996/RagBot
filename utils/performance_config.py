@@ -143,6 +143,52 @@ class PerformanceSettings:
     mass_answer_max_upload_mb: int
 
 
+@dataclass(frozen=True)
+class PipelineDebugSettings:
+    """Immutable, process-scoped settings for terminal-only pipeline reports."""
+
+    enabled: bool = False
+    query: bool = True
+    normalization: bool = True
+    history: bool = True
+    rewrite: bool = True
+    intent: bool = True
+    retrieval: bool = True
+    rerank: bool = True
+    context: bool = True
+    prompt: bool = False
+    answer: bool = True
+    timings: bool = True
+    chunk_max_chars: int = 1200
+    full_chunks: bool = False
+
+    def displays(self, name: str) -> bool:
+        """Apply the master switch before any granular display setting."""
+
+        return self.enabled and bool(getattr(self, name, False))
+
+
+def load_pipeline_debug_settings() -> PipelineDebugSettings:
+    return PipelineDebugSettings(
+        enabled=_boolean("RAG_PIPELINE_DEBUG", False),
+        query=_boolean("RAG_PIPELINE_DEBUG_QUERY", True),
+        normalization=_boolean("RAG_PIPELINE_DEBUG_NORMALIZATION", True),
+        history=_boolean("RAG_PIPELINE_DEBUG_HISTORY", True),
+        rewrite=_boolean("RAG_PIPELINE_DEBUG_REWRITE", True),
+        intent=_boolean("RAG_PIPELINE_DEBUG_INTENT", True),
+        retrieval=_boolean("RAG_PIPELINE_DEBUG_RETRIEVAL", True),
+        rerank=_boolean("RAG_PIPELINE_DEBUG_RERANK", True),
+        context=_boolean("RAG_PIPELINE_DEBUG_CONTEXT", True),
+        prompt=_boolean("RAG_PIPELINE_DEBUG_PROMPT", False),
+        answer=_boolean("RAG_PIPELINE_DEBUG_ANSWER", True),
+        timings=_boolean("RAG_PIPELINE_DEBUG_TIMINGS", True),
+        chunk_max_chars=_nonnegative_int(
+            "RAG_PIPELINE_DEBUG_CHUNK_MAX_CHARS", 1200
+        ),
+        full_chunks=_boolean("RAG_PIPELINE_DEBUG_FULL_CHUNKS", False),
+    )
+
+
 def load_performance_settings() -> PerformanceSettings:
     settings = PerformanceSettings(
         application_request_timeout_seconds=_bounded_positive_float(
@@ -304,3 +350,4 @@ def load_performance_settings() -> PerformanceSettings:
 
 
 PERFORMANCE_SETTINGS = load_performance_settings()
+PIPELINE_DEBUG_SETTINGS = load_pipeline_debug_settings()
