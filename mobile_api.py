@@ -3,7 +3,6 @@ from pydantic import BaseModel, Field
 from typing import List, Optional, Dict, Any
 import asyncio
 import time
-import uuid
 import psycopg2
 from psycopg2.extras import RealDictCursor
 from utils.concurrency import run_with_limit
@@ -81,19 +80,6 @@ def get_services(request: Request):
 # CORE GATEWAY ENDPOINTS (No Auth Required)
 # ==========================================
 
-def _validate_mobile_session_id(session_id: str) -> None:
-    try:
-        parsed_session_id = uuid.UUID(session_id)
-    except ValueError as exc:
-        raise HTTPException(
-            status_code=400, detail="session_id must be a valid UUID."
-        ) from exc
-    if str(parsed_session_id) != session_id.lower():
-        raise HTTPException(
-            status_code=400, detail="session_id must be a valid UUID."
-        )
-
-
 @mobile_router.post("/v1/talk", response_model=TalkResponse)
 async def gateway_talk(req: TalkRequest, request: Request):
     async def operation():
@@ -123,7 +109,6 @@ async def gateway_talk(req: TalkRequest, request: Request):
 async def _gateway_talk(req: TalkRequest, request: Request):
     if not req.query or not req.session_id or not req.national_code:
         raise HTTPException(status_code=400, detail="session_id, query, and national_code are required.")
-    _validate_mobile_session_id(req.session_id)
 
     async with trace_span("authentication"):
         # The direct mobile route has no authentication dependency. A reverse
