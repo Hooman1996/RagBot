@@ -120,12 +120,11 @@ class EvaluationEnvironmentTests(unittest.TestCase):
             "EVAL_API_HOST": "127.0.0.9",
             "EVAL_API_PORT": "8190",
             "EVAL_REDIS_URL": "redis://internal-redis:6380/4",
-            "EVAL_USE_CELERY": "false",
             "EVAL_ALLOW_DB_INIT": "true",
             "EVAL_SESSION_CONCURRENCY": "3",
             "EVAL_REPEAT_MAX": "27",
-            "EVAL_CELERY_POOL": "solo",
-            "EVAL_CELERY_CONCURRENCY": "2",
+            "EVAL_WORKER_POLL_INTERVAL_SECONDS": "0.25",
+            "EVAL_WORKER_STALE_AFTER_SECONDS": "301",
         }
         get_settings.cache_clear()
         try:
@@ -135,12 +134,11 @@ class EvaluationEnvironmentTests(unittest.TestCase):
                 self.assertEqual(settings.api_host, "127.0.0.9")
                 self.assertEqual(settings.api_port, 8190)
                 self.assertEqual(settings.redis_url, values["EVAL_REDIS_URL"])
-                self.assertFalse(settings.use_celery)
                 self.assertTrue(settings.allow_db_init)
                 self.assertEqual(settings.session_concurrency, 3)
                 self.assertEqual(settings.repeat_max, 27)
-                self.assertEqual(settings.celery_pool, "solo")
-                self.assertEqual(settings.celery_concurrency, 2)
+                self.assertEqual(settings.worker_poll_interval_seconds, 0.25)
+                self.assertEqual(settings.worker_stale_after_seconds, 301)
         finally:
             get_settings.cache_clear()
 

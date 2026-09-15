@@ -13,8 +13,6 @@ from ..services.provisional_snapshot import build_provisional_snapshot
 from ..services.repository import create_run, delete_run, get_dataset, list_runs
 from ..services.run_planning import RunPlanError
 from ..services.events import EvaluationEventBus
-from ..worker.celery_app import celery_app
-from ..config import get_settings
 from .dependencies import AuthenticatedUserDep, DatabaseDep
 
 
@@ -40,12 +38,6 @@ def _run_dict(row: Run) -> dict[str, Any]:
 
 @router.post("/runs", response_model=IdResponse)
 async def start_run(body: RunCreateRequest, _user: AuthenticatedUserDep, db: DatabaseDep) -> IdResponse:
-    settings = get_settings()
-    if not settings.use_celery:
-        raise HTTPException(
-            status_code=503,
-            detail={"error_code": "EVALUATION_BACKGROUND_EXECUTION_UNAVAILABLE"},
-        )
     dataset = await get_dataset(db, body.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail={"error_code": "DATASET_NOT_FOUND"})
@@ -58,21 +50,6 @@ async def start_run(body: RunCreateRequest, _user: AuthenticatedUserDep, db: Dat
         )
     except RunPlanError as exc:
         raise HTTPException(status_code=422, detail={"error_code": exc.code}) from exc
-    await db.commit()
-    try:
-        task = celery_app.send_task(
-            "evaluation.execute_run", args=[str(run.id)],
-            queue=settings.celery_queue,
-        )
-    except Exception as exc:
-        durable_run = await db.get(Run, run.id, with_for_update=True)
-        if durable_run is not None and durable_run.status == "PENDING":
-            durable_run.status = "FAILED"
-            durable_run.failure_code = "EVALUATION_QUEUE_UNAVAILABLE"
-            durable_run.finished_at = datetime.now(timezone.utc)
-            await db.commit()
-        raise HTTPException(status_code=503, detail={"error_code": "EVALUATION_QUEUE_UNAVAILABLE", "run_id": str(run.id)}) from exc
-    run.worker_task_id = str(task.id)
     await db.commit()
     return IdResponse(id=run.id, status=run.status)
 

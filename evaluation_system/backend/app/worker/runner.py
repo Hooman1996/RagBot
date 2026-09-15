@@ -26,7 +26,7 @@ def now_utc() -> datetime:
 
 
 class EvaluationRunFailed(RuntimeError):
-    """Content-free worker boundary exception safe for Celery logs."""
+    """Content-free worker boundary exception safe for worker logs."""
 
     def __init__(self, error_code: str):
         self.error_code = error_code
@@ -58,11 +58,11 @@ class EvaluationRunExecutor:
         worker_task_id: str | None = None,
     ) -> None:
         task_id = worker_task_id or f"direct:{uuid.uuid4()}"
-        run = await self._claim_run(run_id, task_id)
-        if run is None:
-            return
-        await self.event_bus.publish(run_id, "run_started", {"run_id": str(run_id), "status": "RUNNING"})
         try:
+            run = await self._claim_run(run_id, task_id)
+            if run is None:
+                return
+            await self.event_bus.publish(run_id, "run_started", {"run_id": str(run_id), "status": "RUNNING"})
             async with self.session_factory() as session:
                 run_sessions = list(await session.scalars(
                     select(RunSession).where(
@@ -89,40 +89,67 @@ class EvaluationRunExecutor:
                 getattr(exc, "error_code", type(exc).__name__),
                 fallback="EVALUATION_RUN_ERROR",
             )
+            failure_persisted = False
             try:
-                await self._fail_run(run_id, error_code)
+                failure_persisted = await self._fail_run(
+                    run_id, error_code, task_id
+                )
             except Exception:
                 pass
-            await self.event_bus.publish(run_id, "run_failed", {
-                "run_id": str(run_id), "status": "FAILED",
-                "error_code": error_code,
-            })
+            if failure_persisted:
+                await self.event_bus.publish(run_id, "run_failed", {
+                    "run_id": str(run_id), "status": "FAILED",
+                    "error_code": error_code,
+                })
             raise EvaluationRunFailed(error_code) from None
 
     async def _claim_run(
         self, run_id: uuid.UUID, worker_task_id: str
     ) -> Run | None:
+        selected: list[str] = []
+        snapshot_pending = False
         async with self.session_factory() as session:
             run = await session.scalar(select(Run).where(Run.id == run_id).with_for_update())
             if run is None:
                 return None
             if run.status == "PENDING":
                 run.status = "RUNNING"
-                run.started_at = now_utc()
+                run.started_at = run.started_at or now_utc()
                 run.worker_task_id = worker_task_id
-                selected = list(
-                    (run.config_snapshot.get("retrieval") or {}).get(
-                        "knowledge_sources"
-                    ) or []
-                )
-                snapshot = await self.ragbot_client.runtime_snapshot(selected)
-                run.config_snapshot = snapshot.config_snapshot
-                run.git_commit_sha = snapshot.git_commit_sha
             elif not (
                 run.status == "RUNNING"
                 and run.worker_task_id == worker_task_id
             ):
                 return None
+            snapshot_pending = bool(
+                (run.config_snapshot or {}).get("runtime_snapshot_pending")
+            )
+            if snapshot_pending:
+                selected = list(
+                    ((run.config_snapshot or {}).get("retrieval") or {}).get(
+                        "knowledge_sources"
+                    ) or []
+                )
+            run.heartbeat_at = now_utc()
+            await session.commit()
+
+        if not snapshot_pending:
+            return run
+
+        # Remote I/O happens after the ownership transaction has committed.
+        snapshot = await self.ragbot_client.runtime_snapshot(selected)
+        async with self.session_factory() as session:
+            run = await session.scalar(
+                select(Run).where(Run.id == run_id).with_for_update()
+            )
+            if not (
+                run is not None
+                and run.status == "RUNNING"
+                and run.worker_task_id == worker_task_id
+            ):
+                return None
+            run.config_snapshot = snapshot.config_snapshot
+            run.git_commit_sha = snapshot.git_commit_sha
             run.heartbeat_at = now_utc()
             await session.commit()
             return run
@@ -499,15 +526,19 @@ class EvaluationRunExecutor:
             "total_sessions": run.total_sessions,
         })
 
-    async def _fail_run(self, run_id, error_code):
+    async def _fail_run(self, run_id, error_code, worker_task_id=None):
         async with self.session_factory() as session:
             run = await session.get(Run, run_id, with_for_update=True)
-            if run:
+            if run and run.status == "RUNNING" and (
+                worker_task_id is None or run.worker_task_id == worker_task_id
+            ):
                 run.status = "FAILED"; run.finished_at = now_utc()
                 run.failure_code = error_code
                 metadata = dict(run.metadata_json or {}); metadata["failure_code"] = error_code
                 run.metadata_json = metadata
                 await session.commit()
+                return True
+            return False
 
     async def _store_divergence(self, run_id):
         async with self.session_factory() as session:

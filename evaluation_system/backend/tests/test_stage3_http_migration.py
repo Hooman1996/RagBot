@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import unittest
 import uuid
+from datetime import datetime, timezone
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
@@ -375,6 +376,32 @@ class RunnerHttpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         self.assertTrue(run.config_snapshot["remote"])
         self.assertEqual(run.git_commit_sha, "ragbot-sha")
 
+    async def test_preclaimed_run_still_replaces_pending_runtime_snapshot(self):
+        run = SimpleNamespace(
+            status="RUNNING",
+            started_at=datetime.now(timezone.utc),
+            worker_task_id="worker-a",
+            heartbeat_at=None,
+            config_snapshot={
+                "retrieval": {"knowledge_sources": ["A"]},
+                "runtime_snapshot_pending": True,
+            },
+            git_commit_sha=None,
+        )
+        client = AsyncMock()
+        client.runtime_snapshot.return_value = RuntimeSnapshotResponse(
+            config_snapshot={"authoritative": True},
+            git_commit_sha="ragbot-sha",
+        )
+        runner = self._runner(FakeSession(scalar_value=run), client)
+
+        result = await runner._claim_run(uuid.uuid4(), "worker-a")
+
+        self.assertIs(result, run)
+        client.runtime_snapshot.assert_awaited_once_with(["A"])
+        self.assertEqual(run.config_snapshot, {"authoritative": True})
+        self.assertEqual(run.git_commit_sha, "ragbot-sha")
+
 
 class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_eval_datasource_endpoint_keeps_frontend_shape(self):
@@ -393,8 +420,8 @@ class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
         worker_sources = "\n".join(
             Path(path).read_text(encoding="utf-8")
             for path in (
-                "evaluation_system/backend/app/worker/process_runtime.py",
-                "evaluation_system/backend/app/worker/tasks.py",
+                "evaluation_system/backend/app/worker/postgres_queue.py",
+                "evaluation_system/backend/app/worker/postgres_worker.py",
             )
         )
         forbidden = (

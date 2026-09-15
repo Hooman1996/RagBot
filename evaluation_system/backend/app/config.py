@@ -54,10 +54,8 @@ class EvaluationSettings:
     allow_db_init: bool
     cors_origins: tuple[str, ...]
     redis_url: str
-    use_celery: bool
-    celery_queue: str
-    celery_pool: str
-    celery_concurrency: int
+    worker_poll_interval_seconds: float
+    worker_stale_after_seconds: int
     session_concurrency: int
     repeat_max: int
     max_upload_bytes: int
@@ -72,6 +70,17 @@ class EvaluationSettings:
             for item in os.getenv("EVAL_CORS_ORIGINS", "").split(",")
             if item.strip()
         )
+        ragbot_http_timeout_seconds = _positive_float(
+            "EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS", 70.0
+        )
+        worker_stale_after_seconds = _positive_int(
+            "EVAL_WORKER_STALE_AFTER_SECONDS", 300
+        )
+        if worker_stale_after_seconds <= ragbot_http_timeout_seconds:
+            raise ValueError(
+                "EVAL_WORKER_STALE_AFTER_SECONDS must be greater than "
+                "EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS"
+            )
         return cls(
             enabled=_bool("EVAL_ENABLED", False),
             api_host=os.getenv("EVAL_API_HOST", "127.0.0.1"),
@@ -84,10 +93,10 @@ class EvaluationSettings:
             allow_db_init=_bool("EVAL_ALLOW_DB_INIT", False),
             cors_origins=origins,
             redis_url=os.getenv("EVAL_REDIS_URL", "redis://127.0.0.1:6379/1"),
-            use_celery=_bool("EVAL_USE_CELERY", True),
-            celery_queue=os.getenv("EVAL_CELERY_QUEUE", "ragbot-evaluation"),
-            celery_pool=os.getenv("EVAL_CELERY_POOL", "solo"),
-            celery_concurrency=_positive_int("EVAL_CELERY_CONCURRENCY", 1),
+            worker_poll_interval_seconds=_positive_float(
+                "EVAL_WORKER_POLL_INTERVAL_SECONDS", 1.0
+            ),
+            worker_stale_after_seconds=worker_stale_after_seconds,
             session_concurrency=_positive_int("EVAL_SESSION_CONCURRENCY", 1),
             repeat_max=_positive_int("EVAL_REPEAT_MAX", 100),
             max_upload_bytes=_positive_int(
@@ -95,9 +104,7 @@ class EvaluationSettings:
             ),
             max_dataset_rows=_positive_int("EVAL_MAX_DATASET_ROWS", 50_000),
             ragbot_base_url=_ragbot_base_url(),
-            ragbot_http_timeout_seconds=_positive_float(
-                "EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS", 70.0
-            ),
+            ragbot_http_timeout_seconds=ragbot_http_timeout_seconds,
         )
 
     def sqlalchemy_url(self, *, async_driver: bool) -> object:

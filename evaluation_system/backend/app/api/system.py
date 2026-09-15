@@ -54,6 +54,6 @@ async def capabilities(
         "session_concurrency": settings.session_concurrency,
         "stability_default_concurrency": 1,
         "repeat_max": settings.repeat_max,
-        "background_execution_available": settings.use_celery,
+        "background_execution_available": True,
         "allow_database_initialize": settings.allow_db_init,
     }

@@ -73,23 +73,16 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
             repeat_count=1,
             documents=["Cards", "FAQ", "Cards"],
         )
-        task = SimpleNamespace(id="task-id")
         with patch.object(runs, "get_dataset", AsyncMock(return_value=object())), \
-             patch.object(runs, "create_run", create_run), \
-             patch.object(
-                 runs,
-                 "get_settings",
-                 return_value=SimpleNamespace(
-                     use_celery=True, celery_queue="ragbot-evaluation"
-                 ),
-             ), \
-             patch.object(runs.celery_app, "send_task", return_value=task):
+             patch.object(runs, "create_run", create_run):
             response = await runs.start_run(body, object(), db)
 
         self.assertEqual(response.status, "PENDING")
         kwargs = create_run.await_args.kwargs
         self.assertEqual(kwargs["config_snapshot"], EXPECTED_PENDING_SNAPSHOT)
         self.assertIsNone(kwargs["git_commit_sha"])
+        self.assertIsNone(run.worker_task_id)
+        db.commit.assert_awaited_once()
 
     async def test_manual_stability_uses_same_pending_snapshot_and_null_sha(self):
         from evaluation_system.backend.app.api import stability
@@ -107,19 +100,7 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
              patch.object(
                  stability, "persist_parsed_dataset", AsyncMock(return_value=object())
              ), \
-             patch.object(stability, "create_run", create_run), \
-             patch.object(
-                 stability,
-                 "get_settings",
-                 return_value=SimpleNamespace(
-                     use_celery=True, celery_queue="ragbot-evaluation"
-                 ),
-             ), \
-             patch.object(
-                 stability.celery_app,
-                 "send_task",
-                 return_value=SimpleNamespace(id="task-id"),
-             ):
+             patch.object(stability, "create_run", create_run):
             response = await stability.manual_stability(body, object(), db)
 
         self.assertEqual(response.status, "PENDING")
@@ -127,6 +108,8 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(kwargs["run_type"], "STABILITY_QUERY")
         self.assertEqual(kwargs["config_snapshot"], EXPECTED_PENDING_SNAPSHOT)
         self.assertIsNone(kwargs["git_commit_sha"])
+        self.assertIsNone(run.worker_task_id)
+        db.commit.assert_awaited_once()
 
 
 class IsolatedBackendImportTests(unittest.TestCase):
@@ -147,9 +130,9 @@ modules = (
     'app.config',
     'app.clients.ragbot',
     'app.services.divergence',
-    'app.worker.process_runtime',
+    'app.worker.postgres_queue',
+    'app.worker.postgres_worker',
     'app.worker.runner',
-    'app.worker.tasks',
     'app.main',
 )
 for name in modules:

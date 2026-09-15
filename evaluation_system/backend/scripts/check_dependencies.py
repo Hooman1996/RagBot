@@ -8,7 +8,7 @@ import sys
 
 REQUIRED = (
     "fastapi", "pydantic", "sqlalchemy", "alembic", "asyncpg", "psycopg2",
-    "celery", "redis", "openpyxl", "httpx", "dotenv", "openai", "qdrant_client",
+    "redis", "openpyxl", "httpx", "dotenv", "openai", "qdrant_client",
     "langgraph", "langchain_classic", "numpy", "torch", "transformers",
     "parsivar", "rank_bm25", "tqdm",
 )

@@ -11,7 +11,6 @@ from fastapi.responses import StreamingResponse
 from ..db.models import Run
 from ..db.session import AsyncSessionFactory
 from ..services.events import EvaluationEventBus
-from ..config import get_settings
 from .dependencies import AuthenticatedUserDep
 
 
@@ -33,13 +32,6 @@ async def run_events(
     request: Request,
     _user: AuthenticatedUserDep,
 ):
-    if not get_settings().use_celery:
-        raise HTTPException(
-            status_code=503,
-            detail={
-                "error_code": "EVALUATION_BACKGROUND_EXECUTION_UNAVAILABLE"
-            },
-        )
     async with AsyncSessionFactory() as session:
         run = await session.get(Run, run_id)
         if run is None:
