@@ -8,6 +8,7 @@ from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
 from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock, Mock
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -73,14 +74,15 @@ def import_stubs():
 
     concurrency = types.ModuleType("utils.concurrency")
 
-    async def run_with_limit(*_args, **_kwargs):
-        raise AssertionError("not used by history tests")
+    async def run_with_limit(_limiter, operation, **_kwargs):
+        return await operation()
 
     concurrency.run_with_limit = run_with_limit
 
     performance_config = types.ModuleType("utils.performance_config")
     performance_config.PERFORMANCE_SETTINGS = SimpleNamespace(
         application_request_timeout_seconds=50.0,
+        request_admission_timeout_seconds=1.0,
     )
 
     answering_service = types.ModuleType("answering_service")
@@ -279,6 +281,18 @@ class MobileHistoryContentDatabaseTests(unittest.TestCase):
 
         self.assertIsNone(sessions[0]["content"])
 
+    def test_closed_sessions_remain_listed_and_foreign_sessions_do_not(self):
+        _, sessions = self.get_sessions(
+            [
+                session_row(12, status="closed"),
+                session_row(13, user_id=92),
+            ],
+            [],
+        )
+
+        self.assertEqual([session["id"] for session in sessions], ["12"])
+        self.assertEqual(sessions[0]["status"], "closed")
+
 
 class ImmediateRunner:
     async def run(self, function, /, *args, **kwargs):
@@ -293,10 +307,11 @@ class GatewayDatabase:
 
 
 class GatewayChatManager:
-    def __init__(self, content="افتتاح حساب چگونه است؟"):
+    def __init__(self, content="افتتاح حساب چگونه است؟", status="active"):
         self.db = GatewayDatabase()
         self.session_list_calls = []
         self.content = content
+        self.status = status
 
     def get_user_sessions(self, user_id, include_first_user_content=False):
         self.session_list_calls.append((user_id, include_first_user_content))
@@ -310,7 +325,7 @@ class GatewayChatManager:
                 "temperature": 0.7,
                 "query_count": 1,
                 "total_tokens": 0,
-                "status": "active",
+                "status": self.status,
                 "is_pinned": False,
                 "meta_data": {},
                 "created_at": "2026-06-22T10:00:00",
@@ -321,9 +336,12 @@ class GatewayChatManager:
         }
 
     @staticmethod
-    def resolve_mobile_session(user_id, session_id):
+    def resolve_mobile_session(
+            user_id, session_id, require_active=True):
         if user_id != 7 or session_id != "mobile-uuid":
             raise AssertionError("mobile session resolution changed")
+        if require_active:
+            raise AssertionError("history must permit owner-only closed reads")
         return "12"
 
     @staticmethod
@@ -338,13 +356,15 @@ class GatewayChatManager:
         }]
 
 
-def request_with(chat_manager):
+def request_with(chat_manager, answering_service=None):
     state = SimpleNamespace(
         agent_service=object(),
         chat_manager=chat_manager,
         intent_classifier=object(),
         history_rewriting_service=object(),
+        answering_service=answering_service or object(),
         blocking_runner=ImmediateRunner(),
+        request_limiter=object(),
     )
     return SimpleNamespace(app=SimpleNamespace(state=state))
 
@@ -412,30 +432,319 @@ class MobileHistoryContentApiTests(unittest.IsolatedAsyncioTestCase):
         )
         self.assertIsNone(session["content"])
 
+    async def test_national_code_history_keeps_closed_session_visible(self):
+        result = await mobile_api.gateway_history(
+            request_with(GatewayChatManager(status="closed")),
+            national_code="1234567890",
+        )
+
+        self.assertEqual(len(result["sessions"]), 1)
+        self.assertEqual(result["sessions"][0]["id"], 12)
+
 
 class MobileTalkSessionIdTests(unittest.IsolatedAsyncioTestCase):
-    async def test_malformed_session_uuid_is_rejected_before_database_access(self):
-        request = mobile_api.TalkRequest(
-            session_id="550123455-e29b-41d4-a716-446655854444",
-            query="پیام هامو چجوری فعال کنم؟",
-            national_code="8888664190",
-            documents=["General_FAQ"],
+    async def test_external_session_id_is_an_opaque_string(self):
+        class TalkChatManager:
+            def __init__(self):
+                self.db = GatewayDatabase()
+                self.resolved_session_ids = []
+                self.messages = []
+
+            def resolve_mobile_session(self, user_id, session_id):
+                self.resolved_session_ids.append((user_id, session_id))
+                return "12"
+
+            def add_message(
+                self, session_id, role, content, user_id=None, query_id=None
+            ):
+                self.messages.append(
+                    (session_id, role, content, user_id, query_id)
+                )
+                return {"id": 41 if role == "user" else 42}
+
+        class AnsweringService:
+            def __init__(self):
+                self.requests = []
+
+            async def answer(self, request):
+                self.requests.append(request)
+                return SimpleNamespace(
+                    answer="پاسخ",
+                    related_questions=[],
+                    feedback_needed=False,
+                )
+
+        session_ids = (
+            "DP1234567890123456",
+            "DP12345678901234567890",
+            "55012345-e29b-41d4-a716-446655854444",
         )
+        for session_id in session_ids:
+            with self.subTest(session_id=session_id):
+                chat_manager = TalkChatManager()
+                answering_service = AnsweringService()
+                request = mobile_api.TalkRequest(
+                    session_id=session_id,
+                    query="پیام هامو چجوری فعال کنم؟",
+                    national_code="8888664190",
+                    documents=["General_FAQ"],
+                )
 
-        with self.assertRaises(mobile_api.HTTPException) as raised:
-            await mobile_api._gateway_talk(request, object())
+                response = await mobile_api.gateway_talk(
+                    request,
+                    request_with(chat_manager, answering_service),
+                )
 
-        self.assertEqual(raised.exception.status_code, 400)
+                self.assertEqual(
+                    chat_manager.resolved_session_ids, [(7, session_id)]
+                )
+                self.assertEqual(answering_service.requests[0].session_id, "12")
+                self.assertEqual(response.query_id, "42")
+                self.assertEqual(response.session_id, session_id)
+                self.assertEqual(response.query, request.query)
+                self.assertEqual(response.answer, "پاسخ")
+                self.assertEqual(response.related_questions, [])
+                self.assertFalse(response.feedback_needed)
+                self.assertEqual(
+                    chat_manager.messages,
+                    [
+                        ("12", "user", request.query, 7, None),
+                        ("12", "assistant", "پاسخ", 7, 41),
+                    ],
+                )
+
+
+class ScriptedMobileSessionDatabase(database_module.DatabaseManager):
+    def __init__(self, lookups, insert_result=None):
+        self.lookups = list(lookups)
+        self.insert_result = insert_result
+        self.executions = []
+
+    @staticmethod
+    def get_or_create_user_by_national_code(_national_code):
+        return {"id": 7}
+
+    def get_session_by_uuid(self, session_uuid):
+        if not self.lookups:
+            raise AssertionError("unexpected UUID lookup")
+        self.executions.append(("lookup", session_uuid))
+        return self.lookups.pop(0)
+
+    def _execute(self, query, params=None, fetch=None):
+        self.executions.append((query, params, fetch))
+        if "INSERT INTO chat_sessions" not in query:
+            raise AssertionError("unexpected SQL")
+        return self.insert_result
+
+
+class MobileSessionAuthorizationTests(unittest.TestCase):
+    def test_existing_active_session_for_correct_owner_resolves(self):
+        db = ScriptedMobileSessionDatabase([session_row(12)])
+        manager = database_module.ChatManager(db)
+
+        self.assertEqual(manager.resolve_mobile_session(7, "mobile-uuid"), "12")
+        self.assertEqual(db.executions, [("lookup", "mobile-uuid")])
+
+    def test_existing_session_for_wrong_owner_is_rejected(self):
+        db = ScriptedMobileSessionDatabase([session_row(12, user_id=25)])
+        manager = database_module.ChatManager(db)
+
+        with self.assertRaises(database_module.SessionUnavailableError) as raised:
+            manager.resolve_mobile_session(92, "mobile-uuid")
+
+        self.assertEqual(raised.exception.status_code, 404)
+        self.assertEqual(raised.exception.public_message, "Session unavailable.")
+
+    def test_existing_closed_session_cannot_be_continued(self):
+        db = ScriptedMobileSessionDatabase([session_row(12, status="closed")])
+        manager = database_module.ChatManager(db)
+
+        with self.assertRaises(database_module.SessionUnavailableError):
+            manager.resolve_mobile_session(7, "mobile-uuid")
+
+    def test_owner_can_read_existing_closed_session_history(self):
+        db = ScriptedMobileSessionDatabase([session_row(12, status="closed")])
+        manager = database_module.ChatManager(db)
+
         self.assertEqual(
-            raised.exception.detail, "session_id must be a valid UUID."
+            manager.resolve_mobile_session(
+                7, "mobile-uuid", require_active=False
+            ),
+            "12",
         )
 
-    async def test_canonical_session_uuid_remains_valid(self):
-        self.assertIsNone(
-            mobile_api._validate_mobile_session_id(
-                "55012345-e29b-41d4-a716-446655854444"
-            )
+    def test_new_session_is_bound_to_user_as_active(self):
+        created = session_row(12, uuid="new-mobile-uuid")
+        db = ScriptedMobileSessionDatabase([None], insert_result=created)
+        manager = database_module.ChatManager(db)
+
+        self.assertEqual(manager.resolve_mobile_session(7, "new-mobile-uuid"), "12")
+        insert_sql, params, fetch = db.executions[1]
+        self.assertIn("ON CONFLICT (uuid) DO NOTHING", insert_sql)
+        self.assertIn("'active'", insert_sql)
+        self.assertEqual(params[:3], ("new-mobile-uuid", 7, "Mobile App Chat"))
+        self.assertEqual(fetch, "one")
+
+    def test_conflict_winner_same_owner_active_is_allowed(self):
+        winner = session_row(12, uuid="raced-mobile-uuid")
+        db = ScriptedMobileSessionDatabase(
+            [None, winner], insert_result=None
         )
+        manager = database_module.ChatManager(db)
+
+        self.assertEqual(
+            manager.resolve_mobile_session(7, "raced-mobile-uuid"), "12"
+        )
+        self.assertEqual(
+            [call for call in db.executions if call[0] == "lookup"],
+            [
+                ("lookup", "raced-mobile-uuid"),
+                ("lookup", "raced-mobile-uuid"),
+            ],
+        )
+
+    def test_conflict_winner_different_owner_is_rejected(self):
+        winner = session_row(
+            12, uuid="raced-mobile-uuid", user_id=25
+        )
+        db = ScriptedMobileSessionDatabase(
+            [None, winner], insert_result=None
+        )
+        manager = database_module.ChatManager(db)
+
+        with self.assertRaises(database_module.SessionUnavailableError):
+            manager.resolve_mobile_session(92, "raced-mobile-uuid")
+
+
+class MobileAuthorizationApiTests(unittest.IsolatedAsyncioTestCase):
+    async def assert_talk_denied_before_pipeline(self, existing_session):
+        chat_manager = database_module.ChatManager(
+            ScriptedMobileSessionDatabase([existing_session])
+        )
+        chat_manager.add_message = Mock()
+        chat_manager.get_messages = Mock()
+        answering_service = SimpleNamespace(answer=AsyncMock())
+        history_rewriter = SimpleNamespace(rewrite=Mock())
+        request = request_with(chat_manager, answering_service)
+        request.app.state.history_rewriting_service = history_rewriter
+        talk_request = mobile_api.TalkRequest(
+            session_id="foreign-mobile-uuid",
+            query="secure question",
+            national_code="current-user",
+        )
+
+        with self.assertRaises(database_module.SessionUnavailableError) as raised:
+            await mobile_api.gateway_talk(talk_request, request)
+
+        self.assertEqual(raised.exception.public_message, "Session unavailable.")
+        chat_manager.add_message.assert_not_called()
+        chat_manager.get_messages.assert_not_called()
+        answering_service.answer.assert_not_awaited()
+        history_rewriter.rewrite.assert_not_called()
+
+    async def test_talk_wrong_owner_stops_before_writes_or_answering(self):
+        await self.assert_talk_denied_before_pipeline(
+            session_row(12, user_id=25)
+        )
+
+    async def test_talk_closed_owner_stops_before_writes_or_answering(self):
+        await self.assert_talk_denied_before_pipeline(
+            session_row(12, status="closed")
+        )
+
+    async def test_specific_history_wrong_owner_returns_no_messages(self):
+        chat_manager = database_module.ChatManager(
+            ScriptedMobileSessionDatabase([session_row(12, user_id=25)])
+        )
+        chat_manager.get_messages = Mock()
+
+        with self.assertRaises(database_module.SessionUnavailableError) as raised:
+            await mobile_api.gateway_history(
+                request_with(chat_manager),
+                national_code="current-user",
+                session_id="foreign-mobile-uuid",
+            )
+
+        self.assertEqual(raised.exception.public_message, "Session unavailable.")
+        chat_manager.get_messages.assert_not_called()
+
+
+class StatefulCloseDatabase(database_module.DatabaseManager):
+    def __init__(self, row):
+        self.row = dict(row)
+        self.executions = []
+
+    @staticmethod
+    def get_or_create_user_by_national_code(_national_code):
+        return {"id": 7}
+
+    def _execute(self, query, params=None, fetch=None):
+        self.executions.append((query, params, fetch))
+        updated_at, session_uuid, user_id = params
+        if (
+            self.row["uuid"] != session_uuid
+            or self.row["user_id"] != user_id
+        ):
+            return None
+        self.row["status"] = "closed"
+        self.row["updated_at"] = updated_at
+        return dict(self.row)
+
+
+class MobileCloseSessionTests(unittest.IsolatedAsyncioTestCase):
+    async def test_owner_can_close_session_without_removing_or_rebinding_it(self):
+        original = session_row(12, uuid="mobile-uuid", meta_data={"state": 1})
+        db = StatefulCloseDatabase(original)
+        manager = database_module.ChatManager(db)
+
+        result = await mobile_api.gateway_close_session(
+            "mobile-uuid",
+            mobile_api.CloseSessionRequest(national_code="current-user"),
+            request_with(manager),
+        )
+
+        self.assertEqual(
+            result, {"status": "success", "session_id": "mobile-uuid"}
+        )
+        self.assertEqual(db.row["status"], "closed")
+        self.assertNotEqual(db.row["updated_at"], original["updated_at"])
+        for key in original.keys() - {"status", "updated_at"}:
+            self.assertEqual(db.row[key], original[key])
+        sql, params, fetch = db.executions[0]
+        self.assertIn("WHERE uuid = %s AND user_id = %s", sql)
+        self.assertEqual(params[1:], ("mobile-uuid", 7))
+        self.assertEqual(fetch, "one")
+
+    async def test_closing_an_already_closed_session_is_idempotent(self):
+        db = StatefulCloseDatabase(
+            session_row(12, uuid="mobile-uuid", status="closed")
+        )
+        manager = database_module.ChatManager(db)
+
+        result = await mobile_api.gateway_close_session(
+            "mobile-uuid",
+            mobile_api.CloseSessionRequest(national_code="current-user"),
+            request_with(manager),
+        )
+
+        self.assertEqual(result["status"], "success")
+        self.assertEqual(db.row["status"], "closed")
+
+    async def test_foreign_user_cannot_close_session(self):
+        db = StatefulCloseDatabase(
+            session_row(12, uuid="mobile-uuid", user_id=25)
+        )
+        manager = database_module.ChatManager(db)
+
+        with self.assertRaises(database_module.SessionUnavailableError) as raised:
+            await mobile_api.gateway_close_session(
+                "mobile-uuid",
+                mobile_api.CloseSessionRequest(national_code="current-user"),
+                request_with(manager),
+            )
+
+        self.assertEqual(raised.exception.public_message, "Session unavailable.")
+        self.assertEqual(db.row["status"], "active")
 
 
 if __name__ == "__main__":

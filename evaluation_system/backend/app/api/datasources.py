@@ -1,12 +1,9 @@
 from __future__ import annotations
 
-import asyncio
-import os
-
 from fastapi import APIRouter, HTTPException
 
-from new_architecture.app.services.history.database import DatabaseManager
-
+from ..clients.ragbot import RagBotClientError, RagBotEvaluationClient
+from ..config import get_settings
 from .dependencies import AuthenticatedUserDep
 
 
@@ -15,13 +12,13 @@ router = APIRouter(tags=["evaluation-datasources"])
 
 @router.get("/datasources")
 async def list_datasources(_user: AuthenticatedUserDep) -> list[dict]:
-    manager = DatabaseManager(
-        host=os.getenv("POSTGRES_HOST"), port=os.getenv("POSTGRES_PORT"),
-        dbname=os.getenv("POSTGRES_DB"), user=os.getenv("POSTGRES_USER"),
-        password=os.getenv("POSTGRES_PASSWORD"),
-    )
+    settings = get_settings()
     try:
-        rows = await asyncio.to_thread(manager.get_available_documents)
-    except Exception as exc:
+        async with RagBotEvaluationClient(
+            base_url=settings.ragbot_base_url,
+            timeout_seconds=settings.ragbot_http_timeout_seconds,
+        ) as client:
+            response = await client.list_datasources()
+    except RagBotClientError as exc:
         raise HTTPException(status_code=503, detail={"error_code": "DATASOURCE_LOOKUP_UNAVAILABLE"}) from exc
-    return [{"title": str(row.get("title", ""))} for row in rows if row.get("title")]
+    return [{"title": item.name} for item in response.documents if item.name]

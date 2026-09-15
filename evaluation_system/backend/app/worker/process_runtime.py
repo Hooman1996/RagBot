@@ -1,4 +1,4 @@
-"""Process-local lifecycle for the CUDA-capable canonical RagBot runtime."""
+"""Process-local lifecycle for the reusable RagBot HTTP client."""
 
 from __future__ import annotations
 
@@ -27,32 +27,39 @@ def worker_initialization_error_code(exc: BaseException) -> str:
     return "EVALUATION_WORKER_INIT_FAILED"
 
 
-def _default_runtime_factory() -> AbstractAsyncContextManager:
-    # Delay heavyweight RagBot/Torch imports until the solo worker process is
-    # running. The canonical factory still selects the production device.
-    from ..core_adapter.runtime import canonical_turn_runtime
+def _default_client_factory() -> AbstractAsyncContextManager:
+    from ..clients.ragbot import RagBotEvaluationClient
+    from ..config import get_settings
 
-    return canonical_turn_runtime()
+    settings = get_settings()
+    return RagBotEvaluationClient(
+        base_url=settings.ragbot_base_url,
+        timeout_seconds=settings.ragbot_http_timeout_seconds,
+    )
 
 
 class WorkerProcessRuntime:
-    """Own one event loop and one canonical runtime for a worker process."""
+    """Own one event loop and one HTTP client for a worker process."""
 
     def __init__(
         self,
         *,
+        client_factory: Callable[[], AbstractAsyncContextManager] | None = None,
         runtime_factory: Callable[[], AbstractAsyncContextManager] | None = None,
     ) -> None:
-        self._runtime_factory = runtime_factory or _default_runtime_factory
+        if client_factory is not None and runtime_factory is not None:
+            raise ValueError("provide only client_factory")
+        # runtime_factory remains a temporary test/rollback compatibility alias.
+        self._client_factory = client_factory or runtime_factory or _default_client_factory
         self._lock = threading.RLock()
         self._loop: asyncio.AbstractEventLoop | None = None
-        self._runtime_context: AbstractAsyncContextManager | None = None
-        self._answering_service: Any = None
+        self._client_context: AbstractAsyncContextManager | None = None
+        self._ragbot_client: Any = None
         self._closed = False
 
     @property
     def initialized(self) -> bool:
-        return self._answering_service is not None
+        return self._ragbot_client is not None
 
     def _ensure_loop(self) -> asyncio.AbstractEventLoop:
         if self._closed:
@@ -61,32 +68,40 @@ class WorkerProcessRuntime:
             self._loop = asyncio.new_event_loop()
         return self._loop
 
-    def _ensure_runtime(self) -> Any:
-        if self._answering_service is not None:
-            return self._answering_service
+    def _ensure_client(self) -> Any:
+        if self._ragbot_client is not None:
+            return self._ragbot_client
         loop = self._ensure_loop()
-        context = self._runtime_factory()
+        context = self._client_factory()
         try:
-            service = loop.run_until_complete(context.__aenter__())
+            client = loop.run_until_complete(context.__aenter__())
         except BaseException as exc:
-            self._runtime_context = None
-            self._answering_service = None
+            self._client_context = None
+            self._ragbot_client = None
             raise WorkerRuntimeInitializationError(
                 worker_initialization_error_code(exc)
             ) from None
-        self._runtime_context = context
-        self._answering_service = service
-        return service
+        self._client_context = context
+        self._ragbot_client = client
+        return client
+
+    def run_with_client(
+        self,
+        operation: Callable[[Any], Awaitable[Any]],
+    ) -> Any:
+        """Run one task on the persistent loop with the shared HTTP client."""
+
+        with self._lock:
+            client = self._ensure_client()
+            return self._ensure_loop().run_until_complete(operation(client))
 
     def run_with_service(
         self,
         operation: Callable[[Any], Awaitable[Any]],
     ) -> Any:
-        """Run one task on the persistent loop with the shared service."""
+        """Compatibility alias for rollback-era lifecycle tests."""
 
-        with self._lock:
-            service = self._ensure_runtime()
-            return self._ensure_loop().run_until_complete(operation(service))
+        return self.run_with_client(operation)
 
     def run_maintenance(self, awaitable: Awaitable[Any]) -> Any:
         """Run failure persistence on the same loop, even before init succeeds."""
@@ -99,9 +114,9 @@ class WorkerProcessRuntime:
             if self._closed:
                 return
             loop = self._loop
-            context = self._runtime_context
-            self._runtime_context = None
-            self._answering_service = None
+            context = self._client_context
+            self._client_context = None
+            self._ragbot_client = None
             if loop is not None and context is not None:
                 try:
                     loop.run_until_complete(context.__aexit__(None, None, None))

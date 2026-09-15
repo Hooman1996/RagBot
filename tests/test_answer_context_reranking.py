@@ -377,7 +377,7 @@ class TerminalRerankRenderingTests(unittest.TestCase):
 
 
 class FaqContextCountTests(unittest.IsolatedAsyncioTestCase):
-    async def test_faq_sends_all_10_full_reranked_chunks_to_generation(self):
+    async def test_faq_keeps_answer_context_and_caps_related_questions(self):
         graph_module = types.ModuleType("langgraph.graph")
         graph_module.StateGraph = object
         graph_module.END = object()
@@ -388,6 +388,7 @@ class FaqContextCountTests(unittest.IsolatedAsyncioTestCase):
             rag_retrieval_top_k=50,
             rag_context_rerank_enabled=True,
             rag_context_rerank_top_k=10,
+            rag_related_questions_top_k=3,
             rag_related_questions_rerank_threshold=0.1,
         )
         patch = ModulePatch({
@@ -416,7 +417,16 @@ class FaqContextCountTests(unittest.IsolatedAsyncioTestCase):
                         return list(reversed(candidates))[:top_k]
 
                     async def rerank(self, query, candidates, threshold):
-                        return candidates
+                        self.related_call = (query, list(candidates), threshold)
+                        if getattr(self, "return_fewer", False):
+                            return [candidates[2], candidates[0]]
+                        return [
+                            {
+                                "question": f"reranked {index}",
+                                "answer": f"answer {index}",
+                            }
+                            for index in range(5)
+                        ]
 
                 class Rag:
                     def __init__(self):
@@ -451,6 +461,22 @@ class FaqContextCountTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual(rag.search_engine.answer_call[2], 10)
                 self.assertEqual(len(rag.generated_results), 10)
                 self.assertEqual(rag.answer_context.count("answer : پاسخ کامل"), 10)
+                self.assertEqual(len(rag.search_engine.related_call[1]), 3)
+                self.assertEqual(
+                    [item["question"] for item in state["related_questions"]],
+                    ["reranked 0", "reranked 1", "reranked 2"],
+                )
+                rag.search_engine.return_fewer = True
+                threshold_state = dict(state)
+                threshold_state["related_questions"] = []
+                await graph.make_handle_general(rag)(threshold_state)
+                self.assertEqual(
+                    [
+                        item["question"]
+                        for item in threshold_state["related_questions"]
+                    ],
+                    ["پرسش 47", "پرسش 49"],
+                )
             finally:
                 sys.modules.pop(module_name, None)
 

@@ -27,6 +27,20 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _positive_float(name: str, default: float) -> float:
+    value = float(os.getenv(name, str(default)))
+    if value <= 0:
+        raise ValueError(f"{name} must be positive")
+    return value
+
+
+def _ragbot_base_url() -> str:
+    value = os.getenv("EVAL_RAGBOT_BASE_URL", "http://127.0.0.1:8080").strip()
+    if not value:
+        raise ValueError("EVAL_RAGBOT_BASE_URL must not be empty")
+    return value.rstrip("/")
+
+
 @dataclass(frozen=True)
 class EvaluationSettings:
     enabled: bool
@@ -49,6 +63,8 @@ class EvaluationSettings:
     max_upload_bytes: int
     max_dataset_rows: int
     qdrant_collection: str
+    ragbot_base_url: str
+    ragbot_http_timeout_seconds: float
 
     @classmethod
     def from_environment(cls) -> "EvaluationSettings":
@@ -81,6 +97,10 @@ class EvaluationSettings:
             max_dataset_rows=_positive_int("EVAL_MAX_DATASET_ROWS", 50_000),
             qdrant_collection=os.getenv(
                 "QDRANT_COLLECTION", "hihelp_embeddings"
+            ),
+            ragbot_base_url=_ragbot_base_url(),
+            ragbot_http_timeout_seconds=_positive_float(
+                "EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS", 70.0
             ),
         )
 

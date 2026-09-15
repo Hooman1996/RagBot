@@ -61,6 +61,8 @@ class GraphContractTests(unittest.IsolatedAsyncioTestCase):
         performance_config = types.ModuleType("utils.performance_config")
         performance_config.PERFORMANCE_SETTINGS = types.SimpleNamespace(
             rag_retrieval_top_k=10,
+            rag_context_rerank_enabled=False,
+            rag_related_questions_top_k=3,
             rag_related_questions_rerank_threshold=0.1,
         )
         utils = types.ModuleType("utils")

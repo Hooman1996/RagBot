@@ -1,4 +1,4 @@
-"""Bounded evaluation orchestration using the canonical AnsweringService."""
+"""Bounded evaluation orchestration through the RagBot internal HTTP API."""
 
 from __future__ import annotations
 
@@ -8,19 +8,22 @@ from datetime import datetime, timezone
 
 from sqlalchemy import delete, func, select
 
-from answering_service import AnswerRequestContext
-from conversation_history import EVALUATION_EXECUTION_POLICY
-from pipeline_observer import PipelineStage, PipelineStageResult
-from utils.performance_config import PERFORMANCE_SETTINGS
-
-from ..core_adapter.history import EvaluationConversationKey, EvaluationHistoryProvider
+from ..clients.ragbot import (
+    EvaluationStageResponse,
+    EvaluationTurnResponse,
+    RagBotClientError,
+)
+from ..core_adapter.history_state import exact_agent_state_from_turns
 from ..db.models import DatasetTurn, Run, RunSession, RunTurn, StageResult
 from ..services.divergence import ComparableTurn, analyze_stability
 from ..services.events import NoOpEventBus, safe_error_code
-from ..services.failures import is_infrastructure_error
-from ..services.config_snapshot import build_config_snapshot
 from ..services.bounded_execution import bounded_for_each, effective_session_concurrency
-from ..tracing.collector import EvaluationTraceCollector
+
+
+CANONICAL_STAGE_NAMES = (
+    "NORMALIZATION", "HISTORY", "REWRITE", "INTENT", "RETRIEVAL",
+    "RERANK", "CONTEXT_SELECTION", "PROMPT_BUILD", "GENERATION",
+)
 
 
 def now_utc() -> datetime:
@@ -36,14 +39,26 @@ class EvaluationRunFailed(RuntimeError):
 
 
 class EvaluationRunExecutor:
-    def __init__(self, *, session_factory, answering_service, session_concurrency: int = 1, event_bus=None):
+    def __init__(
+        self,
+        *,
+        session_factory,
+        ragbot_client=None,
+        session_concurrency: int = 1,
+        event_bus=None,
+        answering_service=None,
+    ):
         if session_concurrency < 1:
             raise ValueError("session_concurrency must be positive")
+        # answering_service is accepted temporarily for rollback-era unit tests;
+        # the active worker always supplies ragbot_client.
+        client = ragbot_client if ragbot_client is not None else answering_service
+        if client is None:
+            raise ValueError("ragbot_client is required")
         self.session_factory = session_factory
-        self.answering_service = answering_service
+        self.ragbot_client = client
         self.session_concurrency = session_concurrency
         self.event_bus = event_bus or NoOpEventBus()
-        self.history_provider = EvaluationHistoryProvider(session_factory)
 
     async def execute(
         self,
@@ -109,11 +124,9 @@ class EvaluationRunExecutor:
                         "knowledge_sources"
                     ) or []
                 )
-                run.config_snapshot = build_config_snapshot(
-                    answering_service=self.answering_service,
-                    selected_documents=selected,
-                )
-                run.git_commit_sha = run.config_snapshot.get("git_commit_sha")
+                snapshot = await self.ragbot_client.runtime_snapshot(selected)
+                run.config_snapshot = snapshot.config_snapshot
+                run.git_commit_sha = snapshot.git_commit_sha
             elif not (
                 run.status == "RUNNING"
                 and run.worker_task_id == worker_task_id
@@ -161,69 +174,47 @@ class EvaluationRunExecutor:
                 "run_id": str(run.id), "run_session_id": str(run_session.id),
                 "run_turn_id": str(turn.id), "status": "RUNNING",
             })
-            collector = EvaluationTraceCollector()
             turn_failed = False
             turn_started = time.perf_counter()
-            key = EvaluationConversationKey(
-                run_session_id=run_session.id,
-                run_turn_id=turn.id,
-                turn_index=source.turn_index,
-                evaluation_session_key=run_session.evaluation_session_key,
-            )
             try:
-                result = await self.answering_service.answer(
-                    AnswerRequestContext(
-                        original_query=source.query,
-                        selected_documents=tuple(selected_documents),
-                        session_id=None,
-                        conversation_key=key,
-                        channel="evaluation",
-                        use_history=True,
-                        persist_agent_state=True,
-                        include_related_questions=True,
-                        timeout_seconds=PERFORMANCE_SETTINGS.application_request_timeout_seconds,
-                        apply_mobile_empty_answer_fallback=True,
-                    ),
-                    history_provider=self.history_provider,
-                    observer=collector,
-                    execution_policy=EVALUATION_EXECUTION_POLICY,
+                state_before = await self._state_before(
+                    run_session.id, source.turn_index
                 )
-                self._ensure_all_stages(collector)
-                await self._complete_turn(turn.id, result, collector)
-                fallback_count += bool(result.fallback_reason)
-                turn_latency = result.timings_ms.get("total", 0.0)
+                result = await self._evaluate_remote_turn(
+                    run_session, turn, source, selected_documents, state_before
+                )
+                observed_latency = (time.perf_counter() - turn_started) * 1000
+                turn_latency = float(result.timings_ms.get("total", observed_latency))
                 total_latency += turn_latency
-                for stage in collector.records:
-                    await self.event_bus.publish(run.id, "stage_completed", {
-                        "run_id": str(run.id), "run_session_id": str(run_session.id),
-                        "run_turn_id": str(turn.id), "stage_name": stage.stage.value,
-                        "status": stage.status, "duration_ms": stage.duration_ms,
-                        "error_code": stage.error_code,
-                    })
+                if result.status == "COMPLETED":
+                    await self._complete_turn(turn.id, result)
+                    fallback_count += bool(result.fallback_reason)
+                else:
+                    turn_failed = True
+                    error_count += 1
+                    infrastructure_error_count += int(result.infrastructure_error)
+                    await self._structured_error_turn(
+                        turn.id, result=result, total_latency_ms=turn_latency
+                    )
+                await self._publish_stages(run.id, run_session.id, turn.id, result.stages)
             except Exception as exc:
                 turn_failed = True
                 error_count += 1
-                infrastructure = is_infrastructure_error(exc)
+                infrastructure = bool(
+                    getattr(exc, "infrastructure_error", True)
+                )
                 infrastructure_error_count += int(infrastructure)
                 turn_latency = (time.perf_counter() - turn_started) * 1000
                 total_latency += turn_latency
-                await self._error_turn(
+                stages = self._transport_error_stages(exc)
+                await self._transport_error_turn(
                     turn.id,
                     exc,
-                    collector,
+                    stages,
                     infrastructure=infrastructure,
                     total_latency_ms=turn_latency,
                 )
-                for stage in collector.records:
-                    await self.event_bus.publish(run.id, "stage_completed", {
-                        "run_id": str(run.id),
-                        "run_session_id": str(run_session.id),
-                        "run_turn_id": str(turn.id),
-                        "stage_name": stage.stage.value,
-                        "status": stage.status,
-                        "duration_ms": stage.duration_ms,
-                        "error_code": stage.error_code,
-                    })
+                await self._publish_stages(run.id, run_session.id, turn.id, stages)
             await self.event_bus.publish(run.id, "turn_completed", {
                 "run_id": str(run.id), "run_session_id": str(run_session.id),
                 "run_turn_id": str(turn.id), "status": "ERROR" if turn_failed else "COMPLETED",
@@ -283,19 +274,40 @@ class EvaluationRunExecutor:
             await session.commit()
             return turn, True
 
-    @staticmethod
-    def _ensure_all_stages(collector: EvaluationTraceCollector) -> None:
-        present = {record.stage for record in collector.records}
-        for stage in PipelineStage:
-            if stage not in present:
-                collector.record(PipelineStageResult(
-                    stage=stage, status="SKIPPED", metrics={"reason": "NOT_APPLICABLE"}, duration_ms=0.0
-                ))
+    async def _state_before(
+        self, run_session_id: uuid.UUID, turn_index: int
+    ) -> dict | None:
+        async with self.session_factory() as session:
+            turns = list(await session.scalars(
+                select(RunTurn).where(
+                    RunTurn.run_session_id == run_session_id,
+                    RunTurn.turn_index < turn_index,
+                    RunTurn.status == "COMPLETED",
+                ).order_by(RunTurn.turn_index)
+            ))
+        return exact_agent_state_from_turns(turns)
 
-    async def _persist_stages(self, session, turn_id: uuid.UUID, collector: EvaluationTraceCollector) -> None:
-        for record in collector.records:
+    async def _evaluate_remote_turn(
+        self, run_session, turn, source, selected_documents, state_before
+    ) -> EvaluationTurnResponse:
+        return await self.ragbot_client.evaluate_turn(
+            evaluation_session_key=run_session.evaluation_session_key,
+            evaluation_turn_id=turn.id,
+            turn_index=source.turn_index,
+            query=source.query,
+            documents=selected_documents,
+            agent_state_before=state_before,
+        )
+
+    async def _persist_stages(
+        self,
+        session,
+        turn_id: uuid.UUID,
+        stages: list[EvaluationStageResponse],
+    ) -> None:
+        for record in stages:
             session.add(StageResult(
-                run_turn_id=turn_id, stage_name=record.stage.value,
+                run_turn_id=turn_id, stage_name=record.stage_name,
                 stage_order=record.stage_order, status=record.status,
                 input_hash=record.input_hash, output_hash=record.output_hash,
                 duration_ms=record.duration_ms, input_data=record.input_data,
@@ -303,9 +315,13 @@ class EvaluationRunExecutor:
                 error_code=record.error_code, error_data=record.error_data,
             ))
 
-    async def _complete_turn(self, turn_id, result, collector):
-        context_stage = collector.get(PipelineStage.CONTEXT_SELECTION)
-        state_after = await self.history_provider.pending_state(turn_id)
+    async def _complete_turn(self, turn_id, result: EvaluationTurnResponse):
+        context_stage = next(
+            (stage for stage in result.stages if stage.stage_name == "CONTEXT_SELECTION"),
+            None,
+        )
+        if result.agent_state_after is None:
+            raise RagBotClientError("RAGBOT_INVALID_RESPONSE", "missing_success_state")
         async with self.session_factory() as session:
             turn = await session.get(RunTurn, turn_id, with_for_update=True)
             turn.normalized_query = result.normalized_query
@@ -326,11 +342,93 @@ class EvaluationRunExecutor:
             turn.total_latency_ms = result.timings_ms.get("total")
             turn.finished_at = now_utc()
             metadata = dict(turn.metadata_json or {})
-            metadata["agent_state_after"] = state_after
+            metadata["agent_state_after"] = result.agent_state_after
             turn.metadata_json = metadata
-            await self._persist_stages(session, turn_id, collector)
+            await self._persist_stages(session, turn_id, result.stages)
             await session.commit()
-        await self.history_provider.discard_pending_state(turn_id)
+
+    async def _structured_error_turn(
+        self,
+        turn_id,
+        *,
+        result: EvaluationTurnResponse,
+        total_latency_ms: float,
+    ):
+        error_code = safe_error_code(
+            result.error_code,
+            fallback="EVALUATION_TURN_ERROR",
+        )
+        async with self.session_factory() as session:
+            turn = await session.get(RunTurn, turn_id, with_for_update=True)
+            turn.status = "ERROR"
+            turn.infrastructure_error = result.infrastructure_error
+            turn.error_code = error_code
+            turn.error_data = result.error_data
+            turn.total_latency_ms = total_latency_ms
+            turn.finished_at = now_utc()
+            metadata = dict(turn.metadata_json or {})
+            metadata.pop("agent_state_after", None)
+            metadata.update({
+                "error_code": error_code,
+                "infrastructure_error": result.infrastructure_error,
+            })
+            turn.metadata_json = metadata
+            await self._persist_stages(session, turn_id, result.stages)
+            await session.commit()
+
+    @staticmethod
+    def _transport_error_stages(exc: Exception) -> list[EvaluationStageResponse]:
+        error_code = safe_error_code(
+            getattr(exc, "error_code", None), fallback="EVALUATION_TURN_ERROR"
+        )
+        error_data = getattr(exc, "error_data", {"failure_kind": "worker_boundary"})
+        return [
+            EvaluationStageResponse(
+                stage_name=name,
+                stage_order=index * 10,
+                status="ERROR" if index == 1 else "SKIPPED",
+                input_hash=None,
+                output_hash=None,
+                duration_ms=0.0,
+                input_data=None,
+                output_data=None,
+                metrics={} if index == 1 else {"reason": "RAGBOT_TRANSPORT_FAILURE"},
+                error_code=error_code if index == 1 else None,
+                error_data=error_data if index == 1 else None,
+            )
+            for index, name in enumerate(CANONICAL_STAGE_NAMES, start=1)
+        ]
+
+    async def _transport_error_turn(
+        self,
+        turn_id,
+        exc,
+        stages: list[EvaluationStageResponse],
+        *,
+        infrastructure: bool,
+        total_latency_ms: float,
+    ) -> None:
+        error_code = safe_error_code(
+            getattr(exc, "error_code", None), fallback="EVALUATION_TURN_ERROR"
+        )
+        error_data = getattr(exc, "error_data", {"failure_kind": "worker_boundary"})
+        async with self.session_factory() as session:
+            turn = await session.get(RunTurn, turn_id, with_for_update=True)
+            turn.status = "ERROR"
+            turn.infrastructure_error = infrastructure
+            turn.error_code = error_code
+            turn.error_data = error_data
+            turn.total_latency_ms = total_latency_ms
+            turn.finished_at = now_utc()
+            metadata = dict(turn.metadata_json or {})
+            metadata.pop("agent_state_after", None)
+            metadata.update({
+                "error_code": error_code,
+                "infrastructure_error": infrastructure,
+            })
+            turn.metadata_json = metadata
+            await self._persist_stages(session, turn_id, stages)
+            await session.commit()
 
     async def _error_turn(
         self,
@@ -340,38 +438,70 @@ class EvaluationRunExecutor:
         *,
         infrastructure: bool,
         total_latency_ms: float,
-    ):
-        await self.history_provider.discard_pending_state(turn_id)
-        error_code = safe_error_code(
-            getattr(exc, "error_code", type(exc).__name__),
-            fallback="EVALUATION_TURN_ERROR",
-        )
+    ) -> None:
+        """Rollback-era compatibility helper; not used by the HTTP worker path."""
+        from pipeline_observer import PipelineStage, PipelineStageResult
+
         present = {record.stage for record in collector.records}
-        failed_stage = next((stage for stage in PipelineStage if stage not in present), PipelineStage.GENERATION)
+        legacy_failure_order = tuple(
+            stage for stage in PipelineStage if stage is not PipelineStage.HISTORY
+        )
+        failed_stage = next(
+            (stage for stage in legacy_failure_order if stage not in present),
+            PipelineStage.GENERATION,
+        )
+        error_code = safe_error_code(
+            getattr(exc, "error_code", None), fallback="EVALUATION_TURN_ERROR"
+        )
         collector.record(PipelineStageResult(
             stage=failed_stage,
             status="ERROR",
             error_code=error_code,
             error_data={"error_type": type(exc).__name__},
         ))
-        self._ensure_all_stages(collector)
-        async with self.session_factory() as session:
-            turn = await session.get(RunTurn, turn_id, with_for_update=True)
-            turn.status = "ERROR"
-            turn.infrastructure_error = infrastructure
-            turn.error_code = error_code
-            turn.error_data = {"error_type": type(exc).__name__}
-            turn.total_latency_ms = total_latency_ms
-            turn.finished_at = now_utc()
-            metadata = dict(turn.metadata_json or {})
-            metadata.update({
-                "error_code": error_code,
-                "error_type": type(exc).__name__,
-                "infrastructure_error": infrastructure,
+        present = {record.stage for record in collector.records}
+        for stage in PipelineStage:
+            if stage not in present:
+                collector.record(PipelineStageResult(
+                    stage=stage,
+                    status="SKIPPED",
+                    metrics={"reason": "NOT_APPLICABLE"},
+                    duration_ms=0.0,
+                ))
+        stages = [EvaluationStageResponse(
+            stage_name=record.stage.value,
+            stage_order=record.stage_order,
+            status=record.status,
+            input_hash=record.input_hash,
+            output_hash=record.output_hash,
+            duration_ms=record.duration_ms,
+            input_data=record.input_data,
+            output_data=record.output_data,
+            metrics=record.metrics,
+            error_code=record.error_code,
+            error_data=record.error_data,
+        ) for record in collector.records]
+        if hasattr(self, "history_provider"):
+            await self.history_provider.discard_pending_state(turn_id)
+        await self._transport_error_turn(
+            turn_id,
+            exc,
+            stages,
+            infrastructure=infrastructure,
+            total_latency_ms=total_latency_ms,
+        )
+
+    async def _publish_stages(self, run_id, run_session_id, turn_id, stages):
+        for stage in stages:
+            await self.event_bus.publish(run_id, "stage_completed", {
+                "run_id": str(run_id),
+                "run_session_id": str(run_session_id),
+                "run_turn_id": str(turn_id),
+                "stage_name": stage.stage_name,
+                "status": stage.status,
+                "duration_ms": stage.duration_ms,
+                "error_code": stage.error_code,
             })
-            turn.metadata_json = metadata
-            await self._persist_stages(session, turn_id, collector)
-            await session.commit()
 
     async def _cancel_requested(self, run_id) -> bool:
         async with self.session_factory() as session:

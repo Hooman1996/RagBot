@@ -25,6 +25,7 @@ class PerformanceSettingsTests(unittest.TestCase):
         self.assertEqual(settings.qdrant_concurrency, 4)
         self.assertEqual(settings.rag_retrieval_top_k, 10)
         self.assertEqual(settings.rag_semantic_candidate_limit, 50)
+        self.assertEqual(settings.rag_related_questions_top_k, 3)
         self.assertEqual(
             settings.mobile_related_questions_rerank_threshold, 0.5
         )
@@ -43,6 +44,7 @@ class PerformanceSettingsTests(unittest.TestCase):
             "QDRANT_CONCURRENCY": "8",
             "RAG_RETRIEVAL_TOP_K": "12",
             "RAG_SEMANTIC_CANDIDATE_LIMIT": "60",
+            "RAG_RELATED_QUESTIONS_TOP_K": "2",
             "RAG_MAX_NEW_TOKENS": "400",
         }
         with mock.patch.dict(os.environ, overrides, clear=True):
@@ -56,6 +58,7 @@ class PerformanceSettingsTests(unittest.TestCase):
         self.assertEqual(settings.qdrant_concurrency, 8)
         self.assertEqual(settings.rag_retrieval_top_k, 12)
         self.assertEqual(settings.rag_semantic_candidate_limit, 60)
+        self.assertEqual(settings.rag_related_questions_top_k, 2)
         self.assertEqual(settings.rag_max_new_tokens, 400)
 
     def test_invalid_values_fail_fast(self):
@@ -76,6 +79,9 @@ class PerformanceSettingsTests(unittest.TestCase):
                 "TEI_EMBED_MAX_CLIENT_BATCH_SIZE": "50",
             },
             {"RAG_RELATED_QUESTIONS_RERANK_THRESHOLD": "1.1"},
+            {"RAG_RELATED_QUESTIONS_TOP_K": "0"},
+            {"RAG_RELATED_QUESTIONS_TOP_K": "-1"},
+            {"RAG_RELATED_QUESTIONS_TOP_K": "not-an-integer"},
         ]
         for environment in cases:
             with self.subTest(environment=environment):

@@ -55,11 +55,14 @@ def execute_run_task(self, run_id: str) -> None:
     durable_run_id = uuid.UUID(run_id)
     runtime = get_worker_runtime()
     try:
-        runtime.run_with_service(
-            lambda answering_service: _execute(
+        run_with_client = getattr(runtime, "run_with_client", None)
+        if run_with_client is None:
+            run_with_client = runtime.run_with_service
+        run_with_client(
+            lambda ragbot_client: _execute(
                 durable_run_id,
                 worker_task_id=str(self.request.id),
-                answering_service=answering_service,
+                ragbot_client=ragbot_client,
             )
         )
     except Exception as exc:
@@ -77,7 +80,7 @@ async def _execute(
     run_id: uuid.UUID,
     *,
     worker_task_id: str,
-    answering_service,
+    ragbot_client,
 ) -> None:
     from ..db.session import AsyncSessionFactory, engine
     from ..services.events import EvaluationEventBus
@@ -88,7 +91,7 @@ async def _execute(
     try:
         runner = EvaluationRunExecutor(
             session_factory=AsyncSessionFactory,
-            answering_service=answering_service,
+            ragbot_client=ragbot_client,
             session_concurrency=settings.session_concurrency,
             event_bus=EvaluationEventBus(redis),
         )
@@ -97,7 +100,7 @@ async def _execute(
         try:
             await redis.aclose()
         finally:
-            # The canonical runtime remains alive, but evaluation SQLAlchemy
+            # The shared HTTP client remains alive, but evaluation SQLAlchemy
             # connections are released between durable runs.
             await engine.dispose()
 

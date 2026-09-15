@@ -55,6 +55,7 @@ from mass_answer_files import (
     write_safe_output,
 )
 from kb_manager import router as kb_router
+from internal_evaluation_api import router as internal_evaluation_router
 
 from utils.persian_hybrid_search import PersianTextProcessor
 from utils.concurrency import AdmissionLimiter, BoundedBlockingRunner, run_with_limit
@@ -541,6 +542,7 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 # Mount API Routers
 app.include_router(kb_router)
 app.include_router(mobile_router)
+app.include_router(internal_evaluation_router)
 
 from evaluation_system.backend.app.integration import install_evaluation_routes
 
