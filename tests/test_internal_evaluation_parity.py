@@ -2,21 +2,16 @@ from __future__ import annotations
 
 import unittest
 import uuid
+from copy import deepcopy
+from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import internal_evaluation_api as internal_api
 from answering_service import AnswerResult
 from conversation_history import EVALUATION_EXECUTION_POLICY
-from evaluation_system.backend.app.core_adapter.history_state import (
+from evaluation_system.backend.app.services.history_state import (
     exact_agent_state_from_turns,
-    exact_messages_from_turns,
 )
-from evaluation_system.backend.app.services import config_snapshot as old_snapshot
-from evaluation_system.backend.app.tracing.collector import (
-    EvaluationTraceCollector as OldEvaluationTraceCollector,
-)
-from pipeline_observer import PipelineStage, PipelineStageResult, json_safe
 from utils.performance_config import PERFORMANCE_SETTINGS
 
 
@@ -24,122 +19,9 @@ SESSION_KEY = uuid.UUID("11111111-1111-4111-8111-111111111111")
 TURN_ONE_ID = uuid.UUID("22222222-2222-4222-8222-222222222222")
 
 
-def _serialized_records(collector):
-    return [
-        {
-            "stage_name": record.stage.value,
-            "stage_order": record.stage_order,
-            "status": record.status,
-            "input_data": record.input_data,
-            "output_data": record.output_data,
-            "metrics": record.metrics,
-            "input_hash": record.input_hash,
-            "output_hash": record.output_hash,
-            "duration_ms": record.duration_ms,
-            "error_code": record.error_code,
-            "error_data": record.error_data,
-        }
-        for record in collector.records
-    ]
-
-
-class CollectorParityTests(unittest.TestCase):
-    def test_actual_collectors_merge_the_same_representative_sequence(self):
-        sequence = [
-            PipelineStageResult(
-                stage=PipelineStage.NORMALIZATION,
-                input_data={"query": "raw"},
-                output_data={"query": "normalized"},
-                duration_ms=1.0,
-            ),
-            PipelineStageResult(
-                stage=PipelineStage.HISTORY,
-                output_data={"messages": []},
-                duration_ms=2.0,
-            ),
-            PipelineStageResult(
-                stage=PipelineStage.REWRITE,
-                status="FALLBACK",
-                input_data={"nested": {"old": 1}, "items": [1], "scalar": "old"},
-                output_data={"query": "first"},
-                metrics={"nested": {"first": True}},
-                duration_ms=8.0,
-                error_code="REWRITE_FALLBACK",
-                error_data={"nested": {"old": True}, "items": ["old"]},
-            ),
-            PipelineStageResult(
-                stage=PipelineStage.REWRITE,
-                input_data={"nested": {"new": 2}, "items": [2], "scalar": "new"},
-                output_data={"query": "second", "nested": {"kept": True}},
-                metrics={"nested": {"second": True}},
-                duration_ms=3.0,
-                error_data={"nested": {"new": True}, "items": ["new"]},
-            ),
-            PipelineStageResult(stage=PipelineStage.INTENT, output_data={"intent": "general"}),
-            PipelineStageResult(stage=PipelineStage.RETRIEVAL, output_data={"ids": [1, 2]}),
-            PipelineStageResult(
-                stage=PipelineStage.RERANK,
-                output_data={"ids": [2, 1], "nested": {"first": 1}},
-                metrics={"purpose": "answer_context", "scores": [0.9, 0.8]},
-                duration_ms=4.0,
-            ),
-            PipelineStageResult(
-                stage=PipelineStage.RERANK,
-                output_data={"ids": [2], "nested": {"second": 2}},
-                metrics={"scores": [0.91]},
-                duration_ms=6.0,
-            ),
-            PipelineStageResult(stage=PipelineStage.CONTEXT_SELECTION, output_data={"ids": [2]}),
-            PipelineStageResult(stage=PipelineStage.PROMPT_BUILD, metrics={"prompt_hash": "p"}),
-            PipelineStageResult(stage=PipelineStage.GENERATION, output_data={"answer": "answer"}),
-        ]
-        old = OldEvaluationTraceCollector()
-        new = internal_api.EvaluationTraceCollector()
-
-        for result in sequence:
-            old.record(result)
-            new.record(result)
-
-        self.assertEqual(_serialized_records(new), _serialized_records(old))
-        rewrite = new.get(PipelineStage.REWRITE)
-        self.assertEqual(rewrite.status, "FALLBACK")
-        self.assertEqual(rewrite.duration_ms, 8.0)
-        self.assertEqual(
-            rewrite.input_data,
-            {"nested": {"old": 1, "new": 2}, "items": [2], "scalar": "new"},
-        )
-        self.assertEqual(
-            rewrite.error_data,
-            {"nested": {"old": True, "new": True}, "items": ["new"]},
-        )
-
-        error = PipelineStageResult(
-            stage=PipelineStage.REWRITE,
-            status="ERROR",
-            error_code="REWRITE_ERROR",
-        )
-        completed = PipelineStageResult(stage=PipelineStage.REWRITE, status="COMPLETED")
-        for result in (error, completed):
-            old.record(result)
-            new.record(result)
-        self.assertEqual(_serialized_records(new), _serialized_records(old))
-        self.assertEqual(new.get(PipelineStage.REWRITE).status, "ERROR")
-
-
-class HistoryStateParityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_two_turn_state_matches_embedded_exact_state_helpers(self):
-        turn_one = internal_api.RequestLocalEvaluationHistory(
-            evaluation_session_key=SESSION_KEY,
-            evaluation_turn_id=TURN_ONE_ID,
-            turn_index=1,
-            agent_state_before=None,
-        )
-        first_snapshot = await turn_one.load_snapshot(SESSION_KEY)
-        self.assertIsNone(first_snapshot.actor_id)
-        self.assertEqual(first_snapshot.agent_state["messages"], [])
-
-        final_state = {
-            **first_snapshot.agent_state,
+class HistoryStateBoundaryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_eval_transports_exact_state_and_ragbot_hydrates_it(self):
+        stored_state = {
             "messages": [
                 {"role": "user", "content": str(index), "ignored": True}
                 for index in range(11)
@@ -153,50 +35,60 @@ class HistoryStateParityTests(unittest.IsolatedAsyncioTestCase):
             "allowed_docs": ["Cards"],
             "fallback_reason": "NO_RESULTS",
         }
-        await turn_one.save_snapshot(first_snapshot, final_state)
-        state_after = turn_one.agent_state_after
-        old_turns = [{"metadata": {"agent_state_after": state_after}}]
-        expected_state = exact_agent_state_from_turns(old_turns)
-        expected_messages = exact_messages_from_turns(old_turns)
+        persisted = {"metadata": {"agent_state_after": stored_state}}
+        transported = exact_agent_state_from_turns([persisted])
 
+        self.assertEqual(transported, stored_state)
+        self.assertIsNot(transported, stored_state)
+        before_hydration = deepcopy(stored_state)
         turn_two = internal_api.RequestLocalEvaluationHistory(
             evaluation_session_key=SESSION_KEY,
             evaluation_turn_id=uuid.uuid4(),
             turn_index=2,
-            agent_state_before=state_after,
+            agent_state_before=transported,
         )
-        second_snapshot = await turn_two.load_snapshot(SESSION_KEY)
+        snapshot = await turn_two.load_snapshot(SESSION_KEY)
 
-        self.assertEqual(second_snapshot.agent_state, expected_state)
+        self.assertEqual(stored_state, before_hydration)
+        self.assertEqual(snapshot.agent_state["slots"], {"card": "debit"})
+        self.assertLessEqual(len(snapshot.agent_state["messages"]), 10)
         self.assertEqual(
-            await turn_two.load_rewrite_messages(SESSION_KEY), expected_messages
+            await turn_two.load_rewrite_messages(SESSION_KEY),
+            snapshot.agent_state["messages"],
         )
-        self.assertIsNone(second_snapshot.actor_id)
-        self.assertIsNone(turn_two.agent_state_after)
-        final_state["slots"]["card"] = "mutated"
-        self.assertEqual(second_snapshot.agent_state["slots"], {"card": "debit"})
+        self.assertIsNone(snapshot.actor_id)
 
+    async def test_first_turn_and_session_identity_remain_isolated(self):
         isolated_key = uuid.uuid4()
         isolated = internal_api.RequestLocalEvaluationHistory(
             evaluation_session_key=isolated_key,
-            evaluation_turn_id=uuid.uuid4(),
+            evaluation_turn_id=TURN_ONE_ID,
             turn_index=1,
             agent_state_before=None,
         )
-        self.assertEqual(
-            (await isolated.load_snapshot(isolated_key)).agent_state["messages"], []
-        )
+        snapshot = await isolated.load_snapshot(isolated_key)
+        self.assertEqual(snapshot.agent_state["messages"], [])
+        self.assertIsNone(isolated.agent_state_after)
 
 
 class RequestContextParityTests(unittest.IsolatedAsyncioTestCase):
     async def test_endpoint_context_matches_embedded_executor_contract(self):
         class CapturingService:
-            async def answer(self, request, *, history_provider, observer, execution_policy):
+            async def answer(
+                self,
+                request,
+                *,
+                history_provider,
+                observer,
+                execution_policy,
+            ):
                 self.context = request
                 self.provider = history_provider
                 self.observer = observer
                 self.policy = execution_policy
-                snapshot = await history_provider.load_snapshot(request.conversation_key)
+                snapshot = await history_provider.load_snapshot(
+                    request.conversation_key
+                )
                 await history_provider.save_snapshot(snapshot, snapshot.agent_state)
                 return AnswerResult(
                     original_query=request.original_query,
@@ -216,7 +108,9 @@ class RequestContextParityTests(unittest.IsolatedAsyncioTestCase):
             query="question",
             documents=["FAQ", "Cards"],
         )
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace(answering_service=service)))
+        request = SimpleNamespace(
+            app=SimpleNamespace(state=SimpleNamespace(answering_service=service))
+        )
 
         response = await internal_api.execute_evaluation_turn(payload, request)
 
@@ -237,64 +131,13 @@ class RequestContextParityTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(service.provider.namespace, "evaluation")
 
 
-class RuntimeSnapshotParityTests(unittest.TestCase):
-    def test_runtime_snapshot_matches_embedded_snapshot_builder(self):
-        class FakeRag:
-            model_id = "generation-model"
-            search_engine = SimpleNamespace(
-                collection_name="knowledge",
-                _expected_embedding_dimensions=768,
-            )
-
-            def answer(self):
-                return None
-
-        service = SimpleNamespace(
-            agent_service=SimpleNamespace(rag_system=FakeRag()),
-            intent_classifier=SimpleNamespace(
-                model_path_basename="intent.bin",
-                checkpoint_sha256="checkpoint",
-                threshold=0.75,
-                device="cpu",
-                embedding_dimension=768,
-                embedding_role="query",
-                embedding_prompt_name="classification",
-            ),
-            history_rewriting_service=SimpleNamespace(
-                config=SimpleNamespace(QUERY_REWRITE_PROMPT="rewrite prompt")
-            ),
-        )
-        environment = {
-            "EMBEDDING_MODEL": "embedding-model",
-            "RERANKER_MODEL": "reranker-model",
-            "LLM_MODEL": "environment-fallback-model",
-            "QDRANT_COLLECTION": "environment-fallback-collection",
-        }
-        with patch.dict("os.environ", environment, clear=False), patch.object(
-            old_snapshot, "git_commit_sha", return_value="ragbot-sha"
-        ), patch.object(internal_api, "_git_commit_sha", return_value="ragbot-sha"):
-            old = old_snapshot.build_config_snapshot(
-                answering_service=service, selected_documents=["FAQ", "Cards"]
-            )
-            new = internal_api.build_runtime_snapshot(
-                answering_service=service, selected_documents=["FAQ", "Cards"]
-            )
-
-        self.assertEqual(json_safe(new), json_safe(old))
-        self.assertEqual(
-            set(new),
-            {
-                "schema_version",
-                "intent",
-                "normalizer",
-                "query_canonicalization",
-                "rewrite",
-                "embedding",
-                "retrieval",
-                "rerank",
-                "generation",
-                "git_commit_sha",
-            },
+class RuntimeSnapshotOwnershipTests(unittest.TestCase):
+    def test_authoritative_snapshot_is_owned_by_ragbot_endpoint(self):
+        self.assertTrue(callable(internal_api.build_runtime_snapshot))
+        self.assertFalse(
+            Path(
+                "evaluation_system/backend/app/services/config_snapshot.py"
+            ).exists()
         )
 
 

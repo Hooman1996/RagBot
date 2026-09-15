@@ -62,7 +62,6 @@ class EvaluationSettings:
     repeat_max: int
     max_upload_bytes: int
     max_dataset_rows: int
-    qdrant_collection: str
     ragbot_base_url: str
     ragbot_http_timeout_seconds: float
 
@@ -95,9 +94,6 @@ class EvaluationSettings:
                 "EVAL_MAX_UPLOAD_BYTES", 20 * 1024 * 1024
             ),
             max_dataset_rows=_positive_int("EVAL_MAX_DATASET_ROWS", 50_000),
-            qdrant_collection=os.getenv(
-                "QDRANT_COLLECTION", "hihelp_embeddings"
-            ),
             ragbot_base_url=_ragbot_base_url(),
             ragbot_http_timeout_seconds=_positive_float(
                 "EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS", 70.0

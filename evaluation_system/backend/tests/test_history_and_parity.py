@@ -1,221 +1,101 @@
 from __future__ import annotations
 
 import unittest
+import uuid
+from copy import deepcopy
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
-from answering_service import AnswerRequestContext, AnsweringService
-from conversation_history import (
-    EVALUATION_EXECUTION_POLICY,
-    format_answer_prompt_history,
-    format_rewrite_history,
-    select_answer_prompt_history,
-    trim_agent_messages,
-    messages_from_turn_records,
-)
-from evaluation_system.backend.app.core_adapter.history_state import (
-    exact_messages_from_turns,
+from evaluation_system.backend.app.services.history_state import (
+    exact_agent_state_from_turns,
 )
 
 
-class ImmediateRunner:
-    async def run(self, function, /, *args, **kwargs):
-        kwargs.pop("wait_for_completion_on_cancel", None)
-        return function(*args, **kwargs)
+class ExactHistoryStateTests(unittest.TestCase):
+    def test_no_previous_turns_returns_none(self):
+        self.assertIsNone(exact_agent_state_from_turns([]))
 
-
-class HistoryProvider:
-    def __init__(self, namespace, messages, events=None):
-        self.namespace = namespace
-        self.messages = messages
-        self.events = events
-        self.keys = []
-
-    async def load_rewrite_messages(self, key):
-        self.keys.append(key)
-        if self.events is not None:
-            self.events.append((self.namespace, "history"))
-        return self.messages
-
-
-class Classifier:
-    threshold = 0.875
-
-    def __init__(self, events=None):
-        self.events = events
-        self.queries = []
-
-    async def classify_detailed(self, query):
-        self.queries.append(query)
-        if self.events is not None:
-            self.events.append(("shared", "classify"))
-        return {
-            "type": "general",
-            "scenario_id": None,
-            "confidence": 0.91,
-            "probability_actionable": 0.91,
-            "probability_chitchat": 0.09,
-        }
-
-
-class Rewriter:
-    def __init__(self, events=None):
-        self.events = events
-        self.calls = []
-
-    async def rewrite_query(self, current_query, current_summary):
-        self.calls.append((current_query, current_summary))
-        if self.events is not None:
-            self.events.append(("shared", "rewrite"))
-        return f"{current_query}|{current_summary}"
-
-
-class Agent:
-    def __init__(self):
-        self.calls = []
-    async def process_message_detailed(self, **kwargs):
-        self.calls.append(kwargs)
-        return SimpleNamespace(answer="A", state={
+    def test_latest_persisted_state_is_returned_exactly(self):
+        first = {"messages": [{"role": "user", "content": "one"}]}
+        latest = {
             "messages": [
-                {"role": "user", "content": "Q1"},
-                {"role": "assistant", "content": "A1"},
-                {"role": "user", "content": kwargs["user_message"]},
-                {"role": "assistant", "content": "A"},
+                {"role": "custom", "content": "untouched", "extra": True}
             ],
-            "related_questions": [], "feedback_needed": True,
-        })
-
-
-class Processor:
-    def normalize(self, value): return value
-
-
-class SharedHistoryRuleTests(unittest.TestCase):
-    def test_rewrite_history_preserves_repeated_text_and_role(self):
-        messages = [
-            {"role": "user", "content": "same"},
-            {"role": "assistant", "content": "same"},
-            {"role": "assistant", "content": "answer"},
+            "nested": {"values": [1, 2]},
+        }
+        turns = [
+            SimpleNamespace(metadata_json={"agent_state_after": first}),
+            SimpleNamespace(metadata_json={"agent_state_after": latest}),
         ]
-        self.assertEqual(
-            format_rewrite_history(messages),
-            "User: same\nAI: same\nAI: answer",
-        )
 
-    def test_prompt_selection_and_formatting_are_single_shared_functions(self):
-        messages = [{"role": "user", "content": str(index)} for index in range(9)]
-        selected = select_answer_prompt_history(messages)
-        self.assertEqual([item["content"] for item in selected], ["2", "3", "4", "5", "6", "7"])
-        self.assertEqual(format_answer_prompt_history(selected).splitlines()[0], "کاربر: 2")
+        self.assertEqual(exact_agent_state_from_turns(turns), latest)
 
-    def test_state_trim_is_last_ten(self):
-        messages = [{"role": "user", "content": str(index)} for index in range(12)]
-        self.assertEqual(trim_agent_messages(messages)[0]["content"], "2")
+    def test_returned_state_is_deeply_detached_and_storage_is_not_mutated(self):
+        stored = {
+            "messages": [{"role": "assistant", "content": "answer"}],
+            "nested": {"values": [1]},
+        }
+        original = deepcopy(stored)
+        turn = SimpleNamespace(metadata_json={"agent_state_after": stored})
 
-    def test_turn_two_and_three_reconstruct_generated_answers_in_order(self):
-        prior = [
-            {"raw_query": "Q1", "actual_answer": "A1"},
-            {"raw_query": "Q2", "actual_answer": "A2"},
-        ]
-        self.assertEqual(messages_from_turn_records(prior[:1]), [
-            {"role": "user", "content": "Q1"},
-            {"role": "assistant", "content": "A1"},
-        ])
-        self.assertEqual(messages_from_turn_records(prior), [
-            {"role": "user", "content": "Q1"},
-            {"role": "assistant", "content": "A1"},
-            {"role": "user", "content": "Q2"},
-            {"role": "assistant", "content": "A2"},
-        ])
+        restored = exact_agent_state_from_turns([turn])
+        restored["messages"][0]["content"] = "changed"
+        restored["nested"]["values"].append(2)
 
-    def test_client_only_fallback_is_not_synthesized_into_history(self):
-        turns = [{
-            "raw_query": "Q1",
-            "actual_answer": "client fallback",
-            "metadata": {
-                "agent_state_after": {
-                    "messages": [{"role": "user", "content": "Q1"}],
-                }
-            },
-        }]
-        self.assertEqual(
-            exact_messages_from_turns(turns),
-            [{"role": "user", "content": "Q1"}],
-        )
+        self.assertEqual(stored, original)
 
-
-class CoreParityTests(unittest.IsolatedAsyncioTestCase):
-    async def test_evaluation_policy_rejects_production_history_before_lookup(self):
-        production = HistoryProvider("production", [])
-        service = AnsweringService(
-            agent_service=Agent(), intent_classifier=Classifier(),
-            history_rewriting_service=Rewriter(), text_processor=Processor(),
-            blocking_runner=ImmediateRunner(), category_resolver=lambda _doc: "FAQ",
-        )
+    def test_previous_completed_turn_without_any_exact_state_fails(self):
+        turn = SimpleNamespace(metadata_json={"other": "metadata"})
         with self.assertRaisesRegex(
-            RuntimeError, "EVALUATION_PRODUCTION_HISTORY_FORBIDDEN"
+            RuntimeError, "EVALUATION_HISTORY_STATE_MISSING"
         ):
-            await service.answer(
-                AnswerRequestContext(
-                    original_query="Q",
-                    selected_documents=("General_FAQ",),
-            conversation_key="REAL_LOOKING_SESSION_12345",
-                    session_id=None,
-                ),
-                history_provider=production,
-                execution_policy=EVALUATION_EXECUTION_POLICY,
-            )
-        self.assertEqual(production.keys, [])
+            exact_agent_state_from_turns([turn])
 
-    async def test_production_and_evaluation_use_same_executor_dependencies(self):
-        events = []
-        agent = Agent()
-        classifier = Classifier(events)
-        rewriter = Rewriter(events)
-        service = AnsweringService(
-            agent_service=agent, intent_classifier=classifier,
-            history_rewriting_service=rewriter, text_processor=Processor(),
-            blocking_runner=ImmediateRunner(), category_resolver=lambda _doc: "FAQ",
+    def test_non_dictionary_state_is_not_accepted(self):
+        turns = [
+            {"metadata": {"agent_state_after": ["not", "state"]}},
+        ]
+        with self.assertRaisesRegex(
+            RuntimeError, "EVALUATION_HISTORY_STATE_MISSING"
+        ):
+            exact_agent_state_from_turns(turns)
+
+
+class RunnerHistoryQueryTests(unittest.IsolatedAsyncioTestCase):
+    async def test_runner_queries_only_prior_completed_turns(self):
+        from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
+
+        state = {"opaque": {"messages": ["unchanged"]}}
+        completed = SimpleNamespace(
+            metadata_json={"agent_state_after": state}
         )
-        messages = [{"role": "user", "content": "Q1"}, {"role": "assistant", "content": "A1"}]
-        production = HistoryProvider("production", messages, events)
-        evaluation = HistoryProvider("evaluation", messages, events)
-        source_session_id = "REAL_LOOKING_SESSION_12345"
-        evaluation_key = object()
-        common = AnswerRequestContext(
-            original_query="Q2", selected_documents=("General_FAQ",),
-            session_id=source_session_id,
+
+        class Session:
+            query = None
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, *_args):
+                return False
+
+            async def scalars(self, query):
+                self.query = query
+                return [completed]
+
+        session = Session()
+        runner = EvaluationRunExecutor(
+            session_factory=lambda: session,
+            ragbot_client=AsyncMock(),
+            event_bus=AsyncMock(),
         )
-        production_result = await service.answer(common, history_provider=production)
-        evaluation_result = await service.answer(
-            AnswerRequestContext(
-                original_query="Q2", selected_documents=("General_FAQ",),
-                conversation_key=evaluation_key, session_id=None,
-            ),
-            history_provider=evaluation,
-            execution_policy=EVALUATION_EXECUTION_POLICY,
-        )
-        self.assertEqual(production_result.rewritten_query, evaluation_result.rewritten_query)
-        self.assertEqual(production.keys, [source_session_id])
-        self.assertEqual(evaluation.keys, [evaluation_key])
-        self.assertNotIn(source_session_id, evaluation.keys)
-        self.assertEqual(agent.calls[0]["retrieval_query"], agent.calls[1]["retrieval_query"])
-        self.assertIs(agent.calls[1]["execution_policy"], EVALUATION_EXECUTION_POLICY)
-        expected_classifier_input = "Q2|User: Q1 AI: A1"
-        self.assertEqual(classifier.queries, [
-            expected_classifier_input,
-            expected_classifier_input,
-        ])
-        self.assertEqual(len(rewriter.calls), 2)
-        self.assertEqual(events, [
-            ("production", "history"),
-            ("shared", "rewrite"),
-            ("shared", "classify"),
-            ("evaluation", "history"),
-            ("shared", "rewrite"),
-            ("shared", "classify"),
-        ])
-        self.assertEqual(production_result.intent_details["confidence"], 0.91)
-        self.assertEqual(evaluation_result.intent_details["confidence"], 0.91)
+
+        restored = await runner._state_before(uuid.uuid4(), 3)
+
+        self.assertEqual(restored, state)
+        params = session.query.compile().params
+        self.assertIn("COMPLETED", params.values())
+        self.assertIn(3, params.values())
 
 
 if __name__ == "__main__":

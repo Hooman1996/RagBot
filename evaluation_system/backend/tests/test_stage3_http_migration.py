@@ -151,13 +151,9 @@ class RagBotClientContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.error_code, "DEPENDENCY_TIMEOUT")
         self.assertEqual(result.stages[4].status, "ERROR")
 
-    async def test_returned_stage_hashes_are_preserved_and_locally_verifiable(self):
-        from pipeline_observer import stable_hash
-
+    async def test_returned_stage_hashes_are_preserved_verbatim(self):
         payload = turn_payload()
-        payload["stages"][0]["input_hash"] = stable_hash(
-            payload["stages"][0]["input_data"]
-        )
+        payload["stages"][0]["input_hash"] = "f" * 64
         client = await self._client(
             lambda _request: httpx.Response(200, json=payload)
         )
@@ -174,7 +170,7 @@ class RagBotClientContractTests(unittest.IsolatedAsyncioTestCase):
             await client.aclose()
         self.assertEqual(
             result.stages[0].input_hash,
-            stable_hash(result.stages[0].input_data),
+            "f" * 64,
         )
 
     async def test_runtime_snapshot_uses_repeated_document_parameters(self):
@@ -360,7 +356,11 @@ class RunnerHttpBoundaryTests(unittest.IsolatedAsyncioTestCase):
             status="PENDING",
             started_at=None,
             worker_task_id=None,
-            config_snapshot={"retrieval": {"knowledge_sources": ["A", "B"]}},
+            config_snapshot={
+                "schema_version": "evaluation-pending-v1",
+                "retrieval": {"knowledge_sources": ["A", "B"]},
+                "runtime_snapshot_pending": True,
+            },
             git_commit_sha=None,
         )
         client = AsyncMock()

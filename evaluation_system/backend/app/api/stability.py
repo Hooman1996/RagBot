@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from fastapi import APIRouter, HTTPException
 
 from ..schemas.api import IdResponse, ManualStabilityRequest
-from ..services.config_snapshot import build_config_snapshot
+from ..services.provisional_snapshot import build_provisional_snapshot
 from ..services.importer import parse_manual_dataset
 from ..services.repository import create_run, persist_parsed_dataset
 from ..services.run_planning import RunPlanError
@@ -28,12 +28,12 @@ async def manual_stability(body: ManualStabilityRequest, _user: AuthenticatedUse
         )
     parsed = parse_manual_dataset(body.queries)
     dataset = await persist_parsed_dataset(db, parsed)
-    snapshot = build_config_snapshot(selected_documents=body.documents)
+    snapshot = build_provisional_snapshot(body.documents)
     run_type = "STABILITY_QUERY" if parsed.valid_row_count == 1 else "STABILITY_SESSION"
     try:
         run = await create_run(
             db, dataset=dataset, run_type=run_type, repeat_count=body.repeat_count,
-            config_snapshot=snapshot, git_commit_sha=snapshot.get("git_commit_sha"),
+            config_snapshot=snapshot, git_commit_sha=None,
         )
     except RunPlanError as exc:
         raise HTTPException(status_code=422, detail={"error_code": exc.code}) from exc

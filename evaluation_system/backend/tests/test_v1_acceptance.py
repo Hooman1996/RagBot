@@ -7,17 +7,14 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-from conversation_history import (
-    EVALUATION_EXECUTION_POLICY,
-    format_rewrite_history,
-    messages_from_turn_records,
-    trim_agent_messages,
-)
+from evaluation_system.backend.app.clients.ragbot import RagBotClientError
 from evaluation_system.backend.app.services.divergence import (
     ComparableTurn,
     analyze_stability,
 )
-from evaluation_system.backend.app.services.failures import is_infrastructure_error
+from evaluation_system.backend.app.services.history_state import (
+    exact_agent_state_from_turns,
+)
 from evaluation_system.backend.app.services.importer import parse_dataset_file
 from evaluation_system.backend.app.services.migrations import (
     CONFIRMATION,
@@ -25,8 +22,6 @@ from evaluation_system.backend.app.services.migrations import (
     MigrationService,
 )
 from evaluation_system.backend.app.services.run_planning import build_run_session_specs
-from pipeline_observer import PipelineStage
-from utils.service_errors import ServiceTimeoutError, ServiceUnavailableError
 
 
 SOURCE_SESSION_ID = "REAL_LOOKING_SESSION_12345"
@@ -101,54 +96,32 @@ class AcceptanceImporterTests(unittest.TestCase):
 
 
 class AcceptanceHistoryAndStabilityTests(unittest.TestCase):
-    def test_three_turn_histories_and_shared_formatting_and_trimming(self):
+    def test_three_turn_state_continuation_uses_exact_remote_state(self):
         completed = []
-        expected = [
-            [],
-            [{"role": "user", "content": "Q1"}, {"role": "assistant", "content": "A1"}],
-            [
-                {"role": "user", "content": "Q1"}, {"role": "assistant", "content": "A1"},
-                {"role": "user", "content": "Q2"}, {"role": "assistant", "content": "A2"},
-            ],
-        ]
-        for index, (query, answer) in enumerate(zip(("Q1", "Q2", "Q3"), ("A1", "A2", "A3"))):
-            history = messages_from_turn_records(completed)
-            self.assertEqual(history, expected[index])
-            self.assertEqual(format_rewrite_history(history), format_rewrite_history(trim_agent_messages(history)))
-            completed.append({"raw_query": query, "actual_answer": answer})
+        self.assertIsNone(exact_agent_state_from_turns(completed))
+        for index in range(1, 4):
+            state = {
+                "opaque_version": index,
+                "messages": [{"noncanonical": f"remote-{index}"}],
+            }
+            completed.append({"metadata": {"agent_state_after": state}})
+            self.assertEqual(exact_agent_state_from_turns(completed), state)
 
     def test_five_repetitions_have_isolated_identity_and_history(self):
         logical = uuid.uuid4()
         specs = build_run_session_specs([logical], 5)
         self.assertEqual([spec.repeat_index for spec in specs], [1, 2, 3, 4, 5])
         self.assertEqual(len({spec.evaluation_session_key for spec in specs}), 5)
-        histories = {}
+        states = {}
         for spec in specs:
-            completed = []
-            histories[spec.evaluation_session_key] = []
-            for query, answer in zip(("Q1", "Q2", "Q3"), ("A1", "A2", "A3")):
-                before = messages_from_turn_records(completed)
-                histories[spec.evaluation_session_key].append(before)
-                completed.append({"raw_query": query, "actual_answer": answer})
-        for attempts in histories.values():
-            self.assertEqual(attempts[0], [])
-            self.assertEqual([item["content"] for item in attempts[1]], ["Q1", "A1"])
-            self.assertEqual([item["content"] for item in attempts[2]], ["Q1", "A1", "Q2", "A2"])
-
-    def test_evaluation_policy_forbids_production_namespace_before_lookup(self):
-        class ProductionSpy:
-            namespace = "production"
-            calls = 0
-
-            async def load_rewrite_messages(self, key):
-                self.calls += 1
-                raise AssertionError("production history lookup must not execute")
-
-        from conversation_history import enforce_history_policy
-        spy = ProductionSpy()
-        with self.assertRaisesRegex(RuntimeError, "EVALUATION_PRODUCTION_HISTORY_FORBIDDEN"):
-            enforce_history_policy(spy, EVALUATION_EXECUTION_POLICY)
-        self.assertEqual(spy.calls, 0)
+            states[spec.evaluation_session_key] = {
+                "evaluation_session_key": str(spec.evaluation_session_key)
+            }
+        self.assertEqual(len(states), 5)
+        self.assertEqual(
+            len({value["evaluation_session_key"] for value in states.values()}),
+            5,
+        )
 
 
 class AcceptanceDivergenceTests(unittest.TestCase):
@@ -198,30 +171,24 @@ class AcceptanceDivergenceTests(unittest.TestCase):
 
 
 class AcceptanceInfrastructureTests(unittest.TestCase):
-    def test_dependency_failures_are_infrastructure_not_semantic_fallbacks(self):
-        injected = {
-            "embedding": ServiceTimeoutError("embedding timeout"),
-            "qdrant": ServiceUnavailableError("qdrant unavailable"),
-            "reranker": ServiceTimeoutError("reranker timeout"),
-            "vllm": ServiceUnavailableError("vllm unavailable"),
-        }
-        for stage, error in injected.items():
-            with self.subTest(stage=stage):
-                self.assertTrue(is_infrastructure_error(error))
-        for semantic_reason in ("NO_RETRIEVAL_RESULTS", "LLM_CONTEXT_REFUSAL"):
-            with self.subTest(reason=semantic_reason):
-                self.assertIsInstance(semantic_reason, str)
-                self.assertNotIsInstance(semantic_reason, BaseException)
+    def test_http_failures_are_classified_at_the_transport_boundary(self):
+        for code, kind in (
+            ("RAGBOT_TIMEOUT", "timeout"),
+            ("RAGBOT_UNAVAILABLE", "connection"),
+            ("RAGBOT_INVALID_RESPONSE", "schema_validation"),
+        ):
+            with self.subTest(code=code):
+                self.assertTrue(RagBotClientError(code, kind).infrastructure_error)
+        self.assertFalse(
+            RagBotClientError(
+                "RAGBOT_REQUEST_REJECTED", "request_contract"
+            ).infrastructure_error
+        )
 
 
 class AcceptanceInfrastructurePersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_persists_each_dependency_failure_as_infrastructure(self):
-        try:
-            from evaluation_system.backend.app.tracing.collector import EvaluationTraceCollector
-            from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
-            from pipeline_observer import PipelineStageResult
-        except ImportError as exc:
-            self.skipTest(f"evaluation runtime dependency is not installed: {exc}")
+        from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
 
         class Turn:
             metadata_json = {}
@@ -236,47 +203,52 @@ class AcceptanceInfrastructurePersistenceTests(unittest.IsolatedAsyncioTestCase)
             def add(self, value): self.added.append(value)
             async def commit(self): pass
 
-        class Provider:
-            async def discard_pending_state(self, _turn_id): pass
-
         cases = (
-            ("embedding", ServiceTimeoutError("timeout"), (PipelineStage.NORMALIZATION, PipelineStage.INTENT, PipelineStage.REWRITE), PipelineStage.RETRIEVAL, "DEPENDENCY_TIMEOUT"),
-            ("qdrant", ServiceUnavailableError("unavailable"), (PipelineStage.NORMALIZATION, PipelineStage.INTENT, PipelineStage.REWRITE), PipelineStage.RETRIEVAL, "DEPENDENCY_UNAVAILABLE"),
-            ("reranker", ServiceTimeoutError("timeout"), (PipelineStage.NORMALIZATION, PipelineStage.INTENT, PipelineStage.REWRITE, PipelineStage.RETRIEVAL), PipelineStage.RERANK, "DEPENDENCY_TIMEOUT"),
-            ("vllm", ServiceUnavailableError("unavailable"), tuple(PipelineStage)[:-1], PipelineStage.GENERATION, "DEPENDENCY_UNAVAILABLE"),
+            ("timeout", RagBotClientError("RAGBOT_TIMEOUT", "timeout")),
+            ("unavailable", RagBotClientError("RAGBOT_UNAVAILABLE", "connection")),
+            ("invalid", RagBotClientError("RAGBOT_INVALID_RESPONSE", "schema_validation")),
         )
-        for component, error, completed, expected_stage, expected_code in cases:
+        for component, error in cases:
             with self.subTest(component=component):
                 turn = Turn()
                 session = Session(turn)
                 runner = EvaluationRunExecutor(
                     session_factory=lambda: session,
-                    answering_service=object(),
+                    ragbot_client=object(),
                     session_concurrency=1,
                     event_bus=object(),
                 )
-                runner.history_provider = Provider()
-                collector = EvaluationTraceCollector()
-                for stage in completed:
-                    collector.record(PipelineStageResult(stage=stage))
-                await runner._error_turn(
-                    uuid.uuid4(), error, collector,
-                    infrastructure=is_infrastructure_error(error),
+                stages = runner._transport_error_stages(error)
+                await runner._transport_error_turn(
+                    uuid.uuid4(), error, stages,
+                    infrastructure=error.infrastructure_error,
                     total_latency_ms=12.0,
                 )
                 self.assertTrue(turn.infrastructure_error)
                 self.assertEqual(turn.status, "ERROR")
-                self.assertEqual(turn.error_code, expected_code)
-                failed = collector.get(expected_stage)
-                self.assertIsNotNone(failed)
-                self.assertEqual(failed.status, "ERROR")
-                self.assertEqual(failed.error_code, expected_code)
+                self.assertEqual(turn.error_code, error.error_code)
+                self.assertEqual(len(session.added), 9)
+                self.assertEqual(session.added[0].status, "ERROR")
+                self.assertTrue(
+                    all(stage.status == "SKIPPED" for stage in session.added[1:])
+                )
 
 
 class AcceptanceStaticSafetyTests(unittest.TestCase):
-    def test_evaluation_history_adapter_has_no_production_chat_dependency(self):
-        source = Path("evaluation_system/backend/app/core_adapter/history.py").read_text(encoding="utf-8")
-        for forbidden in ("ChatManager", "DatabaseManager", SOURCE_SESSION_ID):
+    def test_eval_owned_history_state_has_no_ragbot_dependency(self):
+        self.assertFalse(
+            Path("evaluation_system/backend/app/core_adapter/history.py").exists()
+        )
+        source = Path(
+            "evaluation_system/backend/app/services/history_state.py"
+        ).read_text(encoding="utf-8")
+        for forbidden in (
+            "ChatManager",
+            "DatabaseManager",
+            "conversation_history",
+            "pipeline_observer",
+            SOURCE_SESSION_ID,
+        ):
             self.assertNotIn(forbidden, source)
 
     def test_no_evaluation_drop_all_or_arbitrary_sql_api(self):

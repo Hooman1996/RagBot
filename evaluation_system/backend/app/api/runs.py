@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from ..db.models import DatasetTurn, Run, RunSession, RunTurn, StageResult
 from ..schemas.api import DeleteResponse, IdResponse, RunCreateRequest
-from ..services.config_snapshot import build_config_snapshot, git_commit_sha
+from ..services.provisional_snapshot import build_provisional_snapshot
 from ..services.repository import create_run, delete_run, get_dataset, list_runs
 from ..services.run_planning import RunPlanError
 from ..services.events import EvaluationEventBus
@@ -49,12 +49,12 @@ async def start_run(body: RunCreateRequest, _user: AuthenticatedUserDep, db: Dat
     dataset = await get_dataset(db, body.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail={"error_code": "DATASET_NOT_FOUND"})
-    snapshot = build_config_snapshot(selected_documents=body.documents)
+    snapshot = build_provisional_snapshot(body.documents)
     try:
         run = await create_run(
             db, dataset=dataset, run_type=body.run_type,
             repeat_count=body.repeat_count, config_snapshot=snapshot,
-            git_commit_sha=snapshot.get("git_commit_sha"),
+            git_commit_sha=None,
         )
     except RunPlanError as exc:
         raise HTTPException(status_code=422, detail={"error_code": exc.code}) from exc

@@ -13,17 +13,12 @@ from ..clients.ragbot import (
     EvaluationTurnResponse,
     RagBotClientError,
 )
-from ..core_adapter.history_state import exact_agent_state_from_turns
 from ..db.models import DatasetTurn, Run, RunSession, RunTurn, StageResult
 from ..services.divergence import ComparableTurn, analyze_stability
 from ..services.events import NoOpEventBus, safe_error_code
 from ..services.bounded_execution import bounded_for_each, effective_session_concurrency
-
-
-CANONICAL_STAGE_NAMES = (
-    "NORMALIZATION", "HISTORY", "REWRITE", "INTENT", "RETRIEVAL",
-    "RERANK", "CONTEXT_SELECTION", "PROMPT_BUILD", "GENERATION",
-)
+from ..services.history_state import exact_agent_state_from_turns
+from ..services.pipeline_contract import CANONICAL_STAGE_NAMES, STAGE_ORDER
 
 
 def now_utc() -> datetime:
@@ -46,17 +41,13 @@ class EvaluationRunExecutor:
         ragbot_client=None,
         session_concurrency: int = 1,
         event_bus=None,
-        answering_service=None,
     ):
         if session_concurrency < 1:
             raise ValueError("session_concurrency must be positive")
-        # answering_service is accepted temporarily for rollback-era unit tests;
-        # the active worker always supplies ragbot_client.
-        client = ragbot_client if ragbot_client is not None else answering_service
-        if client is None:
+        if ragbot_client is None:
             raise ValueError("ragbot_client is required")
         self.session_factory = session_factory
-        self.ragbot_client = client
+        self.ragbot_client = ragbot_client
         self.session_concurrency = session_concurrency
         self.event_bus = event_bus or NoOpEventBus()
 
@@ -385,7 +376,7 @@ class EvaluationRunExecutor:
         return [
             EvaluationStageResponse(
                 stage_name=name,
-                stage_order=index * 10,
+                stage_order=STAGE_ORDER[name],
                 status="ERROR" if index == 1 else "SKIPPED",
                 input_hash=None,
                 output_hash=None,
@@ -429,67 +420,6 @@ class EvaluationRunExecutor:
             turn.metadata_json = metadata
             await self._persist_stages(session, turn_id, stages)
             await session.commit()
-
-    async def _error_turn(
-        self,
-        turn_id,
-        exc,
-        collector,
-        *,
-        infrastructure: bool,
-        total_latency_ms: float,
-    ) -> None:
-        """Rollback-era compatibility helper; not used by the HTTP worker path."""
-        from pipeline_observer import PipelineStage, PipelineStageResult
-
-        present = {record.stage for record in collector.records}
-        legacy_failure_order = tuple(
-            stage for stage in PipelineStage if stage is not PipelineStage.HISTORY
-        )
-        failed_stage = next(
-            (stage for stage in legacy_failure_order if stage not in present),
-            PipelineStage.GENERATION,
-        )
-        error_code = safe_error_code(
-            getattr(exc, "error_code", None), fallback="EVALUATION_TURN_ERROR"
-        )
-        collector.record(PipelineStageResult(
-            stage=failed_stage,
-            status="ERROR",
-            error_code=error_code,
-            error_data={"error_type": type(exc).__name__},
-        ))
-        present = {record.stage for record in collector.records}
-        for stage in PipelineStage:
-            if stage not in present:
-                collector.record(PipelineStageResult(
-                    stage=stage,
-                    status="SKIPPED",
-                    metrics={"reason": "NOT_APPLICABLE"},
-                    duration_ms=0.0,
-                ))
-        stages = [EvaluationStageResponse(
-            stage_name=record.stage.value,
-            stage_order=record.stage_order,
-            status=record.status,
-            input_hash=record.input_hash,
-            output_hash=record.output_hash,
-            duration_ms=record.duration_ms,
-            input_data=record.input_data,
-            output_data=record.output_data,
-            metrics=record.metrics,
-            error_code=record.error_code,
-            error_data=record.error_data,
-        ) for record in collector.records]
-        if hasattr(self, "history_provider"):
-            await self.history_provider.discard_pending_state(turn_id)
-        await self._transport_error_turn(
-            turn_id,
-            exc,
-            stages,
-            infrastructure=infrastructure,
-            total_latency_ms=total_latency_ms,
-        )
 
     async def _publish_stages(self, run_id, run_session_id, turn_id, stages):
         for stage in stages:

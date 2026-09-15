@@ -12,7 +12,7 @@ from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
 from new_architecture.app.config import Config
-from evaluation_system.backend.app.services.config_snapshot import build_config_snapshot
+from internal_evaluation_api import build_runtime_snapshot as build_config_snapshot
 from pipeline_observer import (
     PipelineStage,
     bind_pipeline_observer,

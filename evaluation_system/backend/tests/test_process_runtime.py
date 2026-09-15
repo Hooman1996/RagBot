@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import asyncio
 import os
 import unittest
 from contextlib import asynccontextmanager
 from datetime import datetime, timezone
+from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -20,8 +22,7 @@ class WorkerCommandTests(unittest.TestCase):
 
         with patch.dict(os.environ, {"EVAL_ENABLED": "true"}, clear=True):
             get_settings.cache_clear()
-            settings = get_settings()
-            argv = build_worker_argv(settings)
+            argv = build_worker_argv(get_settings())
 
         self.assertIn("--pool=solo", argv)
         self.assertIn("--concurrency=1", argv)
@@ -59,32 +60,33 @@ class WorkerRuntimeLifecycleTests(unittest.TestCase):
         finally:
             close_worker_runtime()
 
-    def test_canonical_runtime_is_initialized_once_and_reused(self):
+    def test_http_client_and_event_loop_are_created_once_and_reused(self):
         from evaluation_system.backend.app.worker.process_runtime import (
             WorkerProcessRuntime,
         )
 
         events: list[str] = []
-        service = object()
+        client = object()
 
         @asynccontextmanager
-        async def fake_runtime():
+        async def fake_client_factory():
             events.append("enter")
             try:
-                yield service
+                yield client
             finally:
                 events.append("exit")
 
-        runtime = WorkerProcessRuntime(runtime_factory=fake_runtime)
+        runtime = WorkerProcessRuntime(client_factory=fake_client_factory)
 
-        async def identity(value):
-            return value
+        async def identify(value):
+            return value, asyncio.get_running_loop()
 
         try:
-            first = runtime.run_with_service(identity)
-            second = runtime.run_with_service(identity)
-            self.assertIs(first, service)
-            self.assertIs(second, service)
+            first_client, first_loop = runtime.run_with_client(identify)
+            second_client, second_loop = runtime.run_with_client(identify)
+            self.assertIs(first_client, client)
+            self.assertIs(second_client, client)
+            self.assertIs(first_loop, second_loop)
             self.assertEqual(events, ["enter"])
             self.assertTrue(runtime.initialized)
         finally:
@@ -92,19 +94,36 @@ class WorkerRuntimeLifecycleTests(unittest.TestCase):
 
         self.assertEqual(events, ["enter", "exit"])
 
-    def test_cuda_fork_error_gets_safe_initialization_code(self):
+    def test_initialization_failure_is_generic_and_content_free(self):
         from evaluation_system.backend.app.worker.process_runtime import (
-            worker_initialization_error_code,
+            WorkerProcessRuntime,
+            WorkerRuntimeInitializationError,
         )
 
-        exc = RuntimeError(
-            "Cannot re-initialize CUDA in forked subprocess. "
-            "To use CUDA with multiprocessing, use the 'spawn' start method."
-        )
+        @asynccontextmanager
+        async def failing_client_factory():
+            raise RuntimeError("secret model and CUDA details")
+            yield  # pragma: no cover
+
+        runtime = WorkerProcessRuntime(client_factory=failing_client_factory)
+        try:
+            with self.assertRaises(WorkerRuntimeInitializationError) as caught:
+                runtime.run_with_client(lambda _client: asyncio.sleep(0))
+        finally:
+            runtime.close()
+
         self.assertEqual(
-            worker_initialization_error_code(exc),
-            "CUDA_WORKER_INIT_FAILED",
+            caught.exception.error_code, "EVALUATION_WORKER_INIT_FAILED"
         )
+        self.assertNotIn("secret", str(caught.exception))
+        self.assertNotIn("CUDA", str(caught.exception))
+
+    def test_process_runtime_has_no_model_or_cuda_imports(self):
+        source = Path(
+            "evaluation_system/backend/app/worker/process_runtime.py"
+        ).read_text(encoding="utf-8")
+        for forbidden in ("torch", "CUDA", "RAGSystem", "AsyncOpenAI"):
+            self.assertNotIn(forbidden, source)
 
 
 class WorkerFailureStateTests(unittest.TestCase):
@@ -120,9 +139,9 @@ class WorkerFailureStateTests(unittest.TestCase):
         class FailingRuntime:
             maintenance_called = False
 
-            def run_with_service(self, _operation):
+            def run_with_client(self, _operation):
                 raise WorkerRuntimeInitializationError(
-                    "CUDA_WORKER_INIT_FAILED"
+                    "EVALUATION_WORKER_INIT_FAILED"
                 )
 
             def run_maintenance(self, awaitable):
@@ -138,7 +157,9 @@ class WorkerFailureStateTests(unittest.TestCase):
                 execute_run_task.run("7eab21ff-ddb9-4186-a578-937c3b49343d")
 
         self.assertTrue(runtime.maintenance_called)
-        self.assertEqual(caught.exception.error_code, "CUDA_WORKER_INIT_FAILED")
+        self.assertEqual(
+            caught.exception.error_code, "EVALUATION_WORKER_INIT_FAILED"
+        )
 
     def test_failed_task_marks_nonterminal_run_failed(self):
         from evaluation_system.backend.app.worker.tasks import _mark_run_failed
@@ -152,17 +173,20 @@ class WorkerFailureStateTests(unittest.TestCase):
         finished = datetime.now(timezone.utc)
         code = _mark_run_failed(
             run,
-            "CUDA_WORKER_INIT_FAILED",
+            "EVALUATION_WORKER_INIT_FAILED",
             finished_at=finished,
         )
 
-        self.assertEqual(code, "CUDA_WORKER_INIT_FAILED")
+        self.assertEqual(code, "EVALUATION_WORKER_INIT_FAILED")
         self.assertEqual(run.status, "FAILED")
-        self.assertEqual(run.failure_code, "CUDA_WORKER_INIT_FAILED")
+        self.assertEqual(run.failure_code, "EVALUATION_WORKER_INIT_FAILED")
         self.assertIs(run.finished_at, finished)
         self.assertEqual(
             run.metadata_json,
-            {"preserved": True, "failure_code": "CUDA_WORKER_INIT_FAILED"},
+            {
+                "preserved": True,
+                "failure_code": "EVALUATION_WORKER_INIT_FAILED",
+            },
         )
 
 

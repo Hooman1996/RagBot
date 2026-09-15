@@ -10,9 +10,7 @@ import numpy as np
 
 from answering_service import AnswerRequestContext, AnsweringService
 from conversation_history import NO_CONVERSATION_HISTORY, format_rewrite_history
-from evaluation_system.backend.app.services.config_snapshot import (
-    build_config_snapshot,
-)
+from internal_evaluation_api import build_runtime_snapshot as build_config_snapshot
 from pipeline_observer import PipelineStage, bind_pipeline_observer
 from scripts.validate_environment import parse_env_file
 from utils.persian_hybrid_search import PersianHybridSearch
@@ -317,17 +315,18 @@ class SearchAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SharedPathAndEnvironmentTests(unittest.TestCase):
-    def test_all_interfaces_use_shared_answering_service(self):
+    def test_chat_interfaces_share_service_while_eval_uses_http_boundary(self):
         main = (ROOT / "main.py").read_text(encoding="utf-8")
         mobile = (ROOT / "mobile_api.py").read_text(encoding="utf-8")
         mass = (ROOT / "mass_answer_service.py").read_text(encoding="utf-8")
         evaluation = (
-            ROOT / "evaluation_system/backend/app/core_adapter/runtime.py"
+            ROOT / "evaluation_system/backend/app/worker/process_runtime.py"
         ).read_text(encoding="utf-8")
         self.assertIn("AnsweringService(", main)
         self.assertIn("answering_service.answer(", mobile)
         self.assertIn("self.answering_service.answer(", mass)
-        self.assertIn("AnsweringService(", evaluation)
+        self.assertIn("RagBotEvaluationClient", evaluation)
+        self.assertNotIn("AnsweringService", evaluation)
 
     def test_dev_production_and_example_enable_same_policy(self):
         values = [

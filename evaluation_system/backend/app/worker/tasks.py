@@ -55,10 +55,7 @@ def execute_run_task(self, run_id: str) -> None:
     durable_run_id = uuid.UUID(run_id)
     runtime = get_worker_runtime()
     try:
-        run_with_client = getattr(runtime, "run_with_client", None)
-        if run_with_client is None:
-            run_with_client = runtime.run_with_service
-        run_with_client(
+        runtime.run_with_client(
             lambda ragbot_client: _execute(
                 durable_run_id,
                 worker_task_id=str(self.request.id),

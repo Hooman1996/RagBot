@@ -14,7 +14,10 @@ from evaluation_system.backend.app.services.migrations import (
     MigrationService,
     classify_database_status,
 )
-from pipeline_observer import PipelineStage, STAGE_ORDER
+from evaluation_system.backend.app.services.pipeline_contract import (
+    CANONICAL_STAGE_NAMES,
+    STAGE_ORDER,
+)
 
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -78,8 +81,8 @@ def migration_index_names() -> set[str]:
 class MigrationStaticSafetyTests(unittest.TestCase):
     def test_v1_stage_constraint_matches_every_current_pipeline_stage(self):
         allowed = check_constraint_values(MIGRATION, "ck_stage_results_name")
-        self.assertIn(PipelineStage.HISTORY.value, allowed)
-        self.assertEqual(set(allowed), {stage.value for stage in PipelineStage})
+        self.assertIn("HISTORY", allowed)
+        self.assertEqual(set(allowed), set(CANONICAL_STAGE_NAMES))
 
     def test_model_stage_constraint_matches_v1_and_pipeline_enum(self):
         migration_allowed = check_constraint_values(
@@ -87,21 +90,21 @@ class MigrationStaticSafetyTests(unittest.TestCase):
         )
         model_allowed = check_constraint_values(MODELS, "ck_stage_results_name")
         self.assertEqual(model_allowed, migration_allowed)
-        self.assertEqual(set(model_allowed), {stage.value for stage in PipelineStage})
+        self.assertEqual(set(model_allowed), set(CANONICAL_STAGE_NAMES))
 
     def test_current_pipeline_stage_order(self):
         self.assertEqual(
             STAGE_ORDER,
             {
-                PipelineStage.NORMALIZATION: 10,
-                PipelineStage.HISTORY: 20,
-                PipelineStage.REWRITE: 30,
-                PipelineStage.INTENT: 40,
-                PipelineStage.RETRIEVAL: 50,
-                PipelineStage.RERANK: 60,
-                PipelineStage.CONTEXT_SELECTION: 70,
-                PipelineStage.PROMPT_BUILD: 80,
-                PipelineStage.GENERATION: 90,
+                "NORMALIZATION": 10,
+                "HISTORY": 20,
+                "REWRITE": 30,
+                "INTENT": 40,
+                "RETRIEVAL": 50,
+                "RERANK": 60,
+                "CONTEXT_SELECTION": 70,
+                "PROMPT_BUILD": 80,
+                "GENERATION": 90,
             },
         )
 

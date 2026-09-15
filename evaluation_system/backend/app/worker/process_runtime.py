@@ -9,22 +9,12 @@ from contextlib import AbstractAsyncContextManager
 from typing import Any
 
 
-CUDA_REINITIALIZATION_FRAGMENT = "cannot re-initialize cuda in forked subprocess"
-
-
 class WorkerRuntimeInitializationError(RuntimeError):
     """Content-free initialization failure safe for Celery logs."""
 
     def __init__(self, error_code: str):
         self.error_code = error_code
         super().__init__(f"evaluation worker runtime initialization failed: {error_code}")
-
-
-def worker_initialization_error_code(exc: BaseException) -> str:
-    message = str(exc).lower()
-    if CUDA_REINITIALIZATION_FRAGMENT in message:
-        return "CUDA_WORKER_INIT_FAILED"
-    return "EVALUATION_WORKER_INIT_FAILED"
 
 
 def _default_client_factory() -> AbstractAsyncContextManager:
@@ -45,12 +35,8 @@ class WorkerProcessRuntime:
         self,
         *,
         client_factory: Callable[[], AbstractAsyncContextManager] | None = None,
-        runtime_factory: Callable[[], AbstractAsyncContextManager] | None = None,
     ) -> None:
-        if client_factory is not None and runtime_factory is not None:
-            raise ValueError("provide only client_factory")
-        # runtime_factory remains a temporary test/rollback compatibility alias.
-        self._client_factory = client_factory or runtime_factory or _default_client_factory
+        self._client_factory = client_factory or _default_client_factory
         self._lock = threading.RLock()
         self._loop: asyncio.AbstractEventLoop | None = None
         self._client_context: AbstractAsyncContextManager | None = None
@@ -75,11 +61,11 @@ class WorkerProcessRuntime:
         context = self._client_factory()
         try:
             client = loop.run_until_complete(context.__aenter__())
-        except BaseException as exc:
+        except BaseException:
             self._client_context = None
             self._ragbot_client = None
             raise WorkerRuntimeInitializationError(
-                worker_initialization_error_code(exc)
+                "EVALUATION_WORKER_INIT_FAILED"
             ) from None
         self._client_context = context
         self._ragbot_client = client
@@ -94,14 +80,6 @@ class WorkerProcessRuntime:
         with self._lock:
             client = self._ensure_client()
             return self._ensure_loop().run_until_complete(operation(client))
-
-    def run_with_service(
-        self,
-        operation: Callable[[Any], Awaitable[Any]],
-    ) -> Any:
-        """Compatibility alias for rollback-era lifecycle tests."""
-
-        return self.run_with_client(operation)
 
     def run_maintenance(self, awaitable: Awaitable[Any]) -> Any:
         """Run failure persistence on the same loop, even before init succeeds."""

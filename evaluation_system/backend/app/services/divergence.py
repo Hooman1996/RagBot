@@ -5,10 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Any
 
-from pipeline_observer import PipelineStage, STAGE_ORDER
-
-
-ORDERED_STAGES = tuple(sorted(PipelineStage, key=STAGE_ORDER.get))
+from .pipeline_contract import CANONICAL_STAGE_NAMES
 
 
 @dataclass(frozen=True)
@@ -85,11 +82,13 @@ def analyze_stability(turns: list[ComparableTurn]) -> dict[object, StabilitySumm
             repetitions = by_turn[turn_index]
             if len(repetitions) < 2:
                 continue
-            for stage in ORDERED_STAGES:
-                values = {item.stage_outputs.get(stage.value) for item in repetitions}
+            for stage_name in CANONICAL_STAGE_NAMES:
+                values = {
+                    item.stage_outputs.get(stage_name) for item in repetitions
+                }
                 if len(values) > 1:
                     summary.first_divergent_turn = turn_index
-                    summary.first_divergent_stage = stage.value
+                    summary.first_divergent_stage = stage_name
                     break
             if summary.first_divergent_stage is not None:
                 break
