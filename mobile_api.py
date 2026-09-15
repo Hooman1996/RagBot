@@ -61,6 +61,10 @@ class SatisfactionRequest(BaseModel):
     satisfied: bool
 
 
+class CloseSessionRequest(BaseModel):
+    national_code: str
+
+
 # ==========================================
 # DEPENDENCY INJECTION
 # ==========================================
@@ -238,7 +242,7 @@ async def gateway_history(
         raise HTTPException(status_code=500, detail="Database failure: Could not provision user profile.")
     user_id = user_row["id"]
 
-    # SCENARIO A: Only national_code provided -> Return all active sessions
+    # SCENARIO A: Only national_code provided -> Return all non-deleted sessions
     if not session_id:
         sessions_dict = await blocking_runner.run(
             chat_manager.get_user_sessions, user_id, True
@@ -263,6 +267,7 @@ async def gateway_history(
             chat_manager.resolve_mobile_session,
             user_id,
             session_id,
+            require_active=False,
             wait_for_completion_on_cancel=True,
         )
         internal_session_id = session_obj["id"] if isinstance(session_obj, dict) else session_obj
@@ -310,6 +315,31 @@ async def gateway_comment(query_id: int, req: CommentRequest):
     if not result:
         raise HTTPException(status_code=404, detail="Query not found")
     return {"status": "success", "query_id": result["id"]}
+
+
+@mobile_router.post("/v1/sessions/{session_id}/close")
+async def gateway_close_session(
+        session_id: str, req: CloseSessionRequest, request: Request):
+    _, chat_manager, _, _ = get_services(request)
+    blocking_runner = request.app.state.blocking_runner
+
+    user_row = await blocking_runner.run(
+        chat_manager.db.get_or_create_user_by_national_code,
+        req.national_code,
+    )
+    if not user_row:
+        raise HTTPException(
+            status_code=500,
+            detail="Database failure: Could not provision user profile.",
+        )
+
+    await blocking_runner.run(
+        chat_manager.close_mobile_session,
+        user_row["id"],
+        session_id,
+        wait_for_completion_on_cancel=True,
+    )
+    return {"status": "success", "session_id": session_id}
 
 
 @mobile_router.post("/v1/sessions/{session_id}/satisfaction")

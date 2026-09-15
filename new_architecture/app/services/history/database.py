@@ -8,10 +8,19 @@ import uuid
 
 import os
 from dotenv import load_dotenv
-from utils.service_errors import ServiceUnavailableError
+from utils.service_errors import ServiceError, ServiceUnavailableError
 
 # Load variables from .env into os.environ
 load_dotenv()
+
+
+class SessionUnavailableError(ServiceError):
+    """A mobile session is missing or inaccessible to the current user."""
+
+    error_code = "SESSION_UNAVAILABLE"
+    status_code = 404
+
+
 # ==================== DATABASE MANAGER ====================
 
 # ==================== DATABASE MANAGER ====================
@@ -801,24 +810,66 @@ class DatabaseManager:
             (json.dumps(metadata, ensure_ascii=False), now, session_id)
         )
 
-    def get_or_create_mobile_session(self, user_id: int, session_uuid: str) -> dict:
-        """Resolves a mobile string UUID to an internal session, creating it if missing."""
+    @staticmethod
+    def _validate_mobile_session(
+            row: dict | None, user_id: int,
+            require_active: bool = True) -> dict:
+        allowed_statuses = {"active"} if require_active else {"active", "closed"}
+        if (
+            not row
+            or row.get("user_id") != user_id
+            or row.get("status") not in allowed_statuses
+        ):
+            raise SessionUnavailableError("Session unavailable.")
+        return row
+
+    def get_or_create_mobile_session(
+            self, user_id: int, session_uuid: str,
+            require_active: bool = True) -> dict:
+        """Resolve and authorize a mobile UUID, creating it if it is unbound."""
         existing = self.get_session_by_uuid(session_uuid)
         if existing:
-            return existing
+            return self._validate_mobile_session(
+                existing, user_id, require_active=require_active
+            )
 
-        # Create new session mapping to the mobile app's specific UUID
+        # The UUID constraint makes first-user binding safe across workers.
         now = datetime.utcnow()
+        created = self._execute("""
+                                INSERT INTO chat_sessions (uuid, user_id, title, model_name, temperature,
+                                                           settings, query_count, total_tokens,
+                                                           status, is_pinned, meta_data,
+                                                           created_at, updated_at, last_activity_at)
+                                VALUES (%s, %s, %s, NULL, 0.7,
+                                        '{}', 0, 0,
+                                        'active', FALSE, '{}',
+                                        %s, %s, %s)
+                                ON CONFLICT (uuid) DO NOTHING
+                                RETURNING *;
+                                """, (session_uuid, user_id, "Mobile App Chat", now, now, now), fetch="one")
+        if created:
+            return self._validate_mobile_session(
+                created, user_id, require_active=require_active
+            )
+
+        # Another transaction won the UUID race. It is authoritative.
+        existing = self.get_session_by_uuid(session_uuid)
+        return self._validate_mobile_session(
+            existing, user_id, require_active=require_active
+        )
+
+    def close_mobile_session(
+            self, user_id: int, session_uuid: str) -> dict | None:
+        """Close a mobile session only when it is owned by ``user_id``."""
         return self._execute("""
-                             INSERT INTO chat_sessions (uuid, user_id, title, model_name, temperature,
-                                                        settings, query_count, total_tokens,
-                                                        status, is_pinned, meta_data,
-                                                        created_at, updated_at, last_activity_at)
-                             VALUES (%s, %s, %s, NULL, 0.7,
-                                     '{}', 0, 0,
-                                     'active', FALSE, '{}',
-                                     %s, %s, %s) RETURNING *;
-                             """, (session_uuid, user_id, "Mobile App Chat", now, now, now), fetch="one")
+                             UPDATE chat_sessions
+                             SET status = 'closed', updated_at = %s
+                             WHERE uuid = %s AND user_id = %s
+                               AND status IN ('active', 'closed')
+                             RETURNING *;
+                             """, (
+                                 datetime.utcnow(), session_uuid, user_id
+                             ), fetch="one")
 # ==================== CHAT MANAGER ====================
 
 class ChatManager:
@@ -948,10 +999,27 @@ class ChatManager:
             raise RuntimeError("Session not found after pin toggle")
         return self._format_session(row)
 
-    def resolve_mobile_session(self, user_id: int, session_uuid: str) -> str:
+    def resolve_mobile_session(
+            self, user_id: int, session_uuid: str,
+            require_active: bool = True) -> str:
         """Returns the internal integer ID (as a string) based on the mobile UUID."""
         if not session_uuid:
             raise ValueError("Mobile sessionID cannot be empty")
 
-        row = self.db.get_or_create_mobile_session(user_id, session_uuid)
+        if require_active:
+            row = self.db.get_or_create_mobile_session(user_id, session_uuid)
+        else:
+            row = self.db.get_or_create_mobile_session(
+                user_id, session_uuid, require_active=False
+            )
+        return str(row["id"])
+
+    def close_mobile_session(self, user_id: int, session_uuid: str) -> str:
+        """Close an owned mobile session and return its internal ID."""
+        if not session_uuid:
+            raise ValueError("Mobile sessionID cannot be empty")
+
+        row = self.db.close_mobile_session(user_id, session_uuid)
+        if not row:
+            raise SessionUnavailableError("Session unavailable.")
         return str(row["id"])

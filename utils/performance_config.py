@@ -121,6 +121,7 @@ class PerformanceSettings:
     rag_semantic_candidate_limit: int
     rag_context_rerank_enabled: bool
     rag_context_rerank_top_k: int
+    rag_related_questions_top_k: int
     rag_related_questions_rerank_threshold: float
     mobile_related_questions_rerank_threshold: float
     rag_max_new_tokens: int
@@ -264,6 +265,9 @@ def load_performance_settings() -> PerformanceSettings:
         ),
         rag_context_rerank_top_k=_positive_int(
             "RAG_CONTEXT_RERANK_TOP_K", 10
+        ),
+        rag_related_questions_top_k=_positive_int(
+            "RAG_RELATED_QUESTIONS_TOP_K", 3
         ),
         rag_related_questions_rerank_threshold=_probability(
             "RAG_RELATED_QUESTIONS_RERANK_THRESHOLD", 0.1

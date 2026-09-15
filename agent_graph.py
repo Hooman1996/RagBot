@@ -138,7 +138,9 @@ def make_handle_general(rag_system):
     def prepare_context(search_results, recent):
         aggregated = rag_system.generate_context(search_results)
         related = []
-        for candidate_index, result in enumerate(search_results[:5]):
+        for candidate_index, result in enumerate(
+            search_results[:PERFORMANCE_SETTINGS.rag_related_questions_top_k]
+        ):
             q_match = re.search(
                 r'question\s*:\s*(.+?)(?=answer\s*\d*\s*:|question category\s*:|$)',
                 result.content,
@@ -257,6 +259,9 @@ def make_handle_general(rag_system):
                 }
                 for candidate in related
             ]
+        state["related_questions"] = state["related_questions"][
+            :PERFORMANCE_SETTINGS.rag_related_questions_top_k
+        ]
         selected_context = aggregated if category == "FAQ" else selected_results
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(
             stage=PipelineStage.CONTEXT_SELECTION,
