@@ -68,15 +68,12 @@ class EvaluationRouteTests(unittest.TestCase):
                 control_plane_router=control_plane,
             )
             self.assertTrue(installed)
-            included = [
-                route.original_router
-                for route in app.routes
-                if hasattr(route, "original_router")
-            ]
-            self.assertIn(control_plane, included)
             control_paths = {route.path for route in control_plane.routes}
             self.assertIn("/api/v1/evaluation/system/database-status", control_paths)
             paths = {getattr(route, "path", "") for route in app.routes}
+            self.assertIn(
+                "/api/v1/evaluation/system/database-status", paths
+            )
             self.assertIn("/evaluation", paths)
             main_source = Path("main.py").read_text(encoding="utf-8")
             self.assertIn("install_evaluation_routes(", main_source)
@@ -119,7 +116,7 @@ class EvaluationEnvironmentTests(unittest.TestCase):
             "EVAL_ENABLED": "true",
             "EVAL_API_HOST": "127.0.0.9",
             "EVAL_API_PORT": "8190",
-            "EVAL_REDIS_URL": "redis://internal-redis:6380/4",
+            "EVAL_SSE_POLL_INTERVAL_SECONDS": "0.75",
             "EVAL_ALLOW_DB_INIT": "true",
             "EVAL_SESSION_CONCURRENCY": "3",
             "EVAL_REPEAT_MAX": "27",
@@ -133,7 +130,7 @@ class EvaluationEnvironmentTests(unittest.TestCase):
                 self.assertTrue(settings.enabled)
                 self.assertEqual(settings.api_host, "127.0.0.9")
                 self.assertEqual(settings.api_port, 8190)
-                self.assertEqual(settings.redis_url, values["EVAL_REDIS_URL"])
+                self.assertEqual(settings.sse_poll_interval_seconds, 0.75)
                 self.assertTrue(settings.allow_db_init)
                 self.assertEqual(settings.session_concurrency, 3)
                 self.assertEqual(settings.repeat_max, 27)

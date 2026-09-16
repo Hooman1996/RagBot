@@ -201,7 +201,6 @@ request_limiter = None
 tei_http_client = None
 tei_sync_http_client = None
 llm_client = None
-evaluation_redis = None
 ocr_inference_lock = threading.Lock()
 
 # db_manager = DatabaseManager(host="localhost", port=5432, dbname="hihelp_db", user="postgres", password="postgres")
@@ -219,7 +218,6 @@ async def lifespan(app: FastAPI):
     global intent_classifier, scenarios_db, agent_service, answering_service, mass_answer_processor, mass_answer_job_manager, chat_manager
     global text_processor, qdrant_client, blocking_runner, request_limiter
     global tei_http_client, tei_sync_http_client, llm_client
-    global evaluation_redis
 
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
     request_limiter = AdmissionLimiter(
@@ -397,15 +395,6 @@ async def lifespan(app: FastAPI):
         app.state.history_rewriting_service = history_rewriting_service
         app.state.blocking_runner = blocking_runner
         app.state.request_limiter = request_limiter
-        evaluation_settings = get_evaluation_settings()
-        if evaluation_settings.enabled and evaluation_settings.use_celery:
-            from redis.asyncio import Redis
-
-            evaluation_redis = Redis.from_url(
-                evaluation_settings.redis_url,
-                decode_responses=False,
-            )
-        app.state.redis = evaluation_redis
         app.state.ready = True
         yield
     finally:
@@ -421,8 +410,6 @@ async def lifespan(app: FastAPI):
 
         if mass_answer_job_manager is not None:
             await cleanup(mass_answer_job_manager.aclose)
-        if evaluation_redis is not None:
-            await cleanup(evaluation_redis.aclose)
         if get_evaluation_settings().enabled:
             from evaluation_system.backend.app.db.session import (
                 engine as evaluation_engine,
@@ -460,7 +447,6 @@ async def lifespan(app: FastAPI):
             "history_rewriting_service",
             "blocking_runner",
             "request_limiter",
-            "redis",
             "ragbot_authenticated_user",
         ):
             if hasattr(app.state, name):
@@ -474,7 +460,6 @@ async def lifespan(app: FastAPI):
         db_connections = None
         blocking_runner = None
         request_limiter = None
-        evaluation_redis = None
         agent_service = None
         answering_service = None
         mass_answer_processor = None

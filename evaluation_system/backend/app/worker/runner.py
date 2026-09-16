@@ -15,7 +15,7 @@ from ..clients.ragbot import (
 )
 from ..db.models import DatasetTurn, Run, RunSession, RunTurn, StageResult
 from ..services.divergence import ComparableTurn, analyze_stability
-from ..services.events import NoOpEventBus, safe_error_code
+from ..services.error_codes import safe_error_code
 from ..services.bounded_execution import bounded_for_each, effective_session_concurrency
 from ..services.history_state import exact_agent_state_from_turns
 from ..services.pipeline_contract import CANONICAL_STAGE_NAMES, STAGE_ORDER
@@ -40,7 +40,6 @@ class EvaluationRunExecutor:
         session_factory,
         ragbot_client=None,
         session_concurrency: int = 1,
-        event_bus=None,
     ):
         if session_concurrency < 1:
             raise ValueError("session_concurrency must be positive")
@@ -49,7 +48,6 @@ class EvaluationRunExecutor:
         self.session_factory = session_factory
         self.ragbot_client = ragbot_client
         self.session_concurrency = session_concurrency
-        self.event_bus = event_bus or NoOpEventBus()
 
     async def execute(
         self,
@@ -62,7 +60,6 @@ class EvaluationRunExecutor:
             run = await self._claim_run(run_id, task_id)
             if run is None:
                 return
-            await self.event_bus.publish(run_id, "run_started", {"run_id": str(run_id), "status": "RUNNING"})
             async with self.session_factory() as session:
                 run_sessions = list(await session.scalars(
                     select(RunSession).where(
@@ -75,32 +72,18 @@ class EvaluationRunExecutor:
                 run_sessions, concurrency,
                 lambda item: self._execute_session(run, item),
             )
-            final_status = await self._finish_run(run_id)
+            await self._finish_run(run_id)
             if run.run_type.startswith("STABILITY"):
                 await self._store_divergence(run_id)
-            event_name = "run_cancelled" if final_status == "CANCELLED" else "run_completed"
-            await self.event_bus.publish(
-                run_id,
-                event_name,
-                {"run_id": str(run_id), "status": final_status},
-            )
         except Exception as exc:
             error_code = safe_error_code(
                 getattr(exc, "error_code", type(exc).__name__),
                 fallback="EVALUATION_RUN_ERROR",
             )
-            failure_persisted = False
             try:
-                failure_persisted = await self._fail_run(
-                    run_id, error_code, task_id
-                )
+                await self._fail_run(run_id, error_code, task_id)
             except Exception:
                 pass
-            if failure_persisted:
-                await self.event_bus.publish(run_id, "run_failed", {
-                    "run_id": str(run_id), "status": "FAILED",
-                    "error_code": error_code,
-                })
             raise EvaluationRunFailed(error_code) from None
 
     async def _claim_run(
@@ -162,9 +145,6 @@ class EvaluationRunExecutor:
             row.status = "RUNNING"
             row.started_at = row.started_at or now_utc()
             await session.commit()
-        await self.event_bus.publish(run.id, "session_started", {
-            "run_id": str(run.id), "run_session_id": str(run_session.id), "status": "RUNNING",
-        })
         async with self.session_factory() as session:
             source_turns = list(await session.scalars(
                 select(DatasetTurn).where(
@@ -186,13 +166,8 @@ class EvaluationRunExecutor:
                 error_count += int(turn.status == "ERROR")
                 infrastructure_error_count += int(bool(turn.infrastructure_error))
                 total_latency += float(turn.total_latency_ms or 0.0)
-                await self._publish_progress(run.id)
+                await self._update_progress(run.id)
                 continue
-            await self.event_bus.publish(run.id, "turn_started", {
-                "run_id": str(run.id), "run_session_id": str(run_session.id),
-                "run_turn_id": str(turn.id), "status": "RUNNING",
-            })
-            turn_failed = False
             turn_started = time.perf_counter()
             try:
                 state_before = await self._state_before(
@@ -208,15 +183,12 @@ class EvaluationRunExecutor:
                     await self._complete_turn(turn.id, result)
                     fallback_count += bool(result.fallback_reason)
                 else:
-                    turn_failed = True
                     error_count += 1
                     infrastructure_error_count += int(result.infrastructure_error)
                     await self._structured_error_turn(
                         turn.id, result=result, total_latency_ms=turn_latency
                     )
-                await self._publish_stages(run.id, run_session.id, turn.id, result.stages)
             except Exception as exc:
-                turn_failed = True
                 error_count += 1
                 infrastructure = bool(
                     getattr(exc, "infrastructure_error", True)
@@ -232,12 +204,7 @@ class EvaluationRunExecutor:
                     infrastructure=infrastructure,
                     total_latency_ms=turn_latency,
                 )
-                await self._publish_stages(run.id, run_session.id, turn.id, stages)
-            await self.event_bus.publish(run.id, "turn_completed", {
-                "run_id": str(run.id), "run_session_id": str(run_session.id),
-                "run_turn_id": str(turn.id), "status": "ERROR" if turn_failed else "COMPLETED",
-            })
-            await self._publish_progress(run.id)
+            await self._update_progress(run.id)
         async with self.session_factory() as session:
             row = await session.get(RunSession, run_session.id, with_for_update=True)
             row.status = "COMPLETED" if error_count == 0 else "FAILED"
@@ -247,12 +214,7 @@ class EvaluationRunExecutor:
             row.total_latency_ms = total_latency
             row.finished_at = now_utc()
             await session.commit()
-        await self._publish_progress(run.id)
-        await self.event_bus.publish(run.id, "session_completed", {
-            "run_id": str(run.id), "run_session_id": str(run_session.id),
-            "status": "COMPLETED" if error_count == 0 else "FAILED",
-            "duration_ms": total_latency,
-        })
+        await self._update_progress(run.id)
 
     async def _claim_turn(
         self, run_session_id: uuid.UUID, source: DatasetTurn
@@ -448,18 +410,6 @@ class EvaluationRunExecutor:
             await self._persist_stages(session, turn_id, stages)
             await session.commit()
 
-    async def _publish_stages(self, run_id, run_session_id, turn_id, stages):
-        for stage in stages:
-            await self.event_bus.publish(run_id, "stage_completed", {
-                "run_id": str(run_id),
-                "run_session_id": str(run_session_id),
-                "run_turn_id": str(turn_id),
-                "stage_name": stage.stage_name,
-                "status": stage.status,
-                "duration_ms": stage.duration_ms,
-                "error_code": stage.error_code,
-            })
-
     async def _cancel_requested(self, run_id) -> bool:
         async with self.session_factory() as session:
             run = await session.get(Run, run_id)
@@ -489,7 +439,7 @@ class EvaluationRunExecutor:
             await session.commit()
             return run.status
 
-    async def _publish_progress(self, run_id):
+    async def _update_progress(self, run_id):
         async with self.session_factory() as session:
             run = await session.get(Run, run_id, with_for_update=True)
             completed_turns = await session.scalar(
@@ -518,13 +468,6 @@ class EvaluationRunExecutor:
             run.infrastructure_error_count = sum(item.infrastructure_error for item in turns)
             run.heartbeat_at = now_utc()
             await session.commit()
-        await self.event_bus.publish(run_id, "progress", {
-            "run_id": str(run_id), "status": run.status,
-            "completed_turns": int(completed_turns or 0),
-            "total_turns": run.total_turns,
-            "completed_sessions": int(completed_sessions or 0),
-            "total_sessions": run.total_sessions,
-        })
 
     async def _fail_run(self, run_id, error_code, worker_task_id=None):
         async with self.session_factory() as session:

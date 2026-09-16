@@ -9,12 +9,9 @@ import socket
 import uuid
 from collections.abc import Awaitable, Callable
 
-from redis.asyncio import Redis
-
 from ..clients.ragbot import RagBotEvaluationClient
 from ..config import EvaluationSettings, get_settings
 from ..db.session import AsyncSessionFactory, engine
-from ..services.events import EvaluationEventBus
 from .postgres_queue import PostgresRunQueue
 from .runner import EvaluationRunExecutor, EvaluationRunFailed
 
@@ -93,7 +90,6 @@ async def run_worker(
         raise RuntimeError("EVALUATION_WORKER_DISABLED")
     stop_event = stop_event or asyncio.Event()
     _install_signal_handlers(stop_event)
-    redis = Redis.from_url(settings.redis_url, decode_responses=False)
     ragbot_client = None
     try:
         ragbot_client = RagBotEvaluationClient(
@@ -108,7 +104,6 @@ async def run_worker(
             session_factory=AsyncSessionFactory,
             ragbot_client=ragbot_client,
             session_concurrency=settings.session_concurrency,
-            event_bus=EvaluationEventBus(redis),
         )
         worker = PostgresEvaluationWorker(
             queue=queue,
@@ -122,10 +117,7 @@ async def run_worker(
             if ragbot_client is not None:
                 await ragbot_client.aclose()
         finally:
-            try:
-                await redis.aclose()
-            finally:
-                await engine.dispose()
+            await engine.dispose()
 
 
 def main() -> int:

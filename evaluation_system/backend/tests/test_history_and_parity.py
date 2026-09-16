@@ -87,7 +87,6 @@ class RunnerHistoryQueryTests(unittest.IsolatedAsyncioTestCase):
         runner = EvaluationRunExecutor(
             session_factory=lambda: session,
             ragbot_client=AsyncMock(),
-            event_bus=AsyncMock(),
         )
 
         restored = await runner._state_before(uuid.uuid4(), 3)

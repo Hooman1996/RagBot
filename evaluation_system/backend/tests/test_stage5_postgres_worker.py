@@ -144,7 +144,6 @@ class WorkerLossResumeTests(unittest.IsolatedAsyncioTestCase):
         runner = EvaluationRunExecutor(
             session_factory=lambda: session,
             ragbot_client=AsyncMock(),
-            event_bus=AsyncMock(),
         )
 
         turn, should_execute = await runner._claim_turn(
@@ -207,11 +206,9 @@ class RunnerPreparationBoundaryTests(unittest.IsolatedAsyncioTestCase):
             raise RagBotClientError("RAGBOT_UNAVAILABLE", "connection")
 
         client.runtime_snapshot.side_effect = fail_snapshot
-        event_bus = SimpleNamespace(publish=AsyncMock())
         runner = EvaluationRunExecutor(
             session_factory=lambda: session,
             ragbot_client=client,
-            event_bus=event_bus,
         )
 
         with self.assertRaises(EvaluationRunFailed) as caught:
@@ -290,15 +287,13 @@ class WorkerLoopTests(unittest.IsolatedAsyncioTestCase):
 
 
 class WorkerResourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
-    async def test_worker_closes_http_redis_and_engine(self):
+    async def test_worker_closes_http_and_engine(self):
         from evaluation_system.backend.app.worker import postgres_worker
 
-        redis = SimpleNamespace(aclose=AsyncMock())
         client = SimpleNamespace(aclose=AsyncMock())
         fake_engine = SimpleNamespace(dispose=AsyncMock())
         settings = SimpleNamespace(
             enabled=True,
-            redis_url="redis://events-only",
             ragbot_base_url="http://ragbot",
             ragbot_http_timeout_seconds=70,
             worker_stale_after_seconds=300,
@@ -306,8 +301,7 @@ class WorkerResourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             worker_poll_interval_seconds=1,
         )
 
-        with patch.object(postgres_worker.Redis, "from_url", return_value=redis), \
-             patch.object(postgres_worker, "RagBotEvaluationClient", return_value=client), \
+        with patch.object(postgres_worker, "RagBotEvaluationClient", return_value=client), \
              patch.object(postgres_worker, "engine", fake_engine), \
              patch.object(postgres_worker, "_install_signal_handlers"), \
              patch.object(postgres_worker.PostgresEvaluationWorker, "run", AsyncMock()):
@@ -316,7 +310,6 @@ class WorkerResourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
             )
 
         client.aclose.assert_awaited_once()
-        redis.aclose.assert_awaited_once()
         fake_engine.dispose.assert_awaited_once()
 
 

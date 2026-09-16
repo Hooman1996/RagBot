@@ -4,7 +4,7 @@ import uuid
 from datetime import datetime, timezone
 from typing import Any
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, HTTPException
 from sqlalchemy import select
 
 from ..db.models import DatasetTurn, Run, RunSession, RunTurn, StageResult
@@ -12,7 +12,6 @@ from ..schemas.api import DeleteResponse, IdResponse, RunCreateRequest
 from ..services.provisional_snapshot import build_provisional_snapshot
 from ..services.repository import create_run, delete_run, get_dataset, list_runs
 from ..services.run_planning import RunPlanError
-from ..services.events import EvaluationEventBus
 from .dependencies import AuthenticatedUserDep, DatabaseDep
 
 
@@ -80,7 +79,6 @@ async def remove_run(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: Databas
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(
     run_id: uuid.UUID,
-    request: Request,
     _user: AuthenticatedUserDep,
     db: DatabaseDep,
 ) -> dict:
@@ -94,11 +92,6 @@ async def cancel_run(
         row.status = "CANCELLED"
         row.finished_at = row.cancel_requested_at
     await db.commit()
-    await EvaluationEventBus(request.app.state.redis).publish(
-        run_id,
-        "run_cancelled" if row.status == "CANCELLED" else "progress",
-        {"run_id": str(run_id), "status": row.status},
-    )
     return {"id": row.id, "status": row.status, "cancel_requested": True}
 
 

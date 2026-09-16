@@ -53,7 +53,7 @@ class EvaluationSettings:
     postgres_password: str
     allow_db_init: bool
     cors_origins: tuple[str, ...]
-    redis_url: str
+    sse_poll_interval_seconds: float
     worker_poll_interval_seconds: float
     worker_stale_after_seconds: int
     session_concurrency: int
@@ -92,7 +92,9 @@ class EvaluationSettings:
             postgres_password=os.getenv("POSTGRES_PASSWORD", "postgres"),
             allow_db_init=_bool("EVAL_ALLOW_DB_INIT", False),
             cors_origins=origins,
-            redis_url=os.getenv("EVAL_REDIS_URL", "redis://127.0.0.1:6379/1"),
+            sse_poll_interval_seconds=_positive_float(
+                "EVAL_SSE_POLL_INTERVAL_SECONDS", 1.0
+            ),
             worker_poll_interval_seconds=_positive_float(
                 "EVAL_WORKER_POLL_INTERVAL_SECONDS", 1.0
             ),

@@ -260,7 +260,6 @@ class RunnerHttpBoundaryTests(unittest.IsolatedAsyncioTestCase):
         return EvaluationRunExecutor(
             session_factory=lambda: session,
             ragbot_client=client or AsyncMock(),
-            event_bus=AsyncMock(),
         )
 
     async def test_remote_turn_uses_only_evaluation_identifiers_and_exact_state(self):

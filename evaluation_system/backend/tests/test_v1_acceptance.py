@@ -216,7 +216,6 @@ class AcceptanceInfrastructurePersistenceTests(unittest.IsolatedAsyncioTestCase)
                     session_factory=lambda: session,
                     ragbot_client=object(),
                     session_concurrency=1,
-                    event_bus=object(),
                 )
                 stages = runner._transport_error_stages(error)
                 await runner._transport_error_turn(

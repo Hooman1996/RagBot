@@ -148,7 +148,7 @@ for name in modules:
                     "POSTGRES_DB": "isolated",
                     "POSTGRES_USER": "isolated",
                     "POSTGRES_PASSWORD": "placeholder",
-                    "EVAL_REDIS_URL": "redis://127.0.0.1:6379/15",
+                    "EVAL_SSE_POLL_INTERVAL_SECONDS": "1",
                     "EVAL_RAGBOT_BASE_URL": "http://127.0.0.1:8080",
                 }
             )

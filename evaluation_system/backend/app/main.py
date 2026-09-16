@@ -7,8 +7,6 @@ from contextlib import asynccontextmanager
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
-from redis.asyncio import Redis
-
 from .api import datasets, datasources, events, runs, stability, system
 from .config import get_settings
 from .db.session import engine
@@ -16,15 +14,10 @@ from .db.session import engine
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    settings = get_settings()
-    app.state.redis = Redis.from_url(settings.redis_url, decode_responses=False)
     try:
         yield
     finally:
-        try:
-            await app.state.redis.aclose()
-        finally:
-            await engine.dispose()
+        await engine.dispose()
 
 
 app = FastAPI(
