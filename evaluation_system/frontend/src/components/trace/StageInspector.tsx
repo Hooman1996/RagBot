@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, CaretDown, CaretLeft, CheckCircle, MinusCircle, WarningCircle } from "@phosphor-icons/react";
+import { ArrowDown, ArrowUp, CaretDown, CaretLeft, CheckCircle, Copy, MinusCircle, WarningCircle } from "@phosphor-icons/react";
 import { useState } from "react";
 import type { StageResult } from "../../types/api";
 import { Badge, statusTone } from "../ui/Badge";
@@ -93,7 +93,13 @@ function Generation({ stage }: { stage: StageResult }) {
 
 export function StageInspector({ stage, stages = [] }: { stage: StageResult | undefined; stages?: StageResult[] }) {
   const [view, setView] = useState<"structured" | "raw">("structured");
-  if (!stage) return <div className="empty-inline">هنوز اثری برای این مرحله ثبت نشده است.</div>;
+  const [copied, setCopied] = useState<"input" | "output" | null>(null);
+  if (!stage) return <div className="empty-inline">این مرحله در این trace موجود نیست.</div>;
+  const copyHash = async (kind: "input" | "output", value: string | null) => {
+    if (!value || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(value);
+    setCopied(kind);
+  };
   const body = (() => {
     switch (stage.stage_name) {
       case "NORMALIZATION": return <Normalization stage={stage} />;
@@ -108,5 +114,9 @@ export function StageInspector({ stage, stages = [] }: { stage: StageResult | un
       default: return <JsonFallback stage={stage} />;
     }
   })();
-  return <section className="stage-inspector"><header><Badge tone={statusTone(stage.status)}>{stage.status}</Badge><span>{formatDuration(stage.duration_ms)}</span><code dir="ltr" title={stage.input_hash || ""}>in {shortHash(stage.input_hash)}</code><code dir="ltr" title={stage.output_hash || ""}>out {shortHash(stage.output_hash)}</code><div className="inspector-tabs" role="tablist"><button role="tab" aria-selected={view === "structured"} onClick={() => setView("structured")}>Structured</button><button role="tab" aria-selected={view === "raw"} onClick={() => setView("raw")}>Raw JSON</button></div></header>{stage.status === "ERROR" && <div className="stage-error"><WarningCircle size={20} /><div><strong>Stage error</strong><p dir="ltr">{stage.error_code || "UNKNOWN_STAGE_ERROR"}</p></div></div>}{view === "structured" ? body : <JsonFallback stage={stage} />}{stage.error_data && <details className="disclosure"><summary>جزئیات امن خطا</summary><TextBlock value={stage.error_data} code /></details>}</section>;
+  return <section className="stage-inspector"><header><Badge tone={statusTone(stage.status)}>{stage.status}</Badge><span>{formatDuration(stage.duration_ms)}</span><div className="inspector-tabs" role="tablist"><button role="tab" aria-selected={view === "structured"} onClick={() => setView("structured")}>Structured</button><button role="tab" aria-selected={view === "raw"} onClick={() => setView("raw")}>Raw JSON</button></div></header><div className="stage-hashes"><HashValue label="input_hash" value={stage.input_hash} copied={copied === "input"} onCopy={() => void copyHash("input", stage.input_hash)} /><HashValue label="output_hash" value={stage.output_hash} copied={copied === "output"} onCopy={() => void copyHash("output", stage.output_hash)} /></div>{stage.status === "ERROR" && <div className="stage-error"><WarningCircle size={20} /><div><strong>Stage error</strong><p dir="ltr">{stage.error_code || "UNKNOWN_STAGE_ERROR"}</p></div></div>}{view === "structured" ? body : <JsonFallback stage={stage} />}{stage.error_data && <details className="disclosure"><summary>جزئیات امن خطا</summary><TextBlock value={stage.error_data} code /></details>}</section>;
+}
+
+function HashValue({ label, value, copied, onCopy }: { label: string; value: string | null; copied: boolean; onCopy: () => void }) {
+  return <div><span>{label}</span><code dir="ltr" title={value || ""}>{value || "-"}</code>{value && <button type="button" className="icon-button" onClick={onCopy} aria-label={`کپی ${label}`} title={copied ? "کپی شد" : "کپی هش"}><Copy size={14} /></button>}</div>;
 }

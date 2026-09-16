@@ -17,7 +17,7 @@ const navigation: NavigationItem[] = [
   { panel: "datasets", label: "مجموعه داده‌ها", english: "Datasets", icon: Database, enabled: true },
   { panel: "runs", label: "اجراها", english: "Runs", icon: ChartDonut, enabled: true },
   { panel: "stability", label: "پایداری", english: "Stability", icon: Pulse, enabled: true },
-  { panel: "pipeline", label: "خط لوله", english: "Pipeline", icon: GitBranch, enabled: false },
+  { panel: "pipeline", label: "خط لوله", english: "Pipeline", icon: GitBranch, enabled: true },
   { panel: "system", label: "سیستم", english: "System", icon: GearSix, enabled: false },
 ];
 
