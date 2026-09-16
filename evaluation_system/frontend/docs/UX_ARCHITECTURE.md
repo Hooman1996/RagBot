@@ -22,7 +22,7 @@ The product observes the real RagBot runtime. It does not introduce another chat
 
 ## Design read and direction
 
-This is a dense enterprise engineering application for AI engineers. The visual language is a calm graphite flight recorder with one cyan-teal accent. Evidence and execution order create the identity, not decoration.
+This is a dense enterprise engineering application for AI engineers. The visual language pairs a fixed deep-navy control rail with a bright cool-gray workspace, white evidence surfaces and one restrained blue accent. Evidence and execution order create the identity, not decoration.
 
 Working design dials from the two frontend design skills:
 
@@ -36,8 +36,8 @@ The prototype uses native HTML, CSS and JavaScript because this is an isolated d
 
 ### Visual character
 
-- One locked dark theme using graphite and deep navy layers.
-- Cyan-teal is reserved for active, live and current selection.
+- A deep-navy navigation shell frames a light, high-contrast technical workspace.
+- Blue and cyan-blue are reserved for active, live and current selection.
 - Green means successful completion.
 - Amber means warning, fallback or divergence.
 - Red means error or failure.
@@ -47,7 +47,7 @@ The prototype uses native HTML, CSS and JavaScript because this is an isolated d
 - Persian uses the existing local Vazirmatn files.
 - Technical values use an isolated monospace stack.
 
-The deliberate aesthetic risk is a compact, border-led three-pane workspace with almost no conventional cards. This makes the product feel closer to an instrument than an admin dashboard while remaining calm and readable.
+The deliberate aesthetic choice is a compact, border-led control panel: overview charts and operational summaries lead into a high-density three-pane Run Inspector. This makes the product feel like a complete evaluation console while keeping trace evidence calm and readable.
 
 ## Current frontend audit
 
@@ -473,20 +473,21 @@ Prototype values:
 
 ```css
 :root {
-  --background: #070d13;
-  --surface-1: #0b131c;
-  --surface-2: #0f1924;
-  --surface-3: #14212d;
-  --border-subtle: #1d2b38;
-  --border-strong: #304252;
-  --text-primary: #e8eef2;
-  --text-secondary: #a7b4be;
-  --text-muted: #71808c;
-  --accent: #48b7c7;
-  --success: #58ba8c;
-  --warning: #d6a552;
-  --danger: #e26f78;
-  --info: #6ca7d9;
+  --background: #f3f6fa;
+  --surface-1: #ffffff;
+  --surface-2: #f8fafc;
+  --surface-3: #eef3f8;
+  --sidebar: #0b1728;
+  --border-subtle: #dbe3ec;
+  --border-strong: #b9c6d4;
+  --text-primary: #132238;
+  --text-secondary: #4d5f73;
+  --text-muted: #7c8b9b;
+  --accent: #1677c8;
+  --success: #23845b;
+  --warning: #b87816;
+  --danger: #c6424c;
+  --info: #247db7;
   --radius-sm: 6px;
   --radius-md: 8px;
 }
