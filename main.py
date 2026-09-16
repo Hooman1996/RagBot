@@ -77,7 +77,6 @@ from document_category import get_document_category
 from evaluation_system.backend.app.config import (
     get_settings as get_evaluation_settings,
 )
-from evaluation_system.backend.app.ragbot_auth import establish_ragbot_user
 
 class Config:
     """Configuration"""
@@ -224,7 +223,6 @@ async def lifespan(app: FastAPI):
         REQUEST_CONCURRENCY_LIMIT, name="answering"
     )
     app.state.ready = False
-    app.state.ragbot_authenticated_user = None
     try:
         text_processor = await blocking_runner.run(
             PersianTextProcessor, use_stemming=False
@@ -447,7 +445,6 @@ async def lifespan(app: FastAPI):
             "history_rewriting_service",
             "blocking_runner",
             "request_limiter",
-            "ragbot_authenticated_user",
         ):
             if hasattr(app.state, name):
                 delattr(app.state, name)
@@ -529,7 +526,7 @@ app.include_router(kb_router)
 app.include_router(mobile_router)
 app.include_router(internal_evaluation_router)
 
-from evaluation_system.backend.app.integration import install_evaluation_routes
+from evaluation_system.embedded_integration import install_evaluation_routes
 
 install_evaluation_routes(
     app,
@@ -605,7 +602,6 @@ async def login(req: LoginRequest, request: Request):
         req.password,
         wait_for_completion_on_cancel=True,
     )
-    establish_ragbot_user(request, user)
     if user:
         user["success"] = True
         return user

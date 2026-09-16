@@ -1,14 +1,14 @@
-"""Optional standalone diagnostic API using root-.env-backed settings."""
+"""Optional standalone API launcher using backend-local settings."""
 
 import uvicorn
 
-from evaluation_system.backend.app.config import get_settings
+from app.config import get_settings
 
 
 def main() -> int:
     settings = get_settings()
     uvicorn.run(
-        "evaluation_system.backend.app.main:app",
+        "app.main:app",
         host=settings.api_host,
         port=settings.api_port,
     )

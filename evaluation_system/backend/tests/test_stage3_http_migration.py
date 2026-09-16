@@ -412,7 +412,7 @@ class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
         fake_context = AsyncMock()
         fake_context.__aenter__.return_value = fake_client
         with patch.object(datasources, "RagBotEvaluationClient", return_value=fake_context):
-            result = await datasources.list_datasources(_user=object())
+            result = await datasources.list_datasources()
         self.assertEqual(result, [{"title": "General_FAQ"}])
 
     def test_active_worker_path_has_no_local_ragbot_runtime_imports(self):

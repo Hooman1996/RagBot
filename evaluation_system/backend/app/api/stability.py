@@ -7,14 +7,14 @@ from ..services.provisional_snapshot import build_provisional_snapshot
 from ..services.importer import parse_manual_dataset
 from ..services.repository import create_run, persist_parsed_dataset
 from ..services.run_planning import RunPlanError
-from .dependencies import AuthenticatedUserDep, DatabaseDep
+from .dependencies import DatabaseDep
 
 
 router = APIRouter(prefix="/stability", tags=["evaluation-stability"])
 
 
 @router.post("/manual", response_model=IdResponse)
-async def manual_stability(body: ManualStabilityRequest, _user: AuthenticatedUserDep, db: DatabaseDep) -> IdResponse:
+async def manual_stability(body: ManualStabilityRequest, db: DatabaseDep) -> IdResponse:
     parsed = parse_manual_dataset(body.queries)
     dataset = await persist_parsed_dataset(db, parsed)
     snapshot = build_provisional_snapshot(body.documents)

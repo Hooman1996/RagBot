@@ -12,7 +12,7 @@ from ..services.importer import DatasetImportError, parse_dataset_file
 from ..services.repository import delete_dataset, get_dataset, list_datasets, persist_parsed_dataset
 from ..db.models import DatasetSession, DatasetTurn, Run
 from sqlalchemy import select
-from .dependencies import AuthenticatedUserDep, DatabaseDep
+from .dependencies import DatabaseDep
 
 
 router = APIRouter(prefix="/datasets", tags=["evaluation-datasets"])
@@ -44,7 +44,6 @@ def _dataset_dict(row) -> dict:
 
 @router.post("/import")
 async def import_dataset(
-    _user: AuthenticatedUserDep,
     db: DatabaseDep,
     file: Annotated[UploadFile, File()],
     dataset_type: Annotated[Literal["PIPELINE_INSPECTION", "STABILITY"], Form()] = "PIPELINE_INSPECTION",
@@ -68,12 +67,12 @@ async def import_dataset(
 
 
 @router.get("")
-async def get_datasets(_user: AuthenticatedUserDep, db: DatabaseDep) -> list[dict]:
+async def get_datasets(db: DatabaseDep) -> list[dict]:
     return [_dataset_dict(row) for row in await list_datasets(db)]
 
 
 @router.get("/{dataset_id}")
-async def get_dataset_by_id(dataset_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> dict:
+async def get_dataset_by_id(dataset_id: uuid.UUID, db: DatabaseDep) -> dict:
     row = await get_dataset(db, dataset_id)
     if row is None:
         raise HTTPException(status_code=404, detail={"error_code": "DATASET_NOT_FOUND"})
@@ -81,7 +80,7 @@ async def get_dataset_by_id(dataset_id: uuid.UUID, _user: AuthenticatedUserDep, 
 
 
 @router.get("/{dataset_id}/sessions")
-async def get_dataset_sessions(dataset_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> list[dict]:
+async def get_dataset_sessions(dataset_id: uuid.UUID, db: DatabaseDep) -> list[dict]:
     rows = list(await db.scalars(
         select(DatasetSession).where(DatasetSession.dataset_id == dataset_id).order_by(DatasetSession.first_source_row)
     ))
@@ -96,7 +95,7 @@ async def get_dataset_sessions(dataset_id: uuid.UUID, _user: AuthenticatedUserDe
 
 
 @router.get("/sessions/{dataset_session_id}/turns")
-async def get_dataset_session_turns(dataset_session_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> list[dict]:
+async def get_dataset_session_turns(dataset_session_id: uuid.UUID, db: DatabaseDep) -> list[dict]:
     rows = list(await db.scalars(
         select(DatasetTurn).where(DatasetTurn.dataset_session_id == dataset_session_id).order_by(DatasetTurn.turn_index)
     ))
@@ -110,7 +109,7 @@ async def get_dataset_session_turns(dataset_session_id: uuid.UUID, _user: Authen
 
 
 @router.delete("/{dataset_id}", response_model=DeleteResponse)
-async def remove_dataset(dataset_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> DeleteResponse:
+async def remove_dataset(dataset_id: uuid.UUID, db: DatabaseDep) -> DeleteResponse:
     active_run = await db.scalar(
         select(Run.id).where(
             Run.dataset_id == dataset_id,

@@ -7,9 +7,9 @@ from logging.config import fileConfig
 from alembic import context
 from sqlalchemy import create_engine, pool, text
 
-from evaluation_system.backend.app.config import get_settings
-from evaluation_system.backend.app.db.base import EVALUATION_SCHEMA, EvaluationBase
-from evaluation_system.backend.app.db import models as _models  # noqa: F401
+from app.config import get_settings
+from app.db.base import EVALUATION_SCHEMA, EvaluationBase
+from app.db import models as _models  # noqa: F401
 
 
 config = context.config

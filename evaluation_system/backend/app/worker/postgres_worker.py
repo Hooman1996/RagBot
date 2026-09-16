@@ -126,7 +126,7 @@ def main() -> int:
     except RuntimeError as exc:
         if str(exc) == "EVALUATION_WORKER_DISABLED":
             raise SystemExit(
-                "Evaluation is disabled: set EVAL_ENABLED=true in root .env"
+                "Evaluation is disabled: set EVAL_ENABLED=true in .env"
             ) from None
         raise
     return 0

@@ -75,7 +75,7 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
         )
         with patch.object(runs, "get_dataset", AsyncMock(return_value=object())), \
              patch.object(runs, "create_run", create_run):
-            response = await runs.start_run(body, object(), db)
+            response = await runs.start_run(body, db)
 
         self.assertEqual(response.status, "PENDING")
         kwargs = create_run.await_args.kwargs
@@ -101,7 +101,7 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
                  stability, "persist_parsed_dataset", AsyncMock(return_value=object())
              ), \
              patch.object(stability, "create_run", create_run):
-            response = await stability.manual_stability(body, object(), db)
+            response = await stability.manual_stability(body, db)
 
         self.assertEqual(response.status, "PENDING")
         kwargs = create_run.await_args.kwargs

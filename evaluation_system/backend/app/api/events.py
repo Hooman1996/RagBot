@@ -18,7 +18,6 @@ from ..config import get_settings
 from ..db.models import Run, RunSession, RunTurn, StageResult
 from ..db.session import AsyncSessionFactory
 from ..services.error_codes import safe_error_code
-from .dependencies import AuthenticatedUserDep
 
 
 router = APIRouter(tags=["evaluation-events"])
@@ -293,7 +292,6 @@ def project_changes(
 async def run_events(
     run_id: uuid.UUID,
     request: Request,
-    _user: AuthenticatedUserDep,
 ):
     # Deliberately tolerated: reconnect recovery uses a fresh snapshot, not replay.
     request.headers.get("last-event-id")

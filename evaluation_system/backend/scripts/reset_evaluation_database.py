@@ -7,7 +7,7 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TextIO
 
-from evaluation_system.backend.app.config import get_settings
+from app.config import get_settings
 
 
 EVALUATION_SCHEMA = "evaluation"
@@ -23,10 +23,10 @@ def build_parser() -> argparse.ArgumentParser:
         "action."
     )
     examples = """examples:
-  python3 -m evaluation_system.backend.scripts.reset_evaluation_database \\
+  python3 -m scripts.reset_evaluation_database \\
     --confirm DROP_EVALUATION_SCHEMA
 
-  bash evaluation_system/backend/scripts/reset_evaluation_database.sh \\
+  bash scripts/reset_evaluation_database.sh \\
     --confirm DROP_EVALUATION_SCHEMA
 """
     parser = argparse.ArgumentParser(

@@ -12,7 +12,7 @@ from ..schemas.api import DeleteResponse, IdResponse, RunCreateRequest
 from ..services.provisional_snapshot import build_provisional_snapshot
 from ..services.repository import create_run, delete_run, get_dataset, list_runs
 from ..services.run_planning import RunPlanError
-from .dependencies import AuthenticatedUserDep, DatabaseDep
+from .dependencies import DatabaseDep
 
 
 router = APIRouter(tags=["evaluation-runs"])
@@ -36,7 +36,7 @@ def _run_dict(row: Run) -> dict[str, Any]:
 
 
 @router.post("/runs", response_model=IdResponse)
-async def start_run(body: RunCreateRequest, _user: AuthenticatedUserDep, db: DatabaseDep) -> IdResponse:
+async def start_run(body: RunCreateRequest, db: DatabaseDep) -> IdResponse:
     dataset = await get_dataset(db, body.dataset_id)
     if dataset is None:
         raise HTTPException(status_code=404, detail={"error_code": "DATASET_NOT_FOUND"})
@@ -54,12 +54,12 @@ async def start_run(body: RunCreateRequest, _user: AuthenticatedUserDep, db: Dat
 
 
 @router.get("/runs")
-async def get_runs(_user: AuthenticatedUserDep, db: DatabaseDep) -> list[dict]:
+async def get_runs(db: DatabaseDep) -> list[dict]:
     return [_run_dict(row) for row in await list_runs(db)]
 
 
 @router.get("/runs/{run_id}")
-async def get_run(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> dict:
+async def get_run(run_id: uuid.UUID, db: DatabaseDep) -> dict:
     row = await db.get(Run, run_id)
     if row is None:
         raise HTTPException(status_code=404, detail={"error_code": "RUN_NOT_FOUND"})
@@ -67,7 +67,7 @@ async def get_run(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDe
 
 
 @router.delete("/runs/{run_id}", response_model=DeleteResponse)
-async def remove_run(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> DeleteResponse:
+async def remove_run(run_id: uuid.UUID, db: DatabaseDep) -> DeleteResponse:
     row = await db.get(Run, run_id)
     if row is not None and row.status in {"PENDING", "RUNNING"}:
         raise HTTPException(status_code=409, detail={"error_code": "RUN_NOT_TERMINAL"})
@@ -79,7 +79,6 @@ async def remove_run(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: Databas
 @router.post("/runs/{run_id}/cancel")
 async def cancel_run(
     run_id: uuid.UUID,
-    _user: AuthenticatedUserDep,
     db: DatabaseDep,
 ) -> dict:
     row = await db.get(Run, run_id, with_for_update=True)
@@ -96,7 +95,7 @@ async def cancel_run(
 
 
 @router.get("/runs/{run_id}/sessions")
-async def get_run_sessions(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> list[dict]:
+async def get_run_sessions(run_id: uuid.UUID, db: DatabaseDep) -> list[dict]:
     rows = list(await db.scalars(select(RunSession).where(RunSession.run_id == run_id).order_by(RunSession.repeat_index, RunSession.dataset_session_id)))
     dataset_session_ids = {
         row.dataset_session_id for row in rows if row.dataset_session_id is not None
@@ -130,7 +129,7 @@ async def get_run_sessions(run_id: uuid.UUID, _user: AuthenticatedUserDep, db: D
 
 
 @router.get("/run-sessions/{run_session_id}")
-async def get_run_session(run_session_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> dict:
+async def get_run_session(run_session_id: uuid.UUID, db: DatabaseDep) -> dict:
     row = await db.get(RunSession, run_session_id)
     if row is None:
         raise HTTPException(status_code=404, detail={"error_code": "RUN_SESSION_NOT_FOUND"})
@@ -147,7 +146,7 @@ async def get_run_session(run_session_id: uuid.UUID, _user: AuthenticatedUserDep
 
 
 @router.get("/run-turns/{run_turn_id}/trace")
-async def get_turn_trace(run_turn_id: uuid.UUID, _user: AuthenticatedUserDep, db: DatabaseDep) -> dict:
+async def get_turn_trace(run_turn_id: uuid.UUID, db: DatabaseDep) -> dict:
     turn = await db.get(RunTurn, run_turn_id)
     if turn is None:
         raise HTTPException(status_code=404, detail={"error_code": "RUN_TURN_NOT_FOUND"})

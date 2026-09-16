@@ -187,7 +187,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
         with patch.object(events, "read_projection", reader), patch.object(
             events, "get_settings", return_value=SimpleNamespace(sse_poll_interval_seconds=0.01)
         ):
-            response = await events.run_events(uuid.uuid4(), request, object())
+            response = await events.run_events(uuid.uuid4(), request)
             chunks = await self.collect(response)
         self.assertEqual(len(chunks), 1)
         name, payload = decode_chunk(chunks[0])
@@ -203,7 +203,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
             events, "get_settings", return_value=SimpleNamespace(sse_poll_interval_seconds=0.01)
         ), patch.object(events.asyncio, "sleep", AsyncMock()):
             response = await events.run_events(
-                uuid.uuid4(), FakeRequest(disconnects=[False, False]), object()
+                uuid.uuid4(), FakeRequest(disconnects=[False, False])
             )
             chunks = await self.collect(response)
         decoded = [decode_chunk(chunk)[0] for chunk in chunks]
@@ -216,7 +216,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
             events, "get_settings", return_value=SimpleNamespace(sse_poll_interval_seconds=1)
         ):
             response = await events.run_events(
-                uuid.uuid4(), FakeRequest(), object()
+                uuid.uuid4(), FakeRequest()
             )
             chunks = await self.collect(response)
         self.assertEqual([decode_chunk(chunk)[0] for chunk in chunks], ["snapshot"])
@@ -229,7 +229,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
             events, "get_settings", return_value=SimpleNamespace(sse_poll_interval_seconds=0.01)
         ), patch.object(events.asyncio, "sleep", AsyncMock()):
             response = await events.run_events(
-                uuid.uuid4(), FakeRequest(disconnects=[False] * 4), object()
+                uuid.uuid4(), FakeRequest(disconnects=[False] * 4)
             )
             chunks = await self.collect(response)
         rendered = b"".join(chunks)
@@ -243,7 +243,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
             events, "get_settings", return_value=SimpleNamespace(sse_poll_interval_seconds=1)
         ):
             response = await events.run_events(
-                uuid.uuid4(), FakeRequest(disconnects=[True]), object()
+                uuid.uuid4(), FakeRequest(disconnects=[True])
             )
             await self.collect(response)
         reader.assert_awaited_once()
@@ -253,7 +253,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
             events, "read_projection", AsyncMock(side_effect=events.ProjectionNotFound())
         ):
             with self.assertRaises(HTTPException) as caught:
-                await events.run_events(uuid.uuid4(), FakeRequest(), object())
+                await events.run_events(uuid.uuid4(), FakeRequest())
         self.assertEqual(caught.exception.status_code, 404)
 
 
@@ -305,7 +305,7 @@ class CancellationTests(unittest.IsolatedAsyncioTestCase):
         database = SimpleNamespace(
             get=AsyncMock(return_value=row), commit=AsyncMock()
         )
-        result = await cancel_run(row.id, object(), database)
+        result = await cancel_run(row.id, database)
         self.assertEqual(row.status, "CANCELLED")
         self.assertIs(row.finished_at, row.cancel_requested_at)
         self.assertEqual(result["status"], "CANCELLED")

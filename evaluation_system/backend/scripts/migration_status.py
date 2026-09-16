@@ -1,7 +1,7 @@
 """Read-only CLI for evaluation migration status."""
 
-from evaluation_system.backend.app.config import get_settings
-from evaluation_system.backend.app.services.migrations import MigrationService
+from app.config import get_settings
+from app.services.migrations import MigrationService
 
 
 def main() -> int:
@@ -16,4 +16,3 @@ def main() -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main())
-

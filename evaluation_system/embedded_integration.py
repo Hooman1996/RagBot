@@ -1,11 +1,11 @@
-"""Mount the evaluation control plane and built UI into an existing app."""
+"""Mount the evaluation control plane and built UI into the RagBot app."""
 
 from pathlib import Path
 
 from fastapi import FastAPI, HTTPException
 from fastapi.staticfiles import StaticFiles
 
-from .config import EvaluationSettings
+from .backend.app.config import EvaluationSettings
 
 
 def install_evaluation_routes(
@@ -19,7 +19,9 @@ def install_evaluation_routes(
         return False
 
     if control_plane_router is None:
-        from .control_plane import router as configured_control_plane_router
+        from .backend.app.control_plane import (
+            router as configured_control_plane_router,
+        )
 
         control_plane_router = configured_control_plane_router
     app.include_router(control_plane_router)
@@ -31,6 +33,7 @@ def install_evaluation_routes(
             name="evaluation-frontend",
         )
     else:
+
         @app.get("/evaluation", include_in_schema=False)
         @app.get("/evaluation/", include_in_schema=False)
         async def evaluation_frontend_not_built():

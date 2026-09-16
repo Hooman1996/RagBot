@@ -19,22 +19,12 @@ class ImmediateRunner:
 
 
 class ExistingLoginCompatibilityTests(unittest.TestCase):
-    def test_existing_login_state_is_reused_without_new_credentials(self):
-        from evaluation_system.backend.app.ragbot_auth import (
-            establish_ragbot_user,
-            require_ragbot_user,
-        )
-        authenticated = {
-            "id": 41,
-            "username": "existing-user",
-            "role": "user",
-        }
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
-        establish_ragbot_user(request, authenticated)
-        self.assertIs(require_ragbot_user(request), authenticated)
+    def test_existing_login_contract_has_no_evaluation_state_bridge(self):
         main_source = Path("main.py").read_text(encoding="utf-8")
         self.assertIn("authentication_service.authenticate", main_source)
-        self.assertIn("establish_ragbot_user(request, user)", main_source)
+        self.assertIn('raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")', main_source)
+        self.assertNotIn("establish_ragbot" + "_user", main_source)
+        self.assertNotIn("ragbot" + "_authenticated" + "_user", main_source)
         self.assertNotIn("EVAL_ADMIN_API_TOKEN_SHA256", main_source)
 
 
@@ -42,7 +32,7 @@ class EvaluationRouteTests(unittest.TestCase):
     def test_control_plane_and_built_frontend_mount_together(self):
         try:
             from fastapi import APIRouter, FastAPI
-            from evaluation_system.backend.app.integration import (
+            from evaluation_system.embedded_integration import (
                 install_evaluation_routes,
             )
         except ImportError as exc:
@@ -77,39 +67,15 @@ class EvaluationRouteTests(unittest.TestCase):
             self.assertIn("/evaluation", paths)
             main_source = Path("main.py").read_text(encoding="utf-8")
             self.assertIn("install_evaluation_routes(", main_source)
-            self.assertIn('Path(__file__).resolve().parent', main_source)
-
-    def test_database_setup_requires_existing_ragbot_login(self):
-        try:
-            from fastapi import HTTPException
-            from evaluation_system.backend.app.api import system
-            from evaluation_system.backend.app.ragbot_auth import (
-                require_ragbot_user,
+            self.assertIn(
+                "from evaluation_system.embedded_integration import",
+                main_source,
             )
-        except ImportError as exc:
-            self.skipTest(f"evaluation API dependency is unavailable: {exc}")
-
-        request = SimpleNamespace(app=SimpleNamespace(state=SimpleNamespace()))
-        with self.assertRaises(HTTPException) as caught:
-            require_ragbot_user(request)
-        self.assertEqual(caught.exception.status_code, 401)
-        self.assertEqual(
-            caught.exception.detail["error_code"], "RAGBOT_AUTH_REQUIRED"
-        )
-        initialize_route = next(
-            route
-            for route in system.router.routes
-            if route.path == "/system/database-initialize"
-        )
-        dependency_calls = {
-            dependency.call
-            for dependency in initialize_route.dependant.dependencies
-        }
-        self.assertIn(require_ragbot_user, dependency_calls)
+            self.assertIn('Path(__file__).resolve().parent', main_source)
 
 
 class EvaluationEnvironmentTests(unittest.TestCase):
-    def test_root_environment_controls_operational_settings(self):
+    def test_environment_controls_operational_settings(self):
         from evaluation_system.backend.app.config import get_settings
 
         values = {

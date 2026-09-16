@@ -244,8 +244,8 @@ class AcceptanceStaticSafetyTests(unittest.TestCase):
         for forbidden in (
             "ChatManager",
             "DatabaseManager",
-            "conversation_history",
-            "pipeline_observer",
+            "conversation" + "_history",
+            "pipeline" + "_observer",
             SOURCE_SESSION_ID,
         ):
             self.assertNotIn(forbidden, source)

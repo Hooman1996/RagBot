@@ -8,7 +8,6 @@ from fastapi import APIRouter, Depends, HTTPException
 from ..config import EvaluationSettings, get_settings
 from ..schemas.api import DatabaseInitializeRequest
 from ..services.migrations import MigrationService
-from .dependencies import AuthenticatedUserDep
 
 
 router = APIRouter(prefix="/system", tags=["evaluation-system"])
@@ -16,7 +15,6 @@ router = APIRouter(prefix="/system", tags=["evaluation-system"])
 
 @router.get("/database-status")
 async def database_status(
-    _user: AuthenticatedUserDep,
     settings: Annotated[EvaluationSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return (await asyncio.to_thread(MigrationService(settings).status)).as_dict()
@@ -25,7 +23,6 @@ async def database_status(
 @router.post("/database-initialize")
 async def database_initialize(
     body: DatabaseInitializeRequest,
-    _user: AuthenticatedUserDep,
     settings: Annotated[EvaluationSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     try:
@@ -44,7 +41,6 @@ async def database_initialize(
 
 @router.get("/capabilities")
 async def capabilities(
-    _user: AuthenticatedUserDep,
     settings: Annotated[EvaluationSettings, Depends(get_settings)],
 ) -> dict[str, Any]:
     return {

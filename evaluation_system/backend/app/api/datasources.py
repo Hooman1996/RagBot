@@ -4,14 +4,13 @@ from fastapi import APIRouter, HTTPException
 
 from ..clients.ragbot import RagBotClientError, RagBotEvaluationClient
 from ..config import get_settings
-from .dependencies import AuthenticatedUserDep
 
 
 router = APIRouter(tags=["evaluation-datasources"])
 
 
 @router.get("/datasources")
-async def list_datasources(_user: AuthenticatedUserDep) -> list[dict]:
+async def list_datasources() -> list[dict]:
     settings = get_settings()
     try:
         async with RagBotEvaluationClient(
