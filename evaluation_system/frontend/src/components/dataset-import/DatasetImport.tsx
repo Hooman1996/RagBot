@@ -1,14 +1,14 @@
 import { FileArrowUp, FileCsv, Warning } from "@phosphor-icons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useRef, useState, type DragEvent } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import type { ImportResponse } from "../../types/api";
 import { Button } from "../ui/Button";
 import { ErrorState } from "../ui/States";
 import { formatBytes } from "../ui/format";
 
 export function DatasetImport({ datasetType, onImported, imported }: { datasetType: "PIPELINE_INSPECTION" | "STABILITY"; onImported: (value: ImportResponse) => void; imported: ImportResponse | null }) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const input = useRef<HTMLInputElement>(null);
   const [file, setFile] = useState<File | null>(null);
   const [drag, setDrag] = useState(false);
@@ -41,7 +41,7 @@ export function DatasetImport({ datasetType, onImported, imported }: { datasetTy
 
 export function ImportSummaryView({ value }: { value: ImportResponse }) {
   const summary = value.summary;
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const sessionQuery = useQuery({ queryKey: ["dataset-sessions", value.dataset.id], queryFn: () => api.datasetSessions(value.dataset.id) });
   const sessions = sessionQuery.data ? { multi: sessionQuery.data.filter((item) => item.turn_count > 1).length, single: sessionQuery.data.filter((item) => item.turn_count === 1).length } : null;
   return (

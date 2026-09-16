@@ -14,7 +14,6 @@ describe("database setup gate", () => {
     let ready = false;
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.endsWith("/api/login") && init?.method === "POST") return jsonResponse({ success: true, id: 1, username: "operator" });
       if (url.endsWith("/system/database-status")) return jsonResponse(ready ? { status: "READY", current_revision: "head", required_revision: "head", missing_objects: [], allow_initialize: true, error_code: null } : { status: "NOT_INITIALIZED", current_revision: null, required_revision: "head", missing_objects: ["table:datasets"], allow_initialize: true, error_code: null });
       if (url.endsWith("/system/database-initialize") && init?.method === "POST") { ready = true; return jsonResponse({ status: "READY", current_revision: "head", required_revision: "head", missing_objects: [], allow_initialize: true, error_code: null }); }
       if (url.endsWith("/runs")) return jsonResponse([]);
@@ -23,9 +22,6 @@ describe("database setup gate", () => {
     }));
     renderWithProviders(<App />);
     const user = userEvent.setup();
-    await user.type(screen.getByLabelText("نام کاربری"), "operator");
-    await user.type(screen.getByLabelText("رمز عبور"), "secret-password");
-    await user.click(screen.getByRole("button", { name: "ورود با حساب RagBot" }));
     expect(await screen.findByText("پایگاه داده ارزیابی راه‌اندازی نشده است")).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "ایجاد جداول ارزیابی" }));
     const dialog = screen.getByRole("dialog");
@@ -33,18 +29,15 @@ describe("database setup gate", () => {
     expect(screen.getByRole("button", { name: "ایجاد جداول" })).toBeDisabled();
     await user.type(confirmInput, "CREATE_EVALUATION_TABLES");
     await user.click(screen.getByRole("button", { name: "ایجاد جداول" }));
-    expect(await screen.findByText("بازپخش دقیق نشست‌ها")).toBeInTheDocument();
+    expect(await screen.findByText("نمای کلی ارزیابی")).toBeInTheDocument();
+    expect(screen.queryByLabelText("نام کاربری")).not.toBeInTheDocument();
   });
 
   it("shows a recoverable API failure state", async () => {
     vi.stubGlobal("fetch", vi.fn(async (input: RequestInfo | URL) => {
-      if (String(input).endsWith("/api/login")) return jsonResponse({ success: true, id: 1 });
       throw new Error("network unavailable");
     }));
-    renderWithProviders(<App />); const user = userEvent.setup();
-    await user.type(screen.getByLabelText("نام کاربری"), "operator");
-    await user.type(screen.getByLabelText("رمز عبور"), "password");
-    await user.click(screen.getByRole("button", { name: "ورود با حساب RagBot" }));
+    renderWithProviders(<App />);
     expect(await screen.findByText("وضعیت پایگاه داده قابل دریافت نیست")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "تلاش دوباره" })).toBeInTheDocument();
   });

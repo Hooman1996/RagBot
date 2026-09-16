@@ -1,7 +1,7 @@
 import { Clock, Hash, WarningCircle } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import type { StageName, TurnTrace as TurnTraceType } from "../../types/api";
 import { Badge, statusTone } from "../ui/Badge";
 import { Definition, ErrorState, SkeletonRows } from "../ui/States";
@@ -10,7 +10,7 @@ import { StageInspector } from "./StageInspector";
 import { StageRail, type TraceView } from "./StageRail";
 
 export function TurnTrace({ turnId, divergentStage, initialTrace }: { turnId: string; divergentStage?: StageName | null; initialTrace?: TurnTraceType }) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const [selected, setSelected] = useState<TraceView>(divergentStage || "HISTORY");
   const query = useQuery({ queryKey: ["turn-trace", turnId], queryFn: () => api.turnTrace(turnId), initialData: initialTrace });
   if (query.isLoading) return <SkeletonRows count={5} />;

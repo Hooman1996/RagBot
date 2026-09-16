@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { useState, type PropsWithChildren } from "react";
-import { AuthProvider } from "./auth";
+import { EvaluationApiProvider } from "../api/context";
 
 export function AppProviders({ children }: PropsWithChildren) {
   const [queryClient] = useState(() => new QueryClient({
@@ -9,5 +9,5 @@ export function AppProviders({ children }: PropsWithChildren) {
       mutations: { retry: 0 },
     },
   }));
-  return <QueryClientProvider client={queryClient}><AuthProvider>{children}</AuthProvider></QueryClientProvider>;
+  return <QueryClientProvider client={queryClient}><EvaluationApiProvider>{children}</EvaluationApiProvider></QueryClientProvider>;
 }

@@ -1,7 +1,7 @@
 import { ArrowsLeftRight, CaretDown, CaretLeft, Fingerprint, Scales } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { Fragment, useMemo, useState } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import { RunProgress } from "../../components/runs/RunProgress";
 import { TurnTrace } from "../../components/trace/TurnTrace";
 import { STAGES } from "../../components/trace/StageRail";
@@ -65,7 +65,7 @@ function TurnAggregate({ turn, attempts, sessions }: { turn: number; attempts: L
 }
 
 function StabilitySession({ sessions }: { sessions: RunSession[] }) {
-  const { api } = useAuth(); const [open, setOpen] = useState(false);
+  const api = useEvaluationApi(); const [open, setOpen] = useState(false);
   const summary = canonicalSummary(sessions); const exemplar = sessions[0];
   const attempts = useQuery({
     queryKey: ["stability-attempts", ...sessions.map((item) => item.id)], enabled: open,
@@ -83,7 +83,7 @@ function StabilitySession({ sessions }: { sessions: RunSession[] }) {
 }
 
 export function StabilityResults({ runId }: { runId: string }) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const sessions = useQuery({ queryKey: ["run-sessions", runId], queryFn: () => api.runSessions(runId), refetchInterval: 5_000 });
   const groups = useMemo(() => {
     const map = new Map<string, RunSession[]>();

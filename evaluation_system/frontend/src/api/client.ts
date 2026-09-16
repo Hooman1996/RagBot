@@ -42,17 +42,6 @@ export class EvaluationApiClient {
     return response.json() as Promise<T>;
   }
 
-  async login(username: string, password: string): Promise<void> {
-    const response = await fetch("/api/login", {
-      method: "POST",
-      headers: { "Content-Type": "application/json", Accept: "application/json" },
-      body: JSON.stringify({ username, password }),
-      cache: "no-store",
-      credentials: "same-origin",
-    });
-    if (!response.ok) throw await parseError(response);
-  }
-
   databaseStatus = () => this.request<DatabaseStatus>("/system/database-status");
   initializeDatabase = () => this.request<DatabaseStatus>("/system/database-initialize", {
     method: "POST", body: JSON.stringify({ confirmation: "CREATE_EVALUATION_TABLES" }),

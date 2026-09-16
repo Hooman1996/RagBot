@@ -1,6 +1,6 @@
 import { Broadcast, Check, Clock, Pause, Queue, SpinnerGap, WarningCircle, XCircle } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import { useRunEvents } from "../../hooks/useRunEvents";
 import { Badge, statusTone } from "../ui/Badge";
 import { Button } from "../ui/Button";
@@ -9,7 +9,7 @@ import { ErrorState, SkeletonRows } from "../ui/States";
 const ACTIVE = new Set(["PENDING", "RUNNING"]);
 
 export function RunProgress({ runId }: { runId: string }) {
-  const { api } = useAuth(); const client = useQueryClient();
+  const api = useEvaluationApi(); const client = useQueryClient();
   const run = useQuery({ queryKey: ["run", runId], queryFn: () => api.run(runId), refetchInterval: (query) => ACTIVE.has(query.state.data?.status || "") ? 5_000 : false });
   const active = ACTIVE.has(run.data?.status || "");
   const { lastEvent, connection, errorCode } = useRunEvents(runId, active);

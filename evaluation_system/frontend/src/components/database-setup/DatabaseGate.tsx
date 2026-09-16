@@ -1,7 +1,7 @@
 import { Database, LockKey, Wrench } from "@phosphor-icons/react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { useState, type PropsWithChildren } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import { Button } from "../ui/Button";
 import { Modal } from "../ui/Modal";
 import { ErrorState, SkeletonRows } from "../ui/States";
@@ -9,7 +9,7 @@ import { ErrorState, SkeletonRows } from "../ui/States";
 const CONFIRMATION = "CREATE_EVALUATION_TABLES";
 
 export function DatabaseGate({ children }: PropsWithChildren) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const queryClient = useQueryClient();
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmation, setConfirmation] = useState("");

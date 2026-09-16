@@ -1,7 +1,7 @@
 import { Play, WarningCircle } from "@phosphor-icons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import { DatasetImport } from "../../components/dataset-import/DatasetImport";
 import { DatasourcePicker } from "../../components/DatasourcePicker";
 import { RecentRuns } from "../../components/runs/RecentRuns";
@@ -11,7 +11,7 @@ import { ErrorState } from "../../components/ui/States";
 import type { ImportResponse } from "../../types/api";
 
 export function DatasetInspector({ activeRunId, onRunOpen }: { activeRunId: string | null; onRunOpen: (id: string) => void }) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const [imported, setImported] = useState<ImportResponse | null>(null);
   const [documents, setDocuments] = useState<string[]>([]);
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities });

@@ -1,7 +1,7 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, type RenderOptions } from "@testing-library/react";
 import type { ReactElement, PropsWithChildren } from "react";
-import { AuthProvider } from "../app/auth";
+import { EvaluationApiProvider } from "../api/context";
 import type { RunSession, TurnTrace } from "../types/api";
 
 export function jsonResponse(value: unknown, status = 200): Response {
@@ -10,7 +10,7 @@ export function jsonResponse(value: unknown, status = 200): Response {
 
 export function renderWithProviders(element: ReactElement, options?: Omit<RenderOptions, "wrapper">) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
-  function Wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}><AuthProvider>{children}</AuthProvider></QueryClientProvider>; }
+  function Wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}><EvaluationApiProvider>{children}</EvaluationApiProvider></QueryClientProvider>; }
   return render(element, { wrapper: Wrapper, ...options });
 }
 

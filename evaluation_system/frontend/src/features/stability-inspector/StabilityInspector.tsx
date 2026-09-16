@@ -1,7 +1,7 @@
 import { Chats, FileArrowUp, Play, TextT, WarningCircle } from "@phosphor-icons/react";
 import { useMutation, useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import { DatasetImport } from "../../components/dataset-import/DatasetImport";
 import { DatasourcePicker } from "../../components/DatasourcePicker";
 import { RecentRuns } from "../../components/runs/RecentRuns";
@@ -14,7 +14,7 @@ import { StabilityResults } from "./StabilityResults";
 type Mode = "single" | "conversation" | "upload";
 
 export function StabilityInspector({ activeRunId, onRunOpen }: { activeRunId: string | null; onRunOpen: (id: string) => void }) {
-  const { api } = useAuth(); const [mode, setMode] = useState<Mode>("single");
+  const api = useEvaluationApi(); const [mode, setMode] = useState<Mode>("single");
   const [queries, setQueries] = useState([""]); const [repeat, setRepeat] = useState(3); const [documents, setDocuments] = useState<string[]>([]); const [imported, setImported] = useState<ImportResponse | null>(null);
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities });
   const repeatMax = capabilities.data?.repeat_max ?? 100;

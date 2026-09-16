@@ -1,14 +1,14 @@
 import { useEffect, useRef, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { streamSse } from "../api/sse";
-import { useAuth } from "../app/auth";
+import { useEvaluationApi } from "../api/context";
 import type { SseEvent } from "../types/api";
 import { ApiError } from "../api/client";
 
 const TERMINAL = new Set(["run_completed", "run_failed", "run_cancelled"]);
 
 export function useRunEvents(runId: string | null, active: boolean) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const queryClient = useQueryClient();
   const [lastEvent, setLastEvent] = useState<SseEvent | null>(null);
   const [connection, setConnection] = useState<"idle" | "connecting" | "live" | "reconnecting" | "closed">("idle");

@@ -1,9 +1,9 @@
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "../app/auth";
+import { useEvaluationApi } from "../api/context";
 import { ErrorState, SkeletonRows } from "./ui/States";
 
 export function DatasourcePicker({ selected, onChange }: { selected: string[]; onChange: (value: string[]) => void }) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const query = useQuery({ queryKey: ["datasources"], queryFn: api.datasources });
   if (query.isLoading) return <SkeletonRows count={2} />;
   if (query.isError) return <ErrorState title="منابع دانش قابل دریافت نیستند" error={query.error} retry={() => void query.refetch()} />;

@@ -1,6 +1,6 @@
 import { ArrowClockwise, CaretLeft } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import type { Run } from "../../types/api";
 import { Badge, statusTone } from "../ui/Badge";
 import { Button } from "../ui/Button";
@@ -8,7 +8,7 @@ import { EmptyState, ErrorState, SkeletonRows } from "../ui/States";
 import { formatDate } from "../ui/format";
 
 export function RecentRuns({ kind, onOpen }: { kind: "dataset" | "stability"; onOpen: (id: string) => void }) {
-  const { api } = useAuth();
+  const api = useEvaluationApi();
   const query = useQuery({ queryKey: ["runs"], queryFn: api.runs, refetchInterval: 10_000 });
   if (query.isLoading) return <SkeletonRows count={3} />;
   if (query.isError) return <ErrorState title="فهرست اجراها قابل دریافت نیست" error={query.error} retry={() => void query.refetch()} />;

@@ -1,7 +1,7 @@
 import { CaretDown, CaretLeft, ChatCircleText } from "@phosphor-icons/react";
 import { useQuery } from "@tanstack/react-query";
 import { useState } from "react";
-import { useAuth } from "../../app/auth";
+import { useEvaluationApi } from "../../api/context";
 import type { RunSession, RunTurn } from "../../types/api";
 import { Badge, statusTone } from "../ui/Badge";
 import { ErrorState, SkeletonRows } from "../ui/States";
@@ -9,7 +9,7 @@ import { formatDate, formatDuration } from "../ui/format";
 import { TurnTrace } from "../trace/TurnTrace";
 
 export function SessionResult({ session }: { session: RunSession }) {
-  const { api } = useAuth(); const [openTurn, setOpenTurn] = useState<string | null>(null);
+  const api = useEvaluationApi(); const [openTurn, setOpenTurn] = useState<string | null>(null);
   const detail = useQuery({ queryKey: ["run-session", session.id], queryFn: () => api.runSession(session.id) });
   const lineage = useQuery({ queryKey: ["dataset-turns", session.dataset_session_id], queryFn: () => api.datasetTurns(session.dataset_session_id!), enabled: !!session.dataset_session_id });
   if (detail.isLoading) return <SkeletonRows count={3} />;
