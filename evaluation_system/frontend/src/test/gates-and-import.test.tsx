@@ -56,10 +56,12 @@ it("renders dataset validation summary and parser warnings", async () => {
     return <DatasetImport datasetType="PIPELINE_INSPECTION" imported={value} onImported={setValue} />;
   }
   renderWithProviders(<Harness />);
-  const user = userEvent.setup(); const input = document.querySelector('input[type="file"]') as HTMLInputElement;
+  const user = userEvent.setup();
+  await screen.findByText("فایل CSV یا XLSX را اینجا رها کنید");
+  const input = document.querySelector('input[type="file"]') as HTMLInputElement;
   await user.upload(input, new File(["query\nسلام"], "sample.csv", { type: "text/csv" }));
   await user.click(screen.getByRole("button", { name: "بارگذاری و تحلیل" }));
   expect(await screen.findByText("INVALID_TIMESTAMP")).toBeInTheDocument();
   expect(screen.getByText("زمان قابل تحلیل نیست")).toBeInTheDocument();
-  await waitFor(() => expect(screen.getAllByText("2", { selector: ".metric-strip dd" }).length).toBeGreaterThanOrEqual(2));
+  await waitFor(() => expect(screen.getAllByText("۲", { selector: ".metric-strip dd" }).length).toBeGreaterThanOrEqual(2));
 });

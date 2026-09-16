@@ -30,6 +30,7 @@ beforeEach(() => {
     if (url.endsWith("/system/capabilities")) return jsonResponse({ file_types: [".csv", ".xlsx"], max_upload_bytes: 10000, max_dataset_rows: 100, session_concurrency: 1, stability_default_concurrency: 1, repeat_max: 10, background_execution_available: true, allow_database_initialize: false });
     if (url.endsWith("/datasources")) return jsonResponse([{ title: "General_FAQ" }]);
     if (url.endsWith("/datasets")) return jsonResponse([{ id: "dataset-1", filename: "eval.csv", source_type: "FILE", file_sha256: "a".repeat(64), dataset_type: "PIPELINE_INSPECTION", row_count: 6, session_count: 2, valid_row_count: 6, invalid_row_count: 0, created_at: "2026-09-15T09:00:00Z", metadata: {} }]);
+    if (url.endsWith("/datasets/dataset-1")) return jsonResponse({ id: "dataset-1", filename: "eval.csv", source_type: "FILE", file_sha256: "a".repeat(64), dataset_type: "PIPELINE_INSPECTION", row_count: 6, session_count: 2, valid_row_count: 6, invalid_row_count: 0, created_at: "2026-09-15T09:00:00Z", metadata: {} });
     if (url.endsWith("/runs")) return jsonResponse(runs);
     return jsonResponse([]);
   }));
@@ -49,7 +50,7 @@ it("navigates between Overview, Datasets, and Stability and follows browser hist
   const user = userEvent.setup();
   await screen.findByRole("heading", { name: "نمای کلی ارزیابی" });
   await user.click(screen.getByRole("button", { name: "مجموعه داده‌ها" }));
-  expect(await screen.findByRole("heading", { name: "بازپخش دقیق نشست‌ها" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "مجموعه داده‌ها" })).toBeInTheDocument();
   expect(window.location.search).toBe("?panel=datasets");
   await user.click(screen.getByRole("button", { name: "پایداری" }));
   expect(await screen.findByRole("heading", { name: "ردیابی نقطه نخست واگرایی" })).toBeInTheDocument();
@@ -58,5 +59,5 @@ it("navigates between Overview, Datasets, and Stability and follows browser hist
     window.history.replaceState({}, "", "/?panel=datasets");
     window.dispatchEvent(new PopStateEvent("popstate"));
   });
-  expect(await screen.findByRole("heading", { name: "بازپخش دقیق نشست‌ها" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "مجموعه داده‌ها" })).toBeInTheDocument();
 });
