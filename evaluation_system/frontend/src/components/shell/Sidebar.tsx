@@ -15,7 +15,7 @@ interface NavigationItem {
 const navigation: NavigationItem[] = [
   { panel: "overview", label: "نمای کلی", english: "Overview", icon: House, enabled: true },
   { panel: "datasets", label: "مجموعه داده‌ها", english: "Datasets", icon: Database, enabled: true },
-  { panel: "runs", label: "اجراها", english: "Runs", icon: ChartDonut, enabled: false },
+  { panel: "runs", label: "اجراها", english: "Runs", icon: ChartDonut, enabled: true },
   { panel: "stability", label: "پایداری", english: "Stability", icon: Pulse, enabled: true },
   { panel: "pipeline", label: "خط لوله", english: "Pipeline", icon: GitBranch, enabled: false },
   { panel: "system", label: "سیستم", english: "System", icon: GearSix, enabled: false },

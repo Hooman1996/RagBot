@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useState } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { streamSse } from "../api/sse";
 import { useEvaluationApi } from "../api/context";
@@ -11,12 +11,11 @@ export function useRunEvents(runId: string | null, active: boolean) {
   const api = useEvaluationApi();
   const queryClient = useQueryClient();
   const [lastEvent, setLastEvent] = useState<SseEvent | null>(null);
-  const [connection, setConnection] = useState<"idle" | "connecting" | "live" | "reconnecting" | "closed">("idle");
+  const [connection, setConnection] = useState<"connecting" | "live" | "reconnecting" | "closed">("closed");
   const [errorCode, setErrorCode] = useState<string | null>(null);
-  const lastId = useRef<string | undefined>(undefined);
 
   useEffect(() => {
-    if (!runId || !active) { setConnection("idle"); setErrorCode(null); return; }
+    if (!runId || !active) { setConnection("closed"); setErrorCode(null); return; }
     const controller = new AbortController();
     let stopped = false;
     let retryTimer: number | undefined;
@@ -26,20 +25,34 @@ export function useRunEvents(runId: string | null, active: boolean) {
     const connect = async () => {
       setConnection(retryCount ? "reconnecting" : "connecting");
       try {
-        const response = await api.eventResponse(runId, controller.signal, lastId.current);
+        const response = await api.eventResponse(runId, controller.signal);
         if (stopped) return;
         setErrorCode(null);
         setConnection("live");
         await streamSse(response, (event) => {
-          if (event.id) lastId.current = event.id;
           setLastEvent(event);
-          if (event.event === "redis_unavailable") setErrorCode("EVALUATION_REDIS_UNAVAILABLE");
-          else setErrorCode(null);
-          void queryClient.invalidateQueries({ queryKey: ["run", runId] });
-          if (["session_completed", "turn_completed", "stage_completed", "progress"].includes(event.event)) {
+          setErrorCode(null);
+          const sessionId = typeof event.data.run_session_id === "string" ? event.data.run_session_id : null;
+          const turnId = typeof event.data.run_turn_id === "string" ? event.data.run_turn_id : null;
+          if (["snapshot", "progress"].includes(event.event)) {
+            void queryClient.invalidateQueries({ queryKey: ["run", runId] });
+          }
+          if (["session_started", "session_completed"].includes(event.event)) {
             void queryClient.invalidateQueries({ queryKey: ["run-sessions", runId] });
           }
-          if (TERMINAL.has(event.event)) { terminalReceived = true; setConnection("closed"); }
+          if (["turn_started", "turn_completed"].includes(event.event)) {
+            void queryClient.invalidateQueries({ queryKey: ["run-sessions", runId] });
+            if (sessionId) void queryClient.invalidateQueries({ queryKey: ["run-session", sessionId] });
+          }
+          if (event.event === "stage_completed" && turnId) {
+            void queryClient.invalidateQueries({ queryKey: ["turn-trace", turnId] });
+          }
+          if (TERMINAL.has(event.event)) {
+            terminalReceived = true;
+            setConnection("closed");
+            void queryClient.invalidateQueries({ queryKey: ["run", runId] });
+            void queryClient.invalidateQueries({ queryKey: ["run-sessions", runId] });
+          }
         });
         if (!stopped && !terminalReceived) {
           retryCount += 1;

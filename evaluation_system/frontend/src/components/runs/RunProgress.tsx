@@ -20,7 +20,7 @@ export function RunProgress({ runId }: { runId: string }) {
   const turnPercent = value.total_turns ? Math.round(value.completed_turns / value.total_turns * 100) : 0;
   const statusLabel = value.status === "PENDING" ? "Queued" : value.status === "RUNNING" ? "Running" : value.status === "COMPLETED" ? "Completed" : value.status === "FAILED" ? "Failed" : "Cancelled";
   const workerUnavailable = errorCode === "EVALUATION_BACKGROUND_EXECUTION_UNAVAILABLE" || errorCode === "EVALUATION_QUEUE_UNAVAILABLE" || value.failure_code === "WORKER_UNAVAILABLE";
-  const redisUnavailable = errorCode === "EVALUATION_REDIS_UNAVAILABLE" || (!workerUnavailable && !!errorCode && (errorCode === "HTTP_503" || errorCode.includes("REDIS")));
+  const liveUnavailable = !workerUnavailable && !!errorCode;
   const phase = value.status === "PENDING" ? 0 : value.status === "RUNNING" ? 1 : value.status === "COMPLETED" ? 2 : 3;
   return <section className="run-progress" aria-live="polite">
     <div className="run-progress__head"><div><span className={`connection connection--${connection}`}><Broadcast size={16} />{connection === "live" ? "زنده" : connection === "reconnecting" ? "اتصال مجدد" : connection === "closed" ? "پایان یافته" : "در حال اتصال"}</span><h2>اجرای {value.id.slice(0, 8)}</h2></div><div><Badge tone={statusTone(value.status)}>{statusLabel}</Badge>{active && <Button variant="secondary" onClick={() => cancel.mutate()} disabled={cancel.isPending}><Pause size={17} />لغو اجرا</Button>}</div></div>
@@ -34,8 +34,8 @@ export function RunProgress({ runId }: { runId: string }) {
     <dl className="metric-strip"><div><dt>پیشرفت جلسه</dt><dd>{value.completed_sessions} / {value.total_sessions}</dd></div><div><dt>پیشرفت نوبت</dt><dd>{value.completed_turns} / {value.total_turns}</dd></div><div><dt>Fallback</dt><dd>{value.fallback_count}</dd></div><div><dt>خطای زیرساخت</dt><dd>{value.infrastructure_error_count}</dd></div></dl>
     {lastEvent && <p className="event-caption" dir="ltr">{lastEvent.event}</p>}
     {workerUnavailable && <div className="service-alert service-alert--danger"><WarningCircle size={20} /><div><strong>Evaluation worker unavailable</strong><p>صف اجرای ارزیابی در دسترس نیست. Worker را بررسی کنید؛ اجرای HTTP ادامه پیدا نمی‌کند.</p></div></div>}
-    {redisUnavailable && <div className="service-alert service-alert--danger"><WarningCircle size={20} /><div><strong>Redis unavailable</strong><p>کانال رویداد زنده در دسترس نیست. حقیقت نهایی اجرا همچنان از PostgreSQL بازیابی می‌شود.</p></div></div>}
-    {active && connection === "reconnecting" && !workerUnavailable && !redisUnavailable && <div className="service-alert"><Clock size={20} /><div><strong>در انتظار اتصال زنده</strong><p>وضعیت پایدار از سرور هر پنج ثانیه بازخوانی می‌شود.</p></div></div>}
+    {liveUnavailable && <div className="service-alert"><WarningCircle size={20} /><div><strong>اتصال زنده موقتاً در دسترس نیست</strong><p>وضعیت ماندگار PostgreSQL همچنان هر پنج ثانیه بازخوانی می‌شود.</p></div></div>}
+    {active && connection === "reconnecting" && !workerUnavailable && !liveUnavailable && <div className="service-alert"><Clock size={20} /><div><strong>در انتظار اتصال زنده</strong><p>وضعیت پایدار از سرور هر پنج ثانیه بازخوانی می‌شود.</p></div></div>}
     {value.failure_code && <div className="stage-error"><XCircle size={20} /><div><strong>Run failure</strong><p dir="ltr">{value.failure_code}</p></div></div>}
   </section>;
 }

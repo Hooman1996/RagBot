@@ -6,10 +6,7 @@ export function parseSseBlock(block: string): SseEvent | null {
   const data: string[] = [];
   for (const line of block.split(/\r?\n/)) {
     if (!line) continue;
-    if (line.startsWith(":")) {
-      if (line.toLowerCase().includes("redis unavailable")) return { event: "redis_unavailable", data: { error_code: "EVALUATION_REDIS_UNAVAILABLE" } };
-      continue;
-    }
+    if (line.startsWith(":")) continue;
     const separator = line.indexOf(":");
     const field = separator < 0 ? line : line.slice(0, separator);
     let value = separator < 0 ? "" : line.slice(separator + 1);

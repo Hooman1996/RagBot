@@ -11,7 +11,7 @@ export function jsonResponse(value: unknown, status = 200): Response {
 export function renderWithProviders(element: ReactElement, options?: Omit<RenderOptions, "wrapper">) {
   const client = new QueryClient({ defaultOptions: { queries: { retry: false, staleTime: Infinity }, mutations: { retry: false } } });
   function Wrapper({ children }: PropsWithChildren) { return <QueryClientProvider client={client}><EvaluationApiProvider>{children}</EvaluationApiProvider></QueryClientProvider>; }
-  return render(element, { wrapper: Wrapper, ...options });
+  return { ...render(element, { wrapper: Wrapper, ...options }), client };
 }
 
 export const runSessionFixture: RunSession = {
@@ -22,19 +22,19 @@ export const runSessionFixture: RunSession = {
 };
 
 export function traceFixture(overrides: Partial<TurnTrace["turn"]> = {}, suffix = "a"): TurnTrace {
-  const turn = {
+  const turn: TurnTrace["turn"] = {
     id: `turn-${suffix}`, turn_index: 1, raw_query: "افتتاح حساب چطور است؟", normalized_query: "افتتاح حساب چطور است؟",
     rewritten_query: "روش افتتاح حساب", history_before_hash: `history-before-${suffix}`, history_after_hash: `history-after-${suffix}`,
     actual_intent: "general", intent_score: .94, selected_context_hash: `context-${suffix}`, actual_answer: `پاسخ ${suffix}`,
     fallback_used: false, fallback_reason: null, status: "COMPLETED", infrastructure_error: false, error_code: null,
     total_latency_ms: 1200, started_at: "2026-08-31T10:00:00Z", finished_at: "2026-08-31T10:00:02Z", ...overrides,
   };
-  const names = ["NORMALIZATION", "INTENT", "REWRITE", "RETRIEVAL", "RERANK", "CONTEXT_SELECTION", "PROMPT_BUILD", "GENERATION"] as const;
+  const names = ["NORMALIZATION", "HISTORY", "REWRITE", "INTENT", "RETRIEVAL", "RERANK", "CONTEXT_SELECTION", "PROMPT_BUILD", "GENERATION"] as const;
   return { turn, stages: names.map((name, index) => ({
-    stage_name: name, stage_order: (index + 1) * 10, status: name === "RERANK" ? "SKIPPED" : "COMPLETED",
+    stage_name: name, stage_order: (index + 1) * 10, status: "COMPLETED",
     input_hash: `in-${name}-${suffix}`, output_hash: `out-${name}-${suffix}`, duration_ms: 10 + index,
-    input_data: name === "REWRITE" ? { original_query: turn.normalized_query, history_used: "[بدون مکالمه قبلی]" } : name === "CONTEXT_SELECTION" ? { history_messages: [] } : {},
-    output_data: name === "NORMALIZATION" ? { normalized_query: turn.normalized_query } : name === "INTENT" ? { label: turn.actual_intent, score: turn.intent_score } : name === "REWRITE" ? { rewritten_query: turn.rewritten_query } : name === "RETRIEVAL" ? { candidates: [{ rank: 1, chunk_id: `chunk-${suffix}`, retrieval_score: .88, content: "محتوای بانکی", title: "افتتاح حساب" }] } : name === "CONTEXT_SELECTION" ? { selected_chunk_ids: [`chunk-${suffix}`], selected_context: "زمینه دقیق" } : name === "PROMPT_BUILD" ? { prompt: "پرامپت دقیق" } : name === "GENERATION" ? { answer: turn.actual_answer } : {},
+    input_data: name === "NORMALIZATION" ? { raw_query: turn.raw_query } : name === "REWRITE" ? { original_query: turn.normalized_query } : name === "RERANK" ? { candidates: [{ chunk_id: `chunk-${suffix}`, original_rrf_rank: 8, hybrid_score: .88 }] } : name === "CONTEXT_SELECTION" ? { history_messages: [] } : {},
+    output_data: name === "NORMALIZATION" ? { normalized_query: turn.normalized_query } : name === "HISTORY" ? { real_history_exists: false, messages_used: [], formatted_history: "" } : name === "INTENT" ? { type: turn.actual_intent, score: turn.intent_score } : name === "REWRITE" ? { rewritten_query: turn.rewritten_query } : name === "RETRIEVAL" ? { candidates: [{ rank: 1, chunk_id: `chunk-${suffix}`, retrieval_score: .88, content: "محتوای بانکی", metadata: { document_name: "General_FAQ" } }] } : name === "RERANK" ? { rankings: [{ chunk_id: `chunk-${suffix}`, original_rrf_rank: 8, reranker_rank: 1, reranker_score: .97, hybrid_score: .88, content: "محتوای بانکی", metadata: { document_name: "General_FAQ" } }] } : name === "CONTEXT_SELECTION" ? { selected_chunk_ids: [`chunk-${suffix}`], selected_context: "زمینه دقیق" } : name === "PROMPT_BUILD" ? { prompt: [{ role: "system", content: "راهنمای سامانه" }, { role: "user", content: "پرامپت دقیق" }] } : name === "GENERATION" ? { answer: turn.actual_answer } : {},
     metrics: name === "INTENT" ? { effective_threshold: .875 } : name === "GENERATION" ? { settings: { model: "/app/model", temperature: 1 }, fallback_used: turn.fallback_used, fallback_reason: turn.fallback_reason } : {},
     error_code: null, error_data: null,
   })) };

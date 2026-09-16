@@ -2,14 +2,14 @@ import { useCallback, useEffect, useState } from "react";
 
 export type PanelName = "overview" | "datasets" | "runs" | "stability" | "pipeline" | "system";
 
-const availablePanels = new Set<PanelName>(["overview", "datasets", "stability"]);
+const availablePanels = new Set<PanelName>(["overview", "datasets", "runs", "stability"]);
 
 function readState() {
   const params = new URLSearchParams(window.location.search);
   const requested = params.get("panel");
   const normalized = requested === "dataset" ? "datasets" : requested;
   const runId = params.get("run");
-  const panel = normalized && availablePanels.has(normalized as PanelName) ? normalized as PanelName : runId ? "datasets" : "overview";
+  const panel = normalized && availablePanels.has(normalized as PanelName) ? normalized as PanelName : runId ? "runs" : "overview";
   return { panel, runId };
 }
 

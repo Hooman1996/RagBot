@@ -20,9 +20,15 @@ function Normalization({ stage }: { stage: StageResult }) {
   return <dl className="definition-grid"><Definition label="پرسش خام">{String(raw ?? "-")}</Definition><Definition label="پرسش نرمال‌شده">{String(normalized ?? "-")}</Definition><Definition label="تغییر کرده">{raw === normalized ? "خیر" : "بله"}</Definition></dl>;
 }
 
+function History({ stage }: { stage: StageResult }) {
+  const output = asRecord(stage.output_data); const metrics = asRecord(stage.metrics);
+  const messages = asList(output.messages_used);
+  return <div className="artifact-columns"><Definition label="تعداد پیام">{String(metrics.history_message_count ?? messages.length)}</Definition><Definition label="تاریخچه واقعی موجود است">{output.real_history_exists === true ? "بله" : output.real_history_exists === false ? "خیر" : "ناموجود"}</Definition><section className="span-all"><h4>پیام‌های استفاده‌شده</h4>{messages.length ? <div className="prompt-messages">{messages.map((message, index) => <article key={index}><strong dir="ltr">{String(message.role ?? `message-${index + 1}`)}</strong><p dir="auto">{String(message.content ?? "")}</p></article>)}</div> : <div className="empty-inline">پیامی در trace ثبت نشده است.</div>}</section>{output.formatted_history != null && <section className="span-all"><details className="disclosure"><summary>تاریخچه قالب‌بندی‌شده</summary><TextBlock value={output.formatted_history} /></details></section>}</div>;
+}
+
 function Intent({ stage }: { stage: StageResult }) {
   const output = asRecord(stage.output_data); const metrics = asRecord(stage.metrics); const input = asRecord(stage.input_data);
-  return <dl className="definition-grid"><Definition label="ورودی طبقه‌بند">{String(input.classifier_input ?? input.query ?? "-")}</Definition><Definition label="برچسب">{String(output.label ?? output.intent ?? "-")}</Definition><Definition label="امتیاز">{String(output.score ?? output.confidence ?? metrics.score ?? "-")}</Definition><Definition label="آستانه مؤثر">{String(metrics.effective_threshold ?? metrics.threshold ?? "-")}</Definition></dl>;
+  return <dl className="definition-grid"><Definition label="ورودی طبقه‌بند">{String(input.classifier_input ?? input.query ?? "-")}</Definition><Definition label="برچسب">{String(output.type ?? output.label ?? output.intent ?? "-")}</Definition><Definition label="امتیاز">{String(output.score ?? output.confidence ?? metrics.score ?? "-")}</Definition><Definition label="آستانه مؤثر">{String(metrics.effective_threshold ?? metrics.threshold ?? "-")}</Definition></dl>;
 }
 
 function Rewrite({ stage }: { stage: StageResult }) {
@@ -43,33 +49,41 @@ function Retrieval({ stage, stages }: { stage: StageResult; stages: StageResult[
   const selectedIds = new Set(asList(asRecord(context?.output_data).selected_chunk_ids ?? asRecord(context?.output_data).chunk_ids).map(String));
   const rerankById = new Map(rerankRows.map((row, index) => [candidateId(row, index), row]));
   const [open, setOpen] = useState<number | null>(null);
-  return <div><dl className="definition-grid"><Definition label="پرسش دقیق بازیابی">{String(input.retrieval_query ?? input.query ?? "-")}</Definition><Definition label="تعداد کاندیدا">{candidates.length}</Definition><Definition label="آستانه بازرتبه‌بندی">{String(asRecord(rerank?.metrics).threshold ?? asRecord(rerank?.metrics).effective_threshold ?? "-")}</Definition></dl><div className="table-wrap"><table className="data-table compact retrieval-table"><thead><tr><th>Rank</th><th>Chunk ID</th><th>Retrieval Score</th><th>Rerank Score</th><th>Selected</th><th>اثر Reranker</th><th></th></tr></thead><tbody>{candidates.map((candidate, index) => {
+  if (!candidates.length) return <div className="empty-inline">نتیجه بازیابی در trace ثبت نشده است.</div>;
+  return <div><h3 className="inspector-section-title">نتایج بازیابی پیش از Rerank</h3><dl className="definition-grid"><Definition label="پرسش دقیق بازیابی">{String(input.retrieval_query ?? input.query ?? "-")}</Definition><Definition label="تعداد کاندیدا">{candidates.length}</Definition><Definition label="اسناد مجاز">{Array.isArray(input.allowed_docs) ? input.allowed_docs.join("، ") : "-"}</Definition></dl><div className="table-wrap"><table className="data-table compact retrieval-table"><thead><tr><th>رتبه بازیابی</th><th>Chunk / Document ID</th><th>Retrieval Score</th><th>Source / Category</th><th>پیش‌نمایش محتوا</th><th>Selected</th><th></th></tr></thead><tbody>{candidates.map((candidate, index) => {
     const content = candidate.content ?? candidate.text ?? candidate.chunk_content;
     const metadata = asRecord(candidate.metadata); const id = candidateId(candidate, index); const reranked = rerankById.get(id);
-    const accepted = reranked?.accepted; const selected = selectedIds.has(id); const inputRank = Number(reranked?.input_rank ?? candidate.rank ?? index + 1); const outputRank = reranked ? Number(reranked.output_rank ?? inputRank) : null; const delta = outputRank == null ? null : inputRank - outputRank;
-    return <tr key={id} className={open === index ? "is-expanded" : ""}><td>{String(candidate.rank ?? index + 1)}</td><td dir="ltr"><code>{id}</code></td><td dir="ltr">{String(candidate.retrieval_score ?? candidate.score ?? "-")}</td><td dir="ltr">{String(reranked?.score ?? "-")}</td><td>{selected ? <Badge tone="success"><CheckCircle />Yes</Badge> : <Badge tone="neutral"><MinusCircle />No</Badge>}</td><td>{rerank?.status === "SKIPPED" ? <Badge tone="neutral">Skipped</Badge> : accepted === false ? <Badge tone="warning">Rejected</Badge> : accepted === true ? delta && delta > 0 ? <span className="rank-up"><ArrowUp />+{delta}</span> : delta && delta < 0 ? <span className="rank-down"><ArrowDown />{delta}</span> : <Badge tone="success">Kept</Badge> : <Badge tone="neutral">Not returned</Badge>}</td><td><button className="icon-button" aria-label="نمایش محتوای قطعه" onClick={() => setOpen(open === index ? null : index)}>{open === index ? <CaretDown /> : <CaretLeft />}</button>{open === index && <div className="row-expansion"><div className="chunk-content-head"><strong dir="auto">{String(candidate.question ?? candidate.title ?? metadata.question ?? metadata.title ?? "Retrieved chunk")}</strong><Badge tone={accepted === false ? "warning" : "neutral"}>{accepted === false ? "Reranker removed" : "Trace content"}</Badge></div><TextBlock value={content} /><TextBlock value={metadata} code /></div>}</td></tr>;
+    const accepted = reranked?.accepted; const selected = selectedIds.has(id);
+    const source = metadata.document_name ?? metadata.source ?? candidate.source ?? metadata.category;
+    const preview = typeof content === "string" ? content.slice(0, 140) : "-";
+    return <tr key={id} className={open === index ? "is-expanded" : ""}><td>{String(candidate.rank ?? index + 1)}</td><td dir="ltr"><code>{id}</code></td><td dir="ltr">{String(candidate.retrieval_score ?? candidate.score ?? "-")}</td><td dir="auto">{String(source ?? "-")}</td><td className="content-preview" dir="auto">{preview}</td><td>{selected ? <Badge tone="success"><CheckCircle />Yes</Badge> : <Badge tone="neutral"><MinusCircle />No</Badge>}</td><td><button className="icon-button" aria-label="نمایش محتوای قطعه" onClick={() => setOpen(open === index ? null : index)}>{open === index ? <CaretDown /> : <CaretLeft />}</button>{open === index && <div className="row-expansion"><div className="chunk-content-head"><strong dir="auto">{String(candidate.question ?? candidate.title ?? metadata.question ?? metadata.title ?? "Retrieved chunk")}</strong>{reranked && <Badge tone={accepted === false ? "warning" : "neutral"}>{accepted === false ? "Reranker removed" : `Rerank #${String(reranked.output_rank ?? "-")}`}</Badge>}</div><TextBlock value={content} /><TextBlock value={metadata} code /></div>}</td></tr>;
   })}</tbody></table></div></div>;
 }
 
 function Rerank({ stage }: { stage: StageResult }) {
-  const output = asRecord(stage.output_data); const metrics = asRecord(stage.metrics);
+  const output = asRecord(stage.output_data); const input = asRecord(stage.input_data); const metrics = asRecord(stage.metrics);
   const rankings = asList(output.rankings ?? output.candidates ?? output.results);
   if (stage.status === "SKIPPED") return <div className="skip-note"><span>این مرحله در مسیر واقعی اجرا نشده است.</span><TextBlock value={stage.metrics ?? stage.output_data} code /></div>;
-  return <div><Definition label="آستانه">{String(metrics.threshold ?? metrics.effective_threshold ?? "-")}</Definition><div className="table-wrap"><table className="data-table compact"><thead><tr><th>رتبه اولیه</th><th>رتبه جدید</th><th>شناسه</th><th>امتیاز</th><th>تغییر</th></tr></thead><tbody>{rankings.map((item, index) => {
-    const initial = Number(item.input_rank ?? item.initial_rank ?? index + 1); const next = Number(item.output_rank ?? item.rank ?? index + 1); const delta = initial - next;
-    return <tr key={String(item.chunk_id ?? item.candidate_id ?? index)}><td>{initial}</td><td>{next}</td><td dir="ltr"><code>{String(item.chunk_id ?? item.candidate_id ?? "-")}</code></td><td dir="ltr">{String(item.score ?? "-")}</td><td>{delta > 0 ? <span className="rank-up"><ArrowUp />{delta}</span> : delta < 0 ? <span className="rank-down"><ArrowDown />{Math.abs(delta)}</span> : "بدون تغییر"}</td></tr>;
+  if (!rankings.length) return <div className="empty-inline">رتبه‌بندی خروجی در trace ثبت نشده است.</div>;
+  const inputs = asList(input.candidates); const byId = new Map(inputs.map((row, index) => [candidateId(row, index), row]));
+  return <div><Definition label="تعداد انتخاب‌شده">{String(metrics.selected_count ?? "-")}</Definition><div className="table-wrap"><table className="data-table compact"><thead><tr><th>رتبه اولیه</th><th>رتبه جدید</th><th>تغییر</th><th>Chunk ID</th><th>Source</th><th>Retrieval Score</th><th>Reranker Score</th></tr></thead><tbody>{rankings.map((item, index) => {
+    const initial = Number(item.original_rrf_rank ?? item.input_rank ?? item.initial_rank ?? index + 1); const next = Number(item.reranker_rank ?? item.output_rank ?? item.rank ?? index + 1); const delta = initial - next;
+    const id = candidateId(item, index); const original = byId.get(id) || {}; const metadata = asRecord(item.metadata ?? original.metadata);
+    return <tr key={id}><td>#{initial}</td><td>#{next}</td><td>{delta > 0 ? <span className="rank-up">#{initial} → #{next} <ArrowUp />{delta}</span> : delta < 0 ? <span className="rank-down">#{initial} → #{next} <ArrowDown />{Math.abs(delta)}</span> : <span>#{initial} → #{next} 0</span>}</td><td dir="ltr"><code>{id}</code></td><td>{String(metadata.document_name ?? metadata.source ?? "-")}</td><td dir="ltr">{String(item.hybrid_score ?? item.retrieval_score ?? original.hybrid_score ?? original.retrieval_score ?? original.score ?? "-")}</td><td dir="ltr">{String(item.reranker_score ?? item.score ?? "-")}</td></tr>;
   })}</tbody></table></div></div>;
 }
 
 function Context({ stage }: { stage: StageResult }) {
   const output = asRecord(stage.output_data); const metrics = asRecord(stage.metrics);
   const ids = output.selected_chunk_ids ?? output.chunk_ids;
-  return <div className="artifact-columns"><section><h4>قطعات انتخاب‌شده به ترتیب</h4><TextBlock value={ids} code /></section><section><h4>هش زمینه</h4><code className="hash" dir="ltr">{String(metrics.selected_context_hash ?? stage.output_hash ?? "-")}</code></section><section className="span-all"><details className="disclosure"><summary>مشاهده متن دقیق زمینه</summary><TextBlock value={output.selected_context ?? output.context} /></details></section></div>;
+  const context = output.selected_context ?? output.context;
+  return <div className="artifact-columns"><section><h4>SELECTED FOR LLM</h4><TextBlock value={ids} code /></section><section><h4>selected_context_hash</h4><code className="hash" dir="ltr" title={String(metrics.selected_context_hash ?? stage.output_hash ?? "-")}>{String(metrics.selected_context_hash ?? stage.output_hash ?? "-")}</code></section><section className="span-all"><h4>زمینه دقیق انتخاب‌شده</h4>{context == null ? <div className="empty-inline">متن زمینه در trace ثبت نشده است.</div> : <TextBlock value={context} />}</section></div>;
 }
 
 function Prompt({ stage }: { stage: StageResult }) {
   const output = asRecord(stage.output_data); const metrics = asRecord(stage.metrics);
-  return <div className="artifact-columns"><section><h4>نسخه / منبع</h4><TextBlock value={metrics.prompt_version ?? metrics.prompt_source ?? output.prompt_version} code /></section><section><h4>هش پرامپت</h4><code className="hash" dir="ltr">{String(metrics.prompt_hash ?? stage.output_hash ?? "-")}</code></section><section className="span-all"><details className="disclosure"><summary>مشاهده پرامپت دقیق ذخیره‌شده</summary><TextBlock value={output.prompt ?? output.final_prompt} /></details></section></div>;
+  const messages = asList(output.prompt ?? output.messages);
+  return <div className="artifact-columns"><section><h4>نسخه / منبع</h4><TextBlock value={metrics.prompt_version ?? metrics.prompt_source ?? output.prompt_version} code /></section><section><h4>هش پرامپت</h4><code className="hash" dir="ltr">{String(metrics.prompt_hash ?? stage.output_hash ?? "-")}</code></section><Definition label="تعداد پیام">{messages.length || "ناموجود"}</Definition><section className="span-all"><h4>پیام‌های پرامپت</h4>{messages.length ? <div className="prompt-messages">{messages.map((message, index) => <article key={index}><strong dir="ltr">{String(message.role ?? `message-${index + 1}`)}</strong><p dir="auto">{String(message.content ?? "")}</p></article>)}</div> : output.system_message != null || output.user_prompt != null ? <div className="prompt-messages">{output.system_message != null && <article><strong dir="ltr">system</strong><p dir="auto">{String(output.system_message)}</p></article>}{output.user_prompt != null && <article><strong dir="ltr">user</strong><p dir="auto">{String(output.user_prompt)}</p></article>}</div> : <div className="empty-inline">پیام ساختاریافته‌ای ثبت نشده است.</div>}</section></div>;
 }
 
 function Generation({ stage }: { stage: StageResult }) {
@@ -78,10 +92,12 @@ function Generation({ stage }: { stage: StageResult }) {
 }
 
 export function StageInspector({ stage, stages = [] }: { stage: StageResult | undefined; stages?: StageResult[] }) {
+  const [view, setView] = useState<"structured" | "raw">("structured");
   if (!stage) return <div className="empty-inline">هنوز اثری برای این مرحله ثبت نشده است.</div>;
   const body = (() => {
     switch (stage.stage_name) {
       case "NORMALIZATION": return <Normalization stage={stage} />;
+      case "HISTORY": return <History stage={stage} />;
       case "INTENT": return <Intent stage={stage} />;
       case "REWRITE": return <Rewrite stage={stage} />;
       case "RETRIEVAL": return <Retrieval stage={stage} stages={stages} />;
@@ -92,5 +108,5 @@ export function StageInspector({ stage, stages = [] }: { stage: StageResult | un
       default: return <JsonFallback stage={stage} />;
     }
   })();
-  return <section className="stage-inspector"><header><Badge tone={statusTone(stage.status)}>{stage.status}</Badge><span>{formatDuration(stage.duration_ms)}</span><code dir="ltr">in {shortHash(stage.input_hash)}</code><code dir="ltr">out {shortHash(stage.output_hash)}</code></header>{stage.status === "ERROR" && <div className="stage-error"><WarningCircle size={20} /><div><strong>Infrastructure Error</strong><p dir="ltr">{stage.error_code || "UNKNOWN_STAGE_ERROR"}</p></div></div>}{body}{stage.error_data && <details className="disclosure"><summary>جزئیات امن خطا</summary><TextBlock value={stage.error_data} code /></details>}</section>;
+  return <section className="stage-inspector"><header><Badge tone={statusTone(stage.status)}>{stage.status}</Badge><span>{formatDuration(stage.duration_ms)}</span><code dir="ltr" title={stage.input_hash || ""}>in {shortHash(stage.input_hash)}</code><code dir="ltr" title={stage.output_hash || ""}>out {shortHash(stage.output_hash)}</code><div className="inspector-tabs" role="tablist"><button role="tab" aria-selected={view === "structured"} onClick={() => setView("structured")}>Structured</button><button role="tab" aria-selected={view === "raw"} onClick={() => setView("raw")}>Raw JSON</button></div></header>{stage.status === "ERROR" && <div className="stage-error"><WarningCircle size={20} /><div><strong>Stage error</strong><p dir="ltr">{stage.error_code || "UNKNOWN_STAGE_ERROR"}</p></div></div>}{view === "structured" ? body : <JsonFallback stage={stage} />}{stage.error_data && <details className="disclosure"><summary>جزئیات امن خطا</summary><TextBlock value={stage.error_data} code /></details>}</section>;
 }

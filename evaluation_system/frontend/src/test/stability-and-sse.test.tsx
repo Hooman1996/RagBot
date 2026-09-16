@@ -60,8 +60,8 @@ describe("SSE client", () => {
   it("parses named events and IDs", () => {
     expect(parseSseBlock('id: 42\nevent: progress\ndata: {"completed_turns":2}')).toEqual({ id: "42", event: "progress", data: { completed_turns: 2 } });
   });
-  it("classifies the backend Redis outage comment", () => {
-    expect(parseSseBlock(": redis unavailable; durable state remains in PostgreSQL")).toEqual({ event: "redis_unavailable", data: { error_code: "EVALUATION_REDIS_UNAVAILABLE" } });
+  it("ignores SSE comments because reconnects start from a durable snapshot", () => {
+    expect(parseSseBlock(": keepalive")).toBeNull();
   });
   it("streams progress updates from a fetch body", async () => {
     const events: string[] = [];

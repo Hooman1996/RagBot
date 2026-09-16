@@ -3,8 +3,9 @@ export type DatabaseState = "NOT_INITIALIZED" | "READY" | "UPGRADE_REQUIRED" | "
 export type RunStatus = "PENDING" | "RUNNING" | "COMPLETED" | "FAILED" | "CANCELLED";
 export type StageName =
   | "NORMALIZATION"
-  | "INTENT"
+  | "HISTORY"
   | "REWRITE"
+  | "INTENT"
   | "RETRIEVAL"
   | "RERANK"
   | "CONTEXT_SELECTION"
@@ -143,7 +144,7 @@ export interface RunTurn {
   rewritten_query: string | null;
   fallback_used: boolean;
   fallback_reason: string | null;
-  status: string;
+  status: RunStatus | "ERROR";
   infrastructure_error: boolean;
   error_code: string | null;
   total_latency_ms: number | null;
