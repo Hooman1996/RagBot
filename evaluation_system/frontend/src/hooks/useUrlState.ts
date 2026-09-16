@@ -3,7 +3,7 @@ import type { StageName } from "../types/api";
 
 export type PanelName = "overview" | "datasets" | "runs" | "stability" | "pipeline" | "system";
 
-const availablePanels = new Set<PanelName>(["overview", "datasets", "runs", "stability", "pipeline"]);
+const availablePanels = new Set<PanelName>(["overview", "datasets", "runs", "stability", "pipeline", "system"]);
 const availableStages = new Set<StageName>([
   "NORMALIZATION", "HISTORY", "REWRITE", "INTENT", "RETRIEVAL", "RERANK", "CONTEXT_SELECTION", "PROMPT_BUILD", "GENERATION",
 ]);

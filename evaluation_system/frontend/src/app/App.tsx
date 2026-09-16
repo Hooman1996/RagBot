@@ -6,6 +6,7 @@ import { Overview } from "../features/overview/Overview";
 import { AppShell } from "../components/shell/AppShell";
 import { Runs } from "../features/runs/Runs";
 import { PipelineExplorer } from "../features/pipeline/PipelineExplorer";
+import { System } from "../features/system/System";
 import type { Run } from "../types/api";
 
 export function App() {
@@ -18,8 +19,9 @@ export function App() {
         {panel === "overview" && <Overview onRunOpen={openRun} />}
         {panel === "datasets" && <DatasetInspector activeRunId={null} onRunOpen={(id) => update({ panel: "runs", runId: id })} />}
         {panel === "runs" && <Runs runId={runId} onRunOpen={(id) => update({ panel: "runs", runId: id })} onBack={() => update({ panel: "runs", runId: null })} />}
-        {panel === "stability" && <StabilityInspector activeRunId={runId} onRunOpen={(id) => update({ runId: id })} />}
+        {panel === "stability" && <StabilityInspector activeRunId={runId} onRunOpen={(id) => update({ runId: id })} onRunInspect={(id) => update({ panel: "runs", runId: id })} onPipelineOpen={(sessionId, turnId, stage) => update({ panel: "pipeline", runId, sessionId, turnId, stage })} />}
         {panel === "pipeline" && <PipelineExplorer runId={runId} sessionId={sessionId} turnId={turnId} stage={stage} onUrlChange={update} />}
+        {panel === "system" && <System />}
       </AppShell>
     </DatabaseGate>
   );

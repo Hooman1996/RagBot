@@ -18,7 +18,7 @@ const navigation: NavigationItem[] = [
   { panel: "runs", label: "اجراها", english: "Runs", icon: ChartDonut, enabled: true },
   { panel: "stability", label: "پایداری", english: "Stability", icon: Pulse, enabled: true },
   { panel: "pipeline", label: "خط لوله", english: "Pipeline", icon: GitBranch, enabled: true },
-  { panel: "system", label: "سیستم", english: "System", icon: GearSix, enabled: false },
+  { panel: "system", label: "سیستم", english: "System", icon: GearSix, enabled: true },
 ];
 
 export function Sidebar({ panel, onNavigate }: { panel: PanelName; onNavigate: (panel: PanelName) => void }) {
@@ -39,12 +39,12 @@ export function Sidebar({ panel, onNavigate }: { panel: PanelName; onNavigate: (
               className={active ? "is-active" : ""}
               disabled={!item.enabled}
               aria-current={active ? "page" : undefined}
-              aria-label={item.enabled ? item.label : `${item.label}، در حال مهاجرت`}
-              title={item.enabled ? item.english : `${item.english} - در حال مهاجرت`}
+              aria-label={item.label}
+              title={item.english}
               onClick={() => onNavigate(item.panel)}
             >
               <IconComponent size={20} weight={active ? "fill" : "regular"} aria-hidden="true" />
-              <span><strong>{item.label}</strong><small>{item.enabled ? item.english : "در حال مهاجرت"}</small></span>
+              <span><strong>{item.label}</strong><small>{item.english}</small></span>
             </button>
           );
         })}

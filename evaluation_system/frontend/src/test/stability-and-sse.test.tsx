@@ -51,9 +51,9 @@ it("uses backend first divergence as the canonical stability marker", async () =
   }));
   renderWithProviders(<StabilityResults runId="run-1" />); const user = userEvent.setup();
   await user.click(await screen.findByRole("button", { name: /458923/ }));
-  expect(await screen.findByText("مقایسه دو تکرار")).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "مقایسه A/B نوبت 1" })).toBeInTheDocument();
   expect(screen.getAllByText("اولین واگرایی").length).toBeGreaterThan(0);
-  expect(screen.getAllByText("DIVERGED").length).toBeGreaterThan(0);
+  expect(screen.getAllByText("DIFFERENT").length).toBeGreaterThan(0);
 });
 
 describe("SSE client", () => {

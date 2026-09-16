@@ -53,7 +53,7 @@ it("navigates between Overview, Datasets, and Stability and follows browser hist
   expect(await screen.findByRole("heading", { name: "مجموعه داده‌ها" })).toBeInTheDocument();
   expect(window.location.search).toBe("?panel=datasets");
   await user.click(screen.getByRole("button", { name: "پایداری" }));
-  expect(await screen.findByRole("heading", { name: "ردیابی نقطه نخست واگرایی" })).toBeInTheDocument();
+  expect(await screen.findByRole("heading", { name: "پایداری و تکرارپذیری" })).toBeInTheDocument();
   expect(window.location.search).toBe("?panel=stability");
   act(() => {
     window.history.replaceState({}, "", "/?panel=datasets");

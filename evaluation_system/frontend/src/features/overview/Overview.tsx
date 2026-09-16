@@ -4,6 +4,7 @@ import { useMemo } from "react";
 import { useEvaluationApi } from "../../api/context";
 import { PageHeader } from "../../components/shell/PageHeader";
 import { MetricCard } from "../../components/ui/MetricCard";
+import { Badge, statusTone } from "../../components/ui/Badge";
 import { StatusBadge } from "../../components/ui/StatusBadge";
 import { EmptyState, ErrorState, SkeletonRows } from "../../components/ui/States";
 import { formatDate } from "../../components/ui/format";
@@ -16,6 +17,7 @@ export function Overview({ onRunOpen }: { onRunOpen: (run: Run) => void }) {
   const datasets = useQuery({ queryKey: ["datasets"], queryFn: api.datasets });
   const runs = useQuery({ queryKey: ["runs"], queryFn: api.runs, refetchInterval: 10_000 });
   const capabilities = useQuery({ queryKey: ["capabilities"], queryFn: api.capabilities, staleTime: 30_000 });
+  const database = useQuery({ queryKey: ["database-status"], queryFn: api.databaseStatus, staleTime: 30_000 });
 
   const counts = useMemo(() => {
     const result = { PENDING: 0, RUNNING: 0, COMPLETED: 0, FAILED: 0, CANCELLED: 0 } satisfies Record<RunStatus, number>;
@@ -31,8 +33,8 @@ export function Overview({ onRunOpen }: { onRunOpen: (run: Run) => void }) {
   const fallbackTotal = (runs.data || []).reduce((sum, run) => sum + run.fallback_count, 0);
   const errorTotal = (runs.data || []).reduce((sum, run) => sum + run.error_count, 0);
   const infrastructureErrorTotal = (runs.data || []).reduce((sum, run) => sum + run.infrastructure_error_count, 0);
-  const loading = datasets.isLoading || runs.isLoading || capabilities.isLoading;
-  const failedQuery = datasets.isError ? datasets : runs.isError ? runs : capabilities.isError ? capabilities : null;
+  const loading = datasets.isLoading || runs.isLoading || capabilities.isLoading || database.isLoading;
+  const failedQuery = datasets.isError ? datasets : runs.isError ? runs : capabilities.isError ? capabilities : database.isError ? database : null;
 
   if (loading) return <div className="overview-page"><PageHeader title="نمای کلی ارزیابی" description="وضعیت جاری داده‌ها و اجرای ارزیابی را از سرویس واقعی مشاهده کنید." /><SkeletonRows count={6} /></div>;
   if (failedQuery) return <div className="overview-page"><PageHeader title="نمای کلی ارزیابی" description="وضعیت جاری داده‌ها و اجرای ارزیابی را از سرویس واقعی مشاهده کنید." /><ErrorState title="داده‌های نمای کلی قابل دریافت نیست" error={failedQuery.error} retry={() => void failedQuery.refetch()} /></div>;
@@ -53,6 +55,8 @@ export function Overview({ onRunOpen }: { onRunOpen: (run: Run) => void }) {
         <MetricCard label="تکمیل شده" value={counts.COMPLETED} icon={CheckCircle} tone="success" />
         <MetricCard label="ناموفق" value={counts.FAILED} icon={WarningCircle} tone="danger" />
       </section>
+
+      <section className="overview-evidence" aria-label="وضعیت سامانه"><div><Database size={18} /><span>پایگاه داده</span><Badge tone={statusTone(database.data!.status)}>{database.data!.status}</Badge></div><div><PlayCircle size={18} /><span>قابلیت اجرای پس‌زمینه</span><strong>{capabilities.data!.background_execution_available ? "فعال" : "در دسترس نیست"}</strong></div>{counts.RUNNING > 0 && <div><Clock size={18} /><span>جدیدترین اجرای فعال</span><code dir="ltr">{recentRuns.find((run) => run.status === "RUNNING")?.id.slice(0, 12) || "-"}</code></div>}</section>
 
       <section className="overview-status surface" aria-labelledby="status-distribution-title">
         <div className="surface-header">
