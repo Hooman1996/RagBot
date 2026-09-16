@@ -1,0 +1,15 @@
+.git
+.gitignore
+.env
+.env.*
+node_modules/
+dist/
+design-preview/
+coverage/
+test-results/
+playwright-report/
+*.tsbuildinfo
+vite.config.js
+vite.config.d.ts
+docs/
+README.md

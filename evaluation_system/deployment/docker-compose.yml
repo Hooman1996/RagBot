@@ -1,0 +1,55 @@
+x-eval-backend: &eval-backend
+  image: ragbot-eval-backend:${EVAL_IMAGE_TAG:-local}
+  environment:
+    EVAL_ENABLED: "true"
+    EVAL_API_HOST: 0.0.0.0
+    EVAL_API_PORT: "8090"
+    POSTGRES_HOST: ${POSTGRES_HOST:?Set POSTGRES_HOST to a host reachable from the containers}
+    POSTGRES_PORT: ${POSTGRES_PORT:-5432}
+    POSTGRES_DB: ${POSTGRES_DB:?Set POSTGRES_DB}
+    POSTGRES_USER: ${POSTGRES_USER:?Set POSTGRES_USER}
+    POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    EVAL_ALLOW_DB_INIT: ${EVAL_ALLOW_DB_INIT:-false}
+    EVAL_CORS_ORIGINS: ${EVAL_CORS_ORIGINS:-}
+    EVAL_SESSION_CONCURRENCY: ${EVAL_SESSION_CONCURRENCY:-1}
+    EVAL_REPEAT_MAX: ${EVAL_REPEAT_MAX:-100}
+    EVAL_WORKER_POLL_INTERVAL_SECONDS: ${EVAL_WORKER_POLL_INTERVAL_SECONDS:-1}
+    EVAL_WORKER_STALE_AFTER_SECONDS: ${EVAL_WORKER_STALE_AFTER_SECONDS:-300}
+    EVAL_SSE_POLL_INTERVAL_SECONDS: ${EVAL_SSE_POLL_INTERVAL_SECONDS:-1}
+    EVAL_MAX_UPLOAD_BYTES: ${EVAL_MAX_UPLOAD_BYTES:-20971520}
+    EVAL_MAX_DATASET_ROWS: ${EVAL_MAX_DATASET_ROWS:-50000}
+    EVAL_RAGBOT_BASE_URL: ${EVAL_RAGBOT_BASE_URL:?Set EVAL_RAGBOT_BASE_URL to a URL reachable from the containers}
+    EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS: ${EVAL_RAGBOT_HTTP_TIMEOUT_SECONDS:-70}
+  restart: unless-stopped
+
+services:
+  eval-api:
+    <<: *eval-backend
+    build:
+      context: ../backend
+    command:
+      - python
+      - -m
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8090"
+
+  eval-worker:
+    <<: *eval-backend
+    command:
+      - python
+      - -m
+      - app.worker.postgres_worker
+
+  eval-frontend:
+    image: ragbot-eval-frontend:${EVAL_IMAGE_TAG:-local}
+    build:
+      context: ../frontend
+    depends_on:
+      - eval-api
+    ports:
+      - "${EVAL_FRONTEND_PORT:-8088}:80"
+    restart: unless-stopped

@@ -13,6 +13,17 @@ service through its internal HTTP API.
 Redis, Celery, Qdrant, GPUs, and local model services are not required. Set
 `EVAL_RAGBOT_BASE_URL` to the RagBot service base URL.
 
+For the current local development stack, RagBot listens on port 7000:
+
+```bash
+EVAL_RAGBOT_BASE_URL=http://127.0.0.1:7000
+```
+
+This address is an environment-specific service boundary. When Eval runs in a
+separate container in a future deployment, `127.0.0.1` refers to that Eval
+container and cannot reach RagBot; configure a reachable RagBot service name
+or host instead.
+
 ## API
 
 From `evaluation_system/backend` (or the root of a copied backend project):
@@ -32,6 +43,30 @@ python -m app.worker.postgres_worker
 
 The API and worker are separate processes from the same codebase or deployment
 image. They must point to the same PostgreSQL database.
+
+## Container image
+
+Build the standalone image from this directory:
+
+```bash
+docker build -t ragbot-eval-backend:local .
+```
+
+The image defaults to the API process:
+
+```bash
+python -m uvicorn app.main:app --host 0.0.0.0 --port 8090
+```
+
+Use the same immutable image for the worker by overriding its command:
+
+```bash
+python -m app.worker.postgres_worker
+```
+
+The container must receive PostgreSQL and RagBot addresses that are reachable
+from its network. Container loopback does not refer to services on the host.
+No database migration runs automatically during image or container startup.
 
 ## Database initialization
 
