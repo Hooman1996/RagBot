@@ -35,7 +35,7 @@ def _positive_float(name: str, default: float) -> float:
 
 
 def _ragbot_base_url() -> str:
-    value = os.getenv("EVAL_RAGBOT_BASE_URL", "http://127.0.0.1:8080").strip()
+    value = os.getenv("EVAL_RAGBOT_BASE_URL", "http://127.0.0.1:7000").strip()
     if not value:
         raise ValueError("EVAL_RAGBOT_BASE_URL must not be empty")
     return value.rstrip("/")

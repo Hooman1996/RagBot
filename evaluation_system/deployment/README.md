@@ -19,15 +19,23 @@ Each component builds independently from its own directory:
 
 ```bash
 cd ../backend
-docker build -t ragbot-eval-backend:local .
+docker build \
+  --build-arg PIP_INDEX_URL=https://mirrors.aliyun.com/pypi/simple/ \
+  -t ragbot-eval-backend:local .
 
 cd ../frontend
-docker build -t ragbot-eval-frontend:local .
+docker build \
+  --build-arg NPM_REGISTRY_URL=https://mirrors.cloud.tencent.com/npm/ \
+  -t ragbot-eval-frontend:local .
 ```
 
 The API and worker use the same `ragbot-eval-backend` image with different
 commands. The frontend image contains the built SPA and Nginx. Nginx exposes
 the browser-facing port and proxies only `/api/v1/evaluation/` to `eval-api`.
+The pip index is a configurable build argument; the example above uses an
+optional mirror, while the Dockerfile and Compose default to PyPI.
+The frontend registry is configurable in the same way and defaults to the
+official npm registry.
 
 ## Configure and validate
 

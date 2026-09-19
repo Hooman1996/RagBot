@@ -182,8 +182,11 @@ class ResetEvaluationDatabaseTests(unittest.TestCase):
         source = WRAPPER.read_text(encoding="utf-8")
         self.assertIn("set -euo pipefail", source)
         self.assertIn(
-            'exec python3 -m evaluation_system.backend.scripts.'
-            'reset_evaluation_database "$@"',
+            'cd "$(dirname "$0")/.."',
+            source,
+        )
+        self.assertIn(
+            'exec python3 -m scripts.reset_evaluation_database "$@"',
             source,
         )
 

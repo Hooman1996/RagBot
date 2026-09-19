@@ -27,6 +27,8 @@ services:
     <<: *eval-backend
     build:
       context: ../backend
+      args:
+        PIP_INDEX_URL: ${PIP_INDEX_URL:-https://pypi.org/simple}
     command:
       - python
       - -m
@@ -48,6 +50,8 @@ services:
     image: ragbot-eval-frontend:${EVAL_IMAGE_TAG:-local}
     build:
       context: ../frontend
+      args:
+        NPM_REGISTRY_URL: ${NPM_REGISTRY_URL:-https://registry.npmjs.org}
     depends_on:
       - eval-api
     ports:

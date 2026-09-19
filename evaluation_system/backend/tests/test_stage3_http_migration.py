@@ -105,6 +105,7 @@ class RagBotClientContractTests(unittest.IsolatedAsyncioTestCase):
 
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.method, "POST")
+            self.assertEqual(request.url.host, "ragbot.test")
             self.assertEqual(request.url.path, RagBotEvaluationClient.TURN_PATH)
             body = json.loads(request.content)
             self.assertEqual(body, {
@@ -177,6 +178,7 @@ class RagBotClientContractTests(unittest.IsolatedAsyncioTestCase):
     async def test_runtime_snapshot_uses_repeated_document_parameters(self):
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.host, "ragbot.test")
             self.assertEqual(request.url.path, RagBotEvaluationClient.SNAPSHOT_PATH)
             self.assertEqual(request.url.params.get_list("documents"), ["A", "B"])
             return httpx.Response(200, json={
@@ -191,11 +193,17 @@ class RagBotClientContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.git_commit_sha, "abc123")
 
     async def test_datasource_shape_is_parsed(self):
-        client = await self._client(lambda request: httpx.Response(200, json={
-            "documents": [{"name": "General_FAQ", "category": "FAQ"}],
-            "count": 1,
-            "categories": ["FAQ"],
-        }))
+        def handler(request: httpx.Request) -> httpx.Response:
+            self.assertEqual(request.method, "GET")
+            self.assertEqual(request.url.host, "ragbot.test")
+            self.assertEqual(request.url.path, RagBotEvaluationClient.DATASOURCES_PATH)
+            return httpx.Response(200, json={
+                "documents": [{"name": "General_FAQ", "category": "FAQ"}],
+                "count": 1,
+                "categories": ["FAQ"],
+            })
+
+        client = await self._client(handler)
         try:
             result = await client.list_datasources()
         finally:
@@ -465,6 +473,15 @@ class Stage3ConfigurationTests(unittest.TestCase):
             get_settings.cache_clear()
             with self.assertRaisesRegex(ValueError, "must not be empty"):
                 get_settings()
+
+    def test_ragbot_local_default_uses_development_port(self):
+        from evaluation_system.backend.app.config import get_settings
+
+        with patch.dict("os.environ", {}, clear=True):
+            get_settings.cache_clear()
+            settings = get_settings()
+
+        self.assertEqual(settings.ragbot_base_url, "http://127.0.0.1:7000")
 
 
 if __name__ == "__main__":
