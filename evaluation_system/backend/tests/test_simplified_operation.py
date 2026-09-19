@@ -1,10 +1,8 @@
 from __future__ import annotations
 
 import os
-import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 from unittest.mock import patch
 
 
@@ -29,49 +27,16 @@ class ExistingLoginCompatibilityTests(unittest.TestCase):
 
 
 class EvaluationRouteTests(unittest.TestCase):
-    def test_control_plane_and_built_frontend_mount_together(self):
-        try:
-            from fastapi import APIRouter, FastAPI
-            from evaluation_system.embedded_integration import (
-                install_evaluation_routes,
-            )
-        except ImportError as exc:
-            self.skipTest(f"evaluation API dependency is unavailable: {exc}")
+    def test_ragbot_owns_only_the_permanent_evaluation_contract(self):
+        main_source = Path("main.py").read_text(encoding="utf-8")
 
-        with tempfile.TemporaryDirectory() as directory:
-            dist = Path(directory)
-            (dist / "index.html").write_text(
-                "<html><body>evaluation-ui</body></html>",
-                encoding="utf-8",
-            )
-            app = FastAPI()
-            control_plane = APIRouter(prefix="/api/v1/evaluation")
-
-            @control_plane.get("/system/database-status")
-            async def database_status_probe():
-                return {"status": "READY"}
-
-            installed = install_evaluation_routes(
-                app,
-                SimpleNamespace(enabled=True),
-                frontend_dist=dist,
-                control_plane_router=control_plane,
-            )
-            self.assertTrue(installed)
-            control_paths = {route.path for route in control_plane.routes}
-            self.assertIn("/api/v1/evaluation/system/database-status", control_paths)
-            paths = {getattr(route, "path", "") for route in app.routes}
-            self.assertIn(
-                "/api/v1/evaluation/system/database-status", paths
-            )
-            self.assertIn("/evaluation", paths)
-            main_source = Path("main.py").read_text(encoding="utf-8")
-            self.assertIn("install_evaluation_routes(", main_source)
-            self.assertIn(
-                "from evaluation_system.embedded_integration import",
-                main_source,
-            )
-            self.assertIn('Path(__file__).resolve().parent', main_source)
+        self.assertIn("app.include_router(internal_evaluation_router)", main_source)
+        self.assertIn('@app.get("/api/documents")', main_source)
+        self.assertNotIn("evaluation_system.backend", main_source)
+        self.assertNotIn("embedded_integration", main_source)
+        self.assertNotIn("install_evaluation_routes", main_source)
+        self.assertNotIn('app.mount("/evaluation"', main_source)
+        self.assertFalse(Path("evaluation_system/embedded_integration.py").exists())
 
 
 class EvaluationEnvironmentTests(unittest.TestCase):

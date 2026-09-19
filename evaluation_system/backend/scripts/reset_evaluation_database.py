@@ -7,7 +7,11 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TextIO
 
-from app.config import get_settings
+try:
+    from app.config import get_settings
+except ModuleNotFoundError:
+    # Support repository-root imports used by the backend regression suite.
+    from evaluation_system.backend.app.config import get_settings
 
 
 EVALUATION_SCHEMA = "evaluation"
@@ -19,7 +23,7 @@ def build_parser() -> argparse.ArgumentParser:
     description = (
         "This utility permanently deletes only the PostgreSQL `evaluation` "
         "schema and its evaluation data. It does not recreate the schema. "
-        "After reset, use the Evaluation System panel's Initialize Database "
+        "After reset, use the standalone Evaluation System's Initialize Database "
         "action."
     )
     examples = """examples:
@@ -128,7 +132,7 @@ def main(
     print("Evaluation schema reset successfully.", file=output)
     print("Database status should now be NOT_INITIALIZED.", file=output)
     print(
-        "Open the Evaluation System panel and click Initialize Database.",
+        "Open the standalone Evaluation System and click Initialize Database.",
         file=output,
     )
     return 0

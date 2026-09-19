@@ -11,7 +11,6 @@ import threading
 import uuid
 import logging
 import time
-from pathlib import Path
 from dotenv import load_dotenv
 
 # Load variables from .env into os.environ
@@ -74,9 +73,6 @@ from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from document_category import get_document_category
-from evaluation_system.backend.app.config import (
-    get_settings as get_evaluation_settings,
-)
 
 class Config:
     """Configuration"""
@@ -408,12 +404,6 @@ async def lifespan(app: FastAPI):
 
         if mass_answer_job_manager is not None:
             await cleanup(mass_answer_job_manager.aclose)
-        if get_evaluation_settings().enabled:
-            from evaluation_system.backend.app.db.session import (
-                engine as evaluation_engine,
-            )
-
-            await cleanup(evaluation_engine.dispose)
         if rag_system is not None:
             await cleanup(rag_system.aclose)
         if llm_client is not None:
@@ -525,19 +515,6 @@ oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 app.include_router(kb_router)
 app.include_router(mobile_router)
 app.include_router(internal_evaluation_router)
-
-from evaluation_system.embedded_integration import install_evaluation_routes
-
-install_evaluation_routes(
-    app,
-    get_evaluation_settings(),
-    frontend_dist=(
-        Path(__file__).resolve().parent
-        / "evaluation_system"
-        / "frontend"
-        / "dist"
-    ),
-)
 
 
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---

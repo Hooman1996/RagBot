@@ -8,7 +8,6 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
-from types import SimpleNamespace
 
 
 REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
@@ -141,51 +140,17 @@ for route in api.app.routes:
 
 
 class EmbeddedCompatibilityTests(unittest.TestCase):
-    def test_embedded_helper_preserves_enablement_and_route_prefixes(self):
-        from fastapi import APIRouter, FastAPI
-
-        from evaluation_system.embedded_integration import (
-            install_evaluation_routes,
-        )
-
-        disabled = FastAPI()
-        self.assertFalse(
-            install_evaluation_routes(
-                disabled,
-                SimpleNamespace(enabled=False),
-                frontend_dist=Path("missing"),
-            )
-        )
-        self.assertNotIn(
-            "/evaluation",
-            {getattr(route, "path", "") for route in disabled.routes},
-        )
-
-        router = APIRouter(prefix="/api/v1/evaluation")
-
-        @router.get("/probe")
-        async def probe():
-            return {"status": "ok"}
-
-        enabled = FastAPI()
-        self.assertTrue(
-            install_evaluation_routes(
-                enabled,
-                SimpleNamespace(enabled=True),
-                frontend_dist=Path("missing"),
-                control_plane_router=router,
-            )
-        )
-        paths = {getattr(route, "path", "") for route in enabled.routes}
-        self.assertIn("/api/v1/evaluation/probe", paths)
-        self.assertIn("/evaluation", paths)
-
+    def test_ragbot_no_longer_embeds_the_standalone_control_plane(self):
         source = (REPOSITORY_ROOT / "main.py").read_text(encoding="utf-8")
-        self.assertIn(
-            "from evaluation_system.embedded_integration import "
-            "install_evaluation_routes",
-            source,
+
+        self.assertFalse(
+            (REPOSITORY_ROOT / "evaluation_system/embedded_integration.py").exists()
         )
+        self.assertNotIn("evaluation_system.backend", source)
+        self.assertNotIn("embedded_integration", source)
+        self.assertNotIn("install_evaluation_routes", source)
+        self.assertNotIn('app.mount("/evaluation"', source)
+        self.assertIn("app.include_router(internal_evaluation_router)", source)
 
     def test_ragbot_login_keeps_authentication_without_eval_bridge(self):
         source = (REPOSITORY_ROOT / "main.py").read_text(encoding="utf-8")
