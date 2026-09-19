@@ -1,5 +1,11 @@
 # Standalone Eval deployment
 
+This directory is a local integration helper and architecture reference. It is
+not a fourth product or a separately published repository. Keep it beside
+`../backend` and `../frontend`; the sibling build contexts intentionally match
+the permanent development layout. Production teams may deploy the two images
+with their own platform instead of this Compose file.
+
 This deployment packages three application services:
 
 ```text

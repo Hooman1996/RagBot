@@ -1,0 +1,25 @@
+name: Backend CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install dependencies
+        run: python -m pip install --requirement requirements-dev.txt
+      - name: Test
+        run: python -m pytest tests -q
+      - name: Import and compile sanity
+        run: |
+          python -m compileall -q app scripts alembic
+          EVAL_ENABLED=false python -c "import app.main; import app.worker.postgres_worker"
+      - name: Build image
+        run: docker build --tag ragbot-eval-backend:ci .

@@ -11,11 +11,11 @@ from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, patch
 
-from evaluation_system.backend.app.schemas.api import (
+from app.schemas.api import (
     ManualStabilityRequest,
     RunCreateRequest,
 )
-from evaluation_system.backend.app.services.provisional_snapshot import (
+from app.services.provisional_snapshot import (
     build_provisional_snapshot,
 )
 
@@ -62,7 +62,7 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_post_runs_stores_only_pending_snapshot_and_null_sha(self):
-        from evaluation_system.backend.app.api import runs
+        from app.api import runs
 
         db = self._db()
         run = self._run()
@@ -85,7 +85,7 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
         db.commit.assert_awaited_once()
 
     async def test_manual_stability_uses_same_pending_snapshot_and_null_sha(self):
-        from evaluation_system.backend.app.api import stability
+        from app.api import stability
 
         db = self._db()
         run = self._run()
@@ -114,8 +114,7 @@ class RunCreationSnapshotTests(unittest.IsolatedAsyncioTestCase):
 
 class IsolatedBackendImportTests(unittest.TestCase):
     def test_backend_imports_without_repository_source_tree(self):
-        repository_root = Path(__file__).resolve().parents[3]
-        backend_source = repository_root / "evaluation_system" / "backend"
+        backend_source = Path(__file__).resolve().parents[1]
         with tempfile.TemporaryDirectory() as temp_dir:
             isolated_backend = Path(temp_dir) / "backend"
             shutil.copytree(backend_source, isolated_backend)
@@ -124,8 +123,8 @@ import importlib
 import pathlib
 import sys
 
-repository_root = pathlib.Path(sys.argv[1]).resolve()
-assert all(pathlib.Path(item or '.').resolve() != repository_root for item in sys.path)
+source_parent = pathlib.Path(sys.argv[1]).resolve()
+assert all(pathlib.Path(item or '.').resolve() != source_parent for item in sys.path)
 modules = (
     'app.config',
     'app.clients.ragbot',
@@ -153,7 +152,7 @@ for name in modules:
                 }
             )
             result = subprocess.run(
-                [sys.executable, "-c", script, str(repository_root)],
+                [sys.executable, "-c", script, str(backend_source.parent)],
                 cwd=isolated_backend,
                 env=environment,
                 capture_output=True,

@@ -5,7 +5,7 @@ import io
 import unittest
 from datetime import datetime
 
-from evaluation_system.backend.app.services.importer import (
+from app.services.importer import (
     DatasetImportError,
     parse_dataset_file,
     parse_manual_dataset,

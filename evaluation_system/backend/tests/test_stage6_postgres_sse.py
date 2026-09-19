@@ -12,7 +12,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi import HTTPException
 
-from evaluation_system.backend.app.api import events
+from app.api import events
 
 
 def projection(
@@ -259,7 +259,7 @@ class SseStreamTests(unittest.IsolatedAsyncioTestCase):
 
 class RedisFreeStartupTests(unittest.TestCase):
     def test_main_eval_lifecycle_has_no_stale_redis_or_celery_settings(self):
-        source = Path("main.py").read_text(encoding="utf-8")
+        source = Path("app/main.py").read_text(encoding="utf-8")
         for stale in (
             "evaluation_settings.use_celery",
             "evaluation_settings.redis_url",
@@ -271,8 +271,8 @@ class RedisFreeStartupTests(unittest.TestCase):
 
     def test_standalone_app_and_worker_import_without_redis_package(self):
         modules = (
-            "evaluation_system.backend.app.main",
-            "evaluation_system.backend.app.worker.postgres_worker",
+            "app.main",
+            "app.worker.postgres_worker",
         )
         saved = {name: sys.modules.pop(name, None) for name in modules}
         real_import = __import__
@@ -294,7 +294,7 @@ class RedisFreeStartupTests(unittest.TestCase):
 
 class CancellationTests(unittest.IsolatedAsyncioTestCase):
     async def test_pending_cancellation_is_committed_without_event_transport(self):
-        from evaluation_system.backend.app.api.runs import cancel_run
+        from app.api.runs import cancel_run
 
         row = SimpleNamespace(
             id=uuid.uuid4(),
@@ -314,7 +314,7 @@ class CancellationTests(unittest.IsolatedAsyncioTestCase):
 
 class SettingsTests(unittest.TestCase):
     def test_sse_poll_interval_must_be_positive(self):
-        from evaluation_system.backend.app.config import EvaluationSettings
+        from app.config import EvaluationSettings
 
         with patch.dict("os.environ", {"EVAL_SSE_POLL_INTERVAL_SECONDS": "0"}):
             with self.assertRaisesRegex(ValueError, "must be positive"):

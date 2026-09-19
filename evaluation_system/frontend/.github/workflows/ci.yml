@@ -1,0 +1,20 @@
+name: Frontend CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+      - run: npm ci
+      - run: npm run test
+      - run: npm run build
+      - run: npm run audit:offline
+      - run: docker build --tag ragbot-eval-frontend:ci .

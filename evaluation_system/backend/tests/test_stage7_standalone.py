@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import ast
 import os
 import shutil
 import subprocess
@@ -10,8 +9,7 @@ import unittest
 from pathlib import Path
 
 
-REPOSITORY_ROOT = Path(__file__).resolve().parents[3]
-BACKEND_SOURCE = REPOSITORY_ROOT / "evaluation_system" / "backend"
+BACKEND_SOURCE = Path(__file__).resolve().parents[1]
 
 
 class StandaloneBackendTests(unittest.TestCase):
@@ -29,8 +27,8 @@ import importlib.abc
 import pathlib
 import sys
 
-repository_root = pathlib.Path(sys.argv[1]).resolve()
-assert repository_root not in {
+source_parent = pathlib.Path(sys.argv[1]).resolve()
+assert source_parent not in {
     pathlib.Path(item or ".").resolve() for item in sys.path
 }
 
@@ -124,7 +122,7 @@ for route in api.app.routes:
                 }
             )
             result = subprocess.run(
-                [sys.executable, "-c", script, str(REPOSITORY_ROOT)],
+                [sys.executable, "-c", script, str(BACKEND_SOURCE.parent)],
                 cwd=isolated_backend,
                 env=environment,
                 capture_output=True,
@@ -137,38 +135,6 @@ for route in api.app.routes:
             0,
             msg=f"stdout={result.stdout}\nstderr={result.stderr}",
         )
-
-
-class EmbeddedCompatibilityTests(unittest.TestCase):
-    def test_ragbot_no_longer_embeds_the_standalone_control_plane(self):
-        source = (REPOSITORY_ROOT / "main.py").read_text(encoding="utf-8")
-
-        self.assertFalse(
-            (REPOSITORY_ROOT / "evaluation_system/embedded_integration.py").exists()
-        )
-        self.assertNotIn("evaluation_system.backend", source)
-        self.assertNotIn("embedded_integration", source)
-        self.assertNotIn("install_evaluation_routes", source)
-        self.assertNotIn('app.mount("/evaluation"', source)
-        self.assertIn("app.include_router(internal_evaluation_router)", source)
-
-    def test_ragbot_login_keeps_authentication_without_eval_bridge(self):
-        source = (REPOSITORY_ROOT / "main.py").read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        login = next(
-            node
-            for node in tree.body
-            if isinstance(node, ast.AsyncFunctionDef) and node.name == "login"
-        )
-        attributes = {
-            node.attr
-            for node in ast.walk(login)
-            if isinstance(node, ast.Attribute)
-        }
-        self.assertIn("authenticate", attributes)
-        self.assertNotIn("establish_ragbot" + "_user", source)
-        self.assertNotIn("ragbot" + "_authenticated" + "_user", source)
-
 
 if __name__ == "__main__":
     unittest.main()

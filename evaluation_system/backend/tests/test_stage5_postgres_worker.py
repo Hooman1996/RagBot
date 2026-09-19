@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 from sqlalchemy.dialects import postgresql
 
-from evaluation_system.backend.app.clients.ragbot import RagBotClientError
+from app.clients.ragbot import RagBotClientError
 
 
 class FakeSession:
@@ -52,7 +52,7 @@ class PostgresClaimTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_fresh_pending_claim_sets_owner_heartbeat_and_start(self):
-        from evaluation_system.backend.app.worker.postgres_queue import PostgresRunQueue
+        from app.worker.postgres_queue import PostgresRunQueue
 
         run = self.make_run()
         session = FakeSession(run)
@@ -68,7 +68,7 @@ class PostgresClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(session.state_at_commit[2])
 
     async def test_stale_running_claim_replaces_owner_and_preserves_start(self):
-        from evaluation_system.backend.app.worker.postgres_queue import PostgresRunQueue
+        from app.worker.postgres_queue import PostgresRunQueue
 
         started = datetime(2026, 1, 1, tzinfo=timezone.utc)
         run = self.make_run(status="RUNNING", started_at=started)
@@ -83,7 +83,7 @@ class PostgresClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNotNone(run.heartbeat_at)
 
     async def test_stale_running_with_cancel_request_is_claimed(self):
-        from evaluation_system.backend.app.worker.postgres_queue import PostgresRunQueue
+        from app.worker.postgres_queue import PostgresRunQueue
 
         run = self.make_run(
             status="RUNNING",
@@ -97,7 +97,7 @@ class PostgresClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(run.worker_task_id, "worker-b")
 
     async def test_no_candidate_does_not_commit(self):
-        from evaluation_system.backend.app.worker.postgres_queue import PostgresRunQueue
+        from app.worker.postgres_queue import PostgresRunQueue
 
         session = FakeSession(None)
         queue = PostgresRunQueue(session_factory=lambda: session, stale_after_seconds=300)
@@ -105,7 +105,7 @@ class PostgresClaimTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(session.committed)
 
     def test_claim_sql_is_locking_skip_locked_deterministic_and_stale_aware(self):
-        from evaluation_system.backend.app.worker.postgres_queue import build_claim_statement
+        from app.worker.postgres_queue import build_claim_statement
 
         cutoff = datetime(2026, 1, 1, tzinfo=timezone.utc)
         sql = str(
@@ -131,7 +131,7 @@ class PostgresClaimTests(unittest.IsolatedAsyncioTestCase):
 
 class WorkerLossResumeTests(unittest.IsolatedAsyncioTestCase):
     async def test_completed_turn_is_not_reset_or_reexecuted(self):
-        from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
+        from app.worker.runner import EvaluationRunExecutor
 
         completed = SimpleNamespace(
             status="COMPLETED",
@@ -162,7 +162,7 @@ class WorkerLossResumeTests(unittest.IsolatedAsyncioTestCase):
 
 class RunnerPreparationBoundaryTests(unittest.IsolatedAsyncioTestCase):
     async def test_snapshot_http_runs_after_claim_commit_and_failure_is_durable(self):
-        from evaluation_system.backend.app.worker.runner import (
+        from app.worker.runner import (
             EvaluationRunExecutor,
             EvaluationRunFailed,
         )
@@ -222,7 +222,7 @@ class RunnerPreparationBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
 class WorkerLoopTests(unittest.IsolatedAsyncioTestCase):
     async def test_reuses_executor_for_two_runs_then_stops(self):
-        from evaluation_system.backend.app.worker.postgres_worker import PostgresEvaluationWorker
+        from app.worker.postgres_worker import PostgresEvaluationWorker
 
         ids = [uuid.uuid4(), uuid.uuid4()]
         stop = asyncio.Event()
@@ -254,7 +254,7 @@ class WorkerLoopTests(unittest.IsolatedAsyncioTestCase):
         )
 
     async def test_graceful_stop_finishes_current_run_and_claims_no_more(self):
-        from evaluation_system.backend.app.worker.postgres_worker import PostgresEvaluationWorker
+        from app.worker.postgres_worker import PostgresEvaluationWorker
 
         stop = asyncio.Event()
         queue = SimpleNamespace(claim_next=AsyncMock(return_value=uuid.uuid4()))
@@ -278,7 +278,7 @@ class WorkerLoopTests(unittest.IsolatedAsyncioTestCase):
         queue.claim_next.assert_awaited_once()
 
     def test_worker_identity_is_content_free_and_fits_owner_column(self):
-        from evaluation_system.backend.app.worker.postgres_worker import create_worker_id
+        from app.worker.postgres_worker import create_worker_id
 
         worker_id = create_worker_id()
         self.assertTrue(worker_id.startswith("eval-worker:"))
@@ -288,7 +288,7 @@ class WorkerLoopTests(unittest.IsolatedAsyncioTestCase):
 
 class WorkerResourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_closes_http_and_engine(self):
-        from evaluation_system.backend.app.worker import postgres_worker
+        from app.worker import postgres_worker
 
         client = SimpleNamespace(aclose=AsyncMock())
         fake_engine = SimpleNamespace(dispose=AsyncMock())
@@ -315,12 +315,12 @@ class WorkerResourceLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
 class WorkerSettingsTests(unittest.TestCase):
     def tearDown(self):
-        from evaluation_system.backend.app.config import get_settings
+        from app.config import get_settings
 
         get_settings.cache_clear()
 
     def test_defaults_and_stale_timeout_validation(self):
-        from evaluation_system.backend.app.config import get_settings
+        from app.config import get_settings
 
         with patch.dict(os.environ, {}, clear=True):
             get_settings.cache_clear()

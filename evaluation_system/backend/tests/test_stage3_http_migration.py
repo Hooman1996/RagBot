@@ -10,7 +10,7 @@ from unittest.mock import AsyncMock, patch
 
 import httpx
 
-from evaluation_system.backend.app.clients.ragbot import (
+from app.clients.ragbot import (
     EvaluationStageResponse,
     EvaluationTurnResponse,
     RagBotClientError,
@@ -264,7 +264,7 @@ class FakeSession:
 
 class RunnerHttpBoundaryTests(unittest.IsolatedAsyncioTestCase):
     def _runner(self, session, client=None):
-        from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
+        from app.worker.runner import EvaluationRunExecutor
         return EvaluationRunExecutor(
             session_factory=lambda: session,
             ragbot_client=client or AsyncMock(),
@@ -412,7 +412,7 @@ class RunnerHttpBoundaryTests(unittest.IsolatedAsyncioTestCase):
 
 class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
     async def test_eval_datasource_endpoint_keeps_frontend_shape(self):
-        from evaluation_system.backend.app.api import datasources
+        from app.api import datasources
 
         response = SimpleNamespace(documents=[SimpleNamespace(name="General_FAQ")])
         fake_client = AsyncMock()
@@ -427,8 +427,8 @@ class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
         worker_sources = "\n".join(
             Path(path).read_text(encoding="utf-8")
             for path in (
-                "evaluation_system/backend/app/worker/postgres_queue.py",
-                "evaluation_system/backend/app/worker/postgres_worker.py",
+                "app/worker/postgres_queue.py",
+                "app/worker/postgres_worker.py",
             )
         )
         forbidden = (
@@ -439,9 +439,7 @@ class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
             self.assertNotIn(name, worker_sources)
 
     def test_http_client_has_no_chatbot_execution_dependencies(self):
-        source = Path(
-            "evaluation_system/backend/app/clients/ragbot.py"
-        ).read_text(encoding="utf-8")
+        source = Path("app/clients/ragbot.py").read_text(encoding="utf-8")
         forbidden = (
             "AnsweringService", "AgentService", "RAGSystem",
             "HistoryRewritingService", "intent_classifier_factory",
@@ -454,11 +452,11 @@ class DatasourceAndStaticMigrationTests(unittest.IsolatedAsyncioTestCase):
 
 class Stage3ConfigurationTests(unittest.TestCase):
     def tearDown(self):
-        from evaluation_system.backend.app.config import get_settings
+        from app.config import get_settings
         get_settings.cache_clear()
 
     def test_ragbot_connection_settings_normalize_and_validate(self):
-        from evaluation_system.backend.app.config import get_settings
+        from app.config import get_settings
 
         with patch.dict("os.environ", {
             "EVAL_RAGBOT_BASE_URL": "  http://ragbot.internal:8000///  ",
@@ -475,7 +473,7 @@ class Stage3ConfigurationTests(unittest.TestCase):
                 get_settings()
 
     def test_ragbot_local_default_uses_development_port(self):
-        from evaluation_system.backend.app.config import get_settings
+        from app.config import get_settings
 
         with patch.dict("os.environ", {}, clear=True):
             get_settings.cache_clear()

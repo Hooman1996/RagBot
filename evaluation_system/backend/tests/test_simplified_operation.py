@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import unittest
-from pathlib import Path
 from unittest.mock import patch
 
 
@@ -16,32 +15,9 @@ class ImmediateRunner:
         return function(*args)
 
 
-class ExistingLoginCompatibilityTests(unittest.TestCase):
-    def test_existing_login_contract_has_no_evaluation_state_bridge(self):
-        main_source = Path("main.py").read_text(encoding="utf-8")
-        self.assertIn("authentication_service.authenticate", main_source)
-        self.assertIn('raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")', main_source)
-        self.assertNotIn("establish_ragbot" + "_user", main_source)
-        self.assertNotIn("ragbot" + "_authenticated" + "_user", main_source)
-        self.assertNotIn("EVAL_ADMIN_API_TOKEN_SHA256", main_source)
-
-
-class EvaluationRouteTests(unittest.TestCase):
-    def test_ragbot_owns_only_the_permanent_evaluation_contract(self):
-        main_source = Path("main.py").read_text(encoding="utf-8")
-
-        self.assertIn("app.include_router(internal_evaluation_router)", main_source)
-        self.assertIn('@app.get("/api/documents")', main_source)
-        self.assertNotIn("evaluation_system.backend", main_source)
-        self.assertNotIn("embedded_integration", main_source)
-        self.assertNotIn("install_evaluation_routes", main_source)
-        self.assertNotIn('app.mount("/evaluation"', main_source)
-        self.assertFalse(Path("evaluation_system/embedded_integration.py").exists())
-
-
 class EvaluationEnvironmentTests(unittest.TestCase):
     def test_environment_controls_operational_settings(self):
-        from evaluation_system.backend.app.config import get_settings
+        from app.config import get_settings
 
         values = {
             "EVAL_ENABLED": "true",

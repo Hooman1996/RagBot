@@ -7,21 +7,21 @@ import uuid
 from pathlib import Path
 from types import SimpleNamespace
 
-from evaluation_system.backend.app.clients.ragbot import RagBotClientError
-from evaluation_system.backend.app.services.divergence import (
+from app.clients.ragbot import RagBotClientError
+from app.services.divergence import (
     ComparableTurn,
     analyze_stability,
 )
-from evaluation_system.backend.app.services.history_state import (
+from app.services.history_state import (
     exact_agent_state_from_turns,
 )
-from evaluation_system.backend.app.services.importer import parse_dataset_file
-from evaluation_system.backend.app.services.migrations import (
+from app.services.importer import parse_dataset_file
+from app.services.migrations import (
     CONFIRMATION,
     DatabaseStatus,
     MigrationService,
 )
-from evaluation_system.backend.app.services.run_planning import build_run_session_specs
+from app.services.run_planning import build_run_session_specs
 
 
 SOURCE_SESSION_ID = "REAL_LOOKING_SESSION_12345"
@@ -188,7 +188,7 @@ class AcceptanceInfrastructureTests(unittest.TestCase):
 
 class AcceptanceInfrastructurePersistenceTests(unittest.IsolatedAsyncioTestCase):
     async def test_worker_persists_each_dependency_failure_as_infrastructure(self):
-        from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
+        from app.worker.runner import EvaluationRunExecutor
 
         class Turn:
             metadata_json = {}
@@ -236,11 +236,9 @@ class AcceptanceInfrastructurePersistenceTests(unittest.IsolatedAsyncioTestCase)
 class AcceptanceStaticSafetyTests(unittest.TestCase):
     def test_eval_owned_history_state_has_no_ragbot_dependency(self):
         self.assertFalse(
-            Path("evaluation_system/backend/app/core_adapter/history.py").exists()
+            Path("app/core_adapter/history.py").exists()
         )
-        source = Path(
-            "evaluation_system/backend/app/services/history_state.py"
-        ).read_text(encoding="utf-8")
+        source = Path("app/services/history_state.py").read_text(encoding="utf-8")
         for forbidden in (
             "ChatManager",
             "DatabaseManager",
@@ -251,7 +249,7 @@ class AcceptanceStaticSafetyTests(unittest.TestCase):
             self.assertNotIn(forbidden, source)
 
     def test_no_evaluation_drop_all_or_arbitrary_sql_api(self):
-        root = Path("evaluation_system/backend")
+        root = Path(".")
         sources = "\n".join(
             path.read_text(encoding="utf-8")
             for path in (root / "app").rglob("*.py")

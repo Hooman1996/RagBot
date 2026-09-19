@@ -4,11 +4,11 @@ import asyncio
 import unittest
 import uuid
 
-from evaluation_system.backend.app.services.bounded_execution import (
+from app.services.bounded_execution import (
     bounded_for_each,
     effective_session_concurrency,
 )
-from evaluation_system.backend.app.services.run_planning import (
+from app.services.run_planning import (
     RunPlanError,
     build_run_session_specs,
     validate_run_shape,

@@ -7,12 +7,12 @@ from contextlib import redirect_stderr
 from pathlib import Path
 from types import SimpleNamespace
 
-from evaluation_system.backend.scripts import reset_evaluation_database as reset
+from scripts import reset_evaluation_database as reset
 
 
-ROOT = Path(__file__).resolve().parents[3]
-SCRIPT = ROOT / "evaluation_system/backend/scripts/reset_evaluation_database.py"
-WRAPPER = ROOT / "evaluation_system/backend/scripts/reset_evaluation_database.sh"
+ROOT = Path(__file__).resolve().parents[1]
+SCRIPT = ROOT / "scripts/reset_evaluation_database.py"
+WRAPPER = ROOT / "scripts/reset_evaluation_database.sh"
 
 
 class Context:

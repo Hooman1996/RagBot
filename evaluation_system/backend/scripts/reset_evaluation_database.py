@@ -7,11 +7,7 @@ import sys
 from collections.abc import Callable, Sequence
 from typing import Any, TextIO
 
-try:
-    from app.config import get_settings
-except ModuleNotFoundError:
-    # Support repository-root imports used by the backend regression suite.
-    from evaluation_system.backend.app.config import get_settings
+from app.config import get_settings
 
 
 EVALUATION_SCHEMA = "evaluation"

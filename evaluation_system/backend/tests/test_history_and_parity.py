@@ -6,7 +6,7 @@ from copy import deepcopy
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
-from evaluation_system.backend.app.services.history_state import (
+from app.services.history_state import (
     exact_agent_state_from_turns,
 )
 
@@ -63,7 +63,7 @@ class ExactHistoryStateTests(unittest.TestCase):
 
 class RunnerHistoryQueryTests(unittest.IsolatedAsyncioTestCase):
     async def test_runner_queries_only_prior_completed_turns(self):
-        from evaluation_system.backend.app.worker.runner import EvaluationRunExecutor
+        from app.worker.runner import EvaluationRunExecutor
 
         state = {"opaque": {"messages": ["unchanged"]}}
         completed = SimpleNamespace(

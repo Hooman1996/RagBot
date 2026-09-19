@@ -7,24 +7,24 @@ import unittest
 from pathlib import Path
 from types import SimpleNamespace
 
-from evaluation_system.backend.app.services.migrations import (
+from app.services.migrations import (
     CONFIRMATION,
     EXPECTED_INDEXES,
     EXPECTED_TABLES,
     MigrationService,
     classify_database_status,
 )
-from evaluation_system.backend.app.services.pipeline_contract import (
+from app.services.pipeline_contract import (
     CANONICAL_STAGE_NAMES,
     STAGE_ORDER,
 )
 
 
-ROOT = Path(__file__).resolve().parents[3]
-MIGRATION = ROOT / "evaluation_system/backend/alembic/versions/20260831_0001_evaluation_v1.py"
-MODELS = ROOT / "evaluation_system/backend/app/db/models.py"
-ALEMBIC_ENV = ROOT / "evaluation_system/backend/alembic/env.py"
-MIGRATION_SERVICE = ROOT / "evaluation_system/backend/app/services/migrations.py"
+ROOT = Path(__file__).resolve().parents[1]
+MIGRATION = ROOT / "alembic/versions/20260831_0001_evaluation_v1.py"
+MODELS = ROOT / "app/db/models.py"
+ALEMBIC_ENV = ROOT / "alembic/env.py"
+MIGRATION_SERVICE = ROOT / "app/services/migrations.py"
 
 
 def check_constraint_values(path: Path, constraint_name: str) -> tuple[str, ...]:
@@ -179,8 +179,8 @@ class MigrationStaticSafetyTests(unittest.TestCase):
 @unittest.skipUnless(importlib.util.find_spec("sqlalchemy"), "SQLAlchemy is not installed")
 class MetadataSafetyTests(unittest.TestCase):
     def test_metadata_contains_only_evaluation_tables_and_foreign_keys(self):
-        from evaluation_system.backend.app.db.base import EvaluationBase
-        from evaluation_system.backend.app.db import models  # noqa: F401
+        from app.db.base import EvaluationBase
+        from app.db import models  # noqa: F401
         self.assertEqual(
             set(EvaluationBase.metadata.tables),
             {

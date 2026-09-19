@@ -2,12 +2,12 @@ from __future__ import annotations
 
 import unittest
 
-from evaluation_system.backend.app.services.divergence import (
+from app.services.divergence import (
     ComparableTurn,
     analyze_stability,
 )
-from evaluation_system.backend.app.services.error_codes import safe_error_code
-from evaluation_system.backend.app.services.pipeline_contract import (
+from app.services.error_codes import safe_error_code
+from app.services.pipeline_contract import (
     CANONICAL_STAGE_NAMES,
     STAGE_ORDER,
 )

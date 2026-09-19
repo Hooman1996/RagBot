@@ -844,6 +844,14 @@ above; use full discovery only after the approved environment adds pytest.
 
 ## Documentation
 
+The co-located `evaluation_system/backend` and `evaluation_system/frontend`
+directories are independently buildable and deployable projects. Their physical
+location in this checkout supports development and subtree-based publication;
+it does not create runtime coupling. Eval calls RagBot only through the internal
+HTTP evaluation contract. See
+[`evaluation_system/PRODUCTION_HANDOFF.md`](evaluation_system/PRODUCTION_HANDOFF.md)
+and [`evaluation_system/PUBLISHING.md`](evaluation_system/PUBLISHING.md).
+
 - [README claim source map](docs/README_SOURCE_MAP.md)
 - [Environment quick start](docs/configuration/ENVIRONMENT_QUICK_START.md)
 - [Environment variable reference](docs/configuration/ENVIRONMENT_VARIABLES.md)
