@@ -1,0 +1,8 @@
+services:
+  eval-api:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  eval-worker:
+    extra_hosts:
+      - "host.docker.internal:host-gateway"

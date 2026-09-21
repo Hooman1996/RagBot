@@ -1840,4 +1840,4 @@ if __name__ == "__main__":
     import uvicorn
 
 
-    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "8080")), reload=False)
+    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*")

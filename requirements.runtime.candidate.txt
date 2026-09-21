@@ -1,0 +1,26 @@
+# GENERATED CANDIDATE — DO NOT USE IN PRODUCTION UNTIL CLEAN-ENV VALIDATION PASSES
+# Derived from static/runtime-path dependency audit of RagBot.
+# Existing dependency files were not modified.
+
+bcrypt==5.0.0
+fastapi==0.124.0
+httpx==0.28.1
+Jinja2==3.1.6
+langchain-classic==1.0.0
+langgraph==1.2.0
+minio==7.2.20
+numpy==2.2.6
+openai==2.6.1
+openpyxl==3.1.5  # Mass-answer .xlsx input/output support.
+pandas==2.3.3
+parsivar==0.2.3.1
+psycopg2-binary==2.9.11
+pydantic==2.12.5
+python-dotenv==1.2.1
+python-multipart==0.0.20
+qdrant-client==1.16.2
+rank-bm25==0.2.2
+torch==2.9.1+cu130  # Local intent-classifier inference; verify the production CUDA wheel source.
+tqdm==4.67.1
+transformers==5.10.1  # Version extracted from the lock's machine-local wheel reference.
+uvicorn==0.38.0
