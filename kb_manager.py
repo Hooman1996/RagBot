@@ -2,6 +2,8 @@
 import re
 import json
 import os
+import logging
+import uuid
 from datetime import datetime
 from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse
@@ -24,6 +26,7 @@ from new_architecture.knowledge_update import (
 router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base Management"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 normalizer = Normalizer()
+logger = logging.getLogger(__name__)
 
 POSTGRES_ENVIRONMENT_VARIABLES = (
     "POSTGRES_HOST",
@@ -285,8 +288,16 @@ def api_create_chunk(payload: ChunkCreatePayload):
     import main
     conn = get_db_connection()
     cursor = conn.cursor()
+    qdrant_write_attempted = False
+    new_chunk_id = None
+    stage = "document lookup"
 
     try:
+        cursor.execute("SELECT title FROM documents WHERE id = %s;", (payload.document_id,))
+        doc_record = cursor.fetchone()
+        if not doc_record:
+            raise HTTPException(status_code=404, detail="Parent Document missing.")
+
         if payload.is_qa and payload.question:
             reconstructed_content = f"question: {payload.question.strip()}\nanswer: {payload.answer.strip()}"
         else:
@@ -294,28 +305,36 @@ def api_create_chunk(payload: ChunkCreatePayload):
 
         normalized_content = normalizer.normalize(reconstructed_content)
 
-        if not main.rag_system:
+        if not main.rag_system or not main.qdrant_client:
             raise HTTPException(status_code=503, detail="RAG engine encoder is not active.")
 
-        new_vector = main.rag_system.search_engine.embed_documents_sync(
+        search_engine = main.rag_system.search_engine
+        model_name = os.getenv("EMBEDDING_MODEL") or getattr(
+            search_engine, "query_embedding_model", None
+        )
+        if not model_name:
+            raise HTTPException(status_code=503, detail="Embedding model is not configured.")
+
+        stage = "embedding"
+        new_vector = search_engine.embed_documents_sync(
             [normalized_content]
         )[0]
+        vector_dimension = len(new_vector)
+        expected_dimension = int(main.Config.QDRANT_VECTOR_SIZE)
+        if vector_dimension != expected_dimension:
+            raise HTTPException(status_code=503, detail="Embedding dimension does not match the configured collection.")
 
         # Fetch next chunk index safely
         cursor.execute("SELECT COALESCE(MAX(chunk_index), -1) + 1 as next_idx FROM chunks WHERE document_id = %s;",
                        (payload.document_id,))
         next_idx = cursor.fetchone()["next_idx"]
 
-        cursor.execute("SELECT title FROM documents WHERE id = %s;", (payload.document_id,))
-        doc_record = cursor.fetchone()
-        if not doc_record:
-            raise HTTPException(status_code=404, detail="Parent Document missing.")
-
         now = datetime.utcnow()
         char_count = len(reconstructed_content)
         token_count = len(normalized_content.split())
 
         # 1. Insert into PostgreSQL chunks
+        stage = "PostgreSQL chunk insert"
         cursor.execute("""
                        INSERT INTO chunks (document_id, content, chunk_index, char_count, token_count, created_at,
                                            updated_at)
@@ -324,12 +343,19 @@ def api_create_chunk(payload: ChunkCreatePayload):
         new_chunk_id = cursor.fetchone()["id"]
 
         # 2. Insert into PostgreSQL embeddings
+        stage = "PostgreSQL embedding insert"
         cursor.execute("""
-                       INSERT INTO embeddings (chunk_id, vector, created_at, updated_at)
-                       VALUES (%s, %s, %s, %s);
-                       """, (new_chunk_id, json.dumps(new_vector), now, now))
+                       INSERT INTO embeddings
+                           (uuid, chunk_id, document_id, vector, vector_dimension,
+                            model_name, vector_db_id, vector_db_collection, status,
+                            created_at, updated_at)
+                       VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s);
+                       """, (str(uuid.uuid4()), new_chunk_id, payload.document_id,
+                              json.dumps(new_vector), vector_dimension, model_name,
+                              str(new_chunk_id), main.QDRANT_COLLECTION, "active", now, now))
 
         # 3. Create baseline Version 1 trace entry
+        stage = "PostgreSQL version and revision insert"
         cursor.execute("""
                        INSERT INTO chunk_versions (chunk_id, content, changed_by, created_at)
                        VALUES (%s, %s, %s, %s);
@@ -356,22 +382,49 @@ def api_create_chunk(payload: ChunkCreatePayload):
                 "text": reconstructed_content
             }
         )
+        stage = "Qdrant upsert"
+        qdrant_write_attempted = True
         main.qdrant_client.upsert(
             collection_name=main.QDRANT_COLLECTION,
             points=[point],
             wait=True,
         )
 
+        stage = "PostgreSQL commit"
         conn.commit()
-        main.rag_system.search_engine.clear_document_cache()
-        return {"status": "success", "chunk_id": new_chunk_id,
-                "message": "Chunk injected successfully across all index layers."}
-    except Exception as e:
-        conn.rollback()
-        raise HTTPException(status_code=500, detail=f"Creation pipeline abort: {str(e)}")
+    except Exception as exc:
+        try:
+            conn.rollback()
+        except Exception as rollback_exc:
+            logger.error("Chunk creation rollback failed: %s", type(rollback_exc).__name__)
+        if qdrant_write_attempted:
+            try:
+                main.qdrant_client.delete(
+                    collection_name=main.QDRANT_COLLECTION,
+                    points_selector=PointIdsList(points=[int(new_chunk_id)]),
+                    wait=True,
+                )
+            except Exception as compensation_exc:
+                logger.error(
+                    "Chunk creation Qdrant compensation failed: %s",
+                    type(compensation_exc).__name__,
+                )
+        if isinstance(exc, HTTPException):
+            raise
+        logger.error(
+            "Knowledge chunk creation failed at %s: %s (SQLSTATE %s)",
+            stage,
+            type(exc).__name__,
+            getattr(exc, "pgcode", None),
+        )
+        raise HTTPException(status_code=500, detail="Creation pipeline failed.") from exc
     finally:
         cursor.close()
         conn.close()
+
+    main.rag_system.search_engine.clear_document_cache()
+    return {"status": "success", "chunk_id": new_chunk_id,
+            "message": "Chunk injected successfully across all index layers."}
 
 
 @router.put("/api/chunks/update")
