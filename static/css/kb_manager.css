@@ -31,3 +31,14 @@ body {
 .question-readonly-panel {
     background-image: repeating-linear-gradient(45deg, #0f172a, #0f172a 8px, #1e293b 8px, #1e293b 16px);
 }
+
+.kb-readable-content {
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+    max-height: 20rem;
+    overflow-y: auto;
+    line-height: 1.8;
+    direction: rtl;
+    text-align: right;
+    user-select: text;
+}

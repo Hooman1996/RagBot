@@ -19,6 +19,7 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "moderator": USER_PERMISSIONS,
     "analytics_viewer": frozenset({"analytics"}),
     "knowledge_editor": frozenset({"kb_page", "kb_read", "kb_write"}),
+    "dashboard_viewer": USER_PERMISSIONS | frozenset({"analytics", "kb_page", "kb_read"}),
 }
 
 

@@ -1,11 +1,13 @@
 """Role-to-route authorization through the real ASGI middleware and route matcher."""
 from fastapi.routing import APIRoute
+from datetime import datetime
 from fastapi.responses import Response
 from fastapi.testclient import TestClient
 from bs4 import BeautifulSoup
 import pytest
 
 import main
+import kb_manager
 from tests.test_web_auth import setup, login, csrf
 from web_permissions import PERMISSIONS, ROLE_PERMISSIONS, route_permission
 
@@ -72,7 +74,7 @@ def test_complete_browser_route_inventory_matches_fastapi():
     assert set(ROLE_PERMISSIONS['admin']) == PERMISSIONS
 
 
-@pytest.mark.parametrize('role', ['admin', 'user', 'analytics_viewer', 'knowledge_editor', 'moderator', 'surprise_role'])
+@pytest.mark.parametrize('role', ['admin', 'user', 'analytics_viewer', 'knowledge_editor', 'dashboard_viewer', 'moderator', 'surprise_role'])
 def test_role_by_api_route_matrix(setup, monkeypatch, role):
     # Stub only endpoint execution; middleware, route matching, cookies, and CSRF are real.
     async def endpoint_stub(scope, receive, send):
@@ -100,6 +102,7 @@ def test_role_by_api_route_matrix(setup, monkeypatch, role):
     ('moderator', '/app', '/app', '/knowledge-base/'),
     ('analytics_viewer', '/analytics', '/analytics', '/app'),
     ('knowledge_editor', '/knowledge-base/', '/knowledge-base/', '/analytics'),
+    ('dashboard_viewer', '/app', '/app', None),
     ('surprise_role', '/access-denied', '/access-denied', '/app'),
 ])
 def test_login_landing_pages_and_forged_links(setup, role, landing, allowed_page, forbidden_page):
@@ -182,3 +185,97 @@ def test_logout_controls_and_permission_aware_links(setup):
         login_html = client.get('/').text
         assert 'window.location.href = result.landing_path' in login_html
         assert 'data-i18n="logout"' in client.get('/app').text
+
+
+def test_dashboard_viewer_exact_grants_navigation_and_read_only_template(setup):
+    expected = ROLE_PERMISSIONS['user'] | {'analytics', 'kb_page', 'kb_read'}
+    assert ROLE_PERMISSIONS['dashboard_viewer'] == expected
+    assert not expected & {'kb_write', 'batch', 'system'}
+    setup.users[1]['role'] = 'dashboard_viewer'
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, 'alice')
+        me = client.get('/api/auth/me').json()['user']
+        assert me['role'] == 'dashboard_viewer'
+        assert me['permissions'] == sorted(expected)
+        assert me['landing_path'] == '/app'
+        for page, links in (('/app', ('/analytics', '/knowledge-base')),
+                            ('/analytics', ('/app', '/knowledge-base')),
+                            ('/knowledge-base/', ('/app', '/analytics'))):
+            soup = BeautifulSoup(client.get(page).text, 'html.parser')
+            for link in links:
+                assert soup.select_one(f'a[href="{link}"]'), (page, link)
+        kb = BeautifulSoup(client.get('/knowledge-base/').text, 'html.parser')
+        assert kb.select_one('#kb-read-only-indicator')
+        assert kb.body['data-can-write'] == 'false'
+        assert not kb.select('textarea, #new-chunk-operator-name, #add-chunk-modal-overlay')
+        assert kb.select_one('#history-modal-overlay')
+        setup.users[1]['role'] = 'user'
+        assert client.get('/api/auth/me').json()['user']['permissions'] == sorted(ROLE_PERMISSIONS['user'])
+        assert client.get('/knowledge-base/', follow_redirects=False).status_code == 403
+
+
+def test_dashboard_viewer_chat_ownership_and_csrf_remain_in_force(setup):
+    setup.users[1]['role'] = 'dashboard_viewer'
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, 'alice')
+        assert client.get('/api/sessions').status_code == 200
+        assert client.get('/api/sessions/20').status_code == 404
+        assert client.get('/api/sessions/20/messages').status_code == 404
+        assert client.get('/api/sessions/20/download').status_code == 404
+        assert client.patch('/api/queries/200/feedback', json={'is_helpful': 1}, headers=csrf(client)).status_code == 404
+        assert client.post('/api/sessions', json={}).status_code == 403
+        assert client.post('/api/sessions', json={}, headers=csrf(client)).status_code != 403
+
+
+@pytest.mark.parametrize('role', ['admin', 'knowledge_editor'])
+def test_kb_editors_keep_write_interface(setup, role):
+    setup.users[1]['role'] = role
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, 'alice')
+        kb = BeautifulSoup(client.get('/knowledge-base/').text, 'html.parser')
+        assert kb.body['data-can-write'] == 'true'
+        assert kb.select_one('#add-chunk-modal-overlay textarea')
+        assert kb.select_one('#new-chunk-operator-name')
+        assert not kb.select_one('#kb-read-only-indicator')
+
+
+@pytest.mark.parametrize('populated', [False, True])
+def test_dashboard_viewer_kb_read_endpoints_return_empty_or_populated_data(setup, monkeypatch, populated):
+    class Cursor:
+        def execute(self, query, params=None):
+            self.query = query
+
+        def fetchall(self):
+            if not populated:
+                return []
+            if 'FROM chunk_versions' in self.query:
+                return [{'id': 9, 'content': 'question: How?\nanswer: Safely.',
+                         'changed_by': 'Editor', 'created_at': datetime(2026, 9, 27)}]
+            if 'FROM chunks' in self.query:
+                return [{'id': 7, 'content': 'Full chunk content', 'chunk_index': 0}]
+            return [{'id': 3, 'title': 'Document', 'filename': 'document.pdf'}]
+
+        def close(self):
+            pass
+
+    class Connection:
+        def cursor(self):
+            return Cursor()
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr(kb_manager, 'get_db_connection', Connection)
+    setup.users[1]['role'] = 'dashboard_viewer'
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, 'alice')
+        documents = client.get('/knowledge-base/api/documents')
+        chunks = client.get('/knowledge-base/api/chunks/3?search=Full')
+        versions = client.get('/knowledge-base/api/chunks/7/versions')
+        assert (documents.status_code, chunks.status_code, versions.status_code) == (200, 200, 200)
+        assert len(documents.json()['documents']) == int(populated)
+        assert len(chunks.json()['chunks']) == int(populated)
+        assert len(versions.json()['versions']) == int(populated)
+        if populated:
+            assert chunks.json()['chunks'][0]['answer'] == 'Full chunk content'
+            assert versions.json()['versions'][0]['answer'] == 'Safely.'

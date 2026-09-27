@@ -1,5 +1,6 @@
 // static/js/kb_manager.js
 document.addEventListener('DOMContentLoaded', () => {
+    const canWrite = document.body.dataset.canWrite === 'true';
     let activeDocId = null;
     let currentOffset = 0;
     const BATCH_LIMIT = 20;
@@ -55,20 +56,18 @@ document.addEventListener('DOMContentLoaded', () => {
         UI.historyModal.classList.remove('flex');
     });
 
-    UI.closeAddModalBtn.addEventListener('click', () => {
-        UI.addChunkModal.classList.add('hidden');
-        UI.addChunkModal.classList.remove('flex');
-    });
+    if (canWrite) {
+        UI.closeAddModalBtn.addEventListener('click', () => {
+            UI.addChunkModal.classList.add('hidden');
+            UI.addChunkModal.classList.remove('flex');
+        });
 
-    UI.addChunkForm.isQa.addEventListener('change', (e) => {
-        if (e.target.value === 'true') {
-            UI.addChunkForm.qaWrapper.classList.remove('hidden');
-        } else {
-            UI.addChunkForm.qaWrapper.classList.add('hidden');
-        }
-    });
+        UI.addChunkForm.isQa.addEventListener('change', (e) => {
+            UI.addChunkForm.qaWrapper.classList.toggle('hidden', e.target.value !== 'true');
+        });
 
-    UI.saveNewChunkBtn.addEventListener('click', () => commitNewChunkToPipeline());
+        UI.saveNewChunkBtn.addEventListener('click', () => commitNewChunkToPipeline());
+    }
 
     async function loadAvailableDocuments() {
         try {
@@ -111,15 +110,13 @@ document.addEventListener('DOMContentLoaded', () => {
     function injectActionActionBarHeaderRow() {
         const actionRow = document.createElement('div');
         actionRow.className = 'flex justify-between items-center bg-slate-950/60 p-4 border border-slate-800 rounded-xl mb-4';
-        actionRow.innerHTML = `
+        actionRow.innerHTML = canWrite ? `
             <div class="text-xs font-semibold text-slate-400">عملیات جاری سند:</div>
-            <button id="global-add-chunk-trigger" class="kb-write-action bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/10">
-                ➕ افزودن تکه داده جدید به سند
-            </button>
-        `;
+            <button id="global-add-chunk-trigger" class="kb-write-action bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/10">➕ افزودن تکه داده جدید به سند</button>
+        ` : `<div class="text-xs font-semibold text-slate-400">تکه‌های سند (فقط خواندنی)</div>`;
         UI.workspace.appendChild(actionRow);
 
-        document.getElementById('global-add-chunk-trigger').addEventListener('click', () => {
+        if (canWrite) document.getElementById('global-add-chunk-trigger').addEventListener('click', () => {
             UI.addChunkForm.question.value = '';
             UI.addChunkForm.answer.value = '';
             UI.addChunkModal.classList.remove('hidden');
@@ -194,7 +191,13 @@ document.addEventListener('DOMContentLoaded', () => {
             card.className = 'bg-slate-950 p-5 rounded-xl border border-slate-800/80 shadow-md flex flex-col gap-4 mb-4 relative group';
 
             let dynamicBodyLayout = '';
-            if (chunk.is_qa) {
+            if (!canWrite) {
+                dynamicBodyLayout = chunk.is_qa ? `
+                    <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <div><span class="block text-[11px] font-bold text-slate-400 mb-1.5">سوال</span><div class="kb-readable-content question-readonly-panel p-3 rounded-lg border border-slate-800 text-xs text-slate-300">${escapeHTML(chunk.question)}</div></div>
+                        <div><span class="block text-[11px] font-bold text-blue-400 mb-1.5">پاسخ</span><div class="kb-readable-content p-3 rounded-lg border border-slate-800 text-xs text-slate-300">${escapeHTML(chunk.answer)}</div></div>
+                    </div>` : `<div><span class="block text-[11px] font-bold text-amber-500 mb-1.5">متن تکه</span><div class="kb-readable-content p-3 rounded-lg border border-slate-800 text-xs text-slate-300">${escapeHTML(chunk.answer)}</div></div>`;
+            } else if (chunk.is_qa) {
                 dynamicBodyLayout = `
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
@@ -222,32 +225,32 @@ document.addEventListener('DOMContentLoaded', () => {
                 <div class="flex justify-between items-center border-b border-slate-800/60 pb-3">
                     <div class="flex items-center gap-2">
                         <span class="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-md text-[10px] font-mono tracking-wider text-slate-400">تکه شماره #${chunk.chunk_index}</span>
-                        <span class="text-[10px] text-slate-600 font-mono">شناسه چانک: ${chunk.id}</span>
+                        <span class="text-[10px] text-slate-600 font-mono">شناسه چانک: ${escapeHTML(String(chunk.id))}</span>
                     </div>
                     <div class="flex items-center gap-2">
                         <button id="history-btn-${chunk.id}" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
                             ⏳ تاریخچه نسخ
                         </button>
-                        <button id="delete-btn-${chunk.id}" class="kb-write-action bg-red-950/40 hover:bg-red-600 border border-red-900 text-red-400 hover:text-white px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
+                        ${canWrite ? `<button id="delete-btn-${chunk.id}" class="kb-write-action bg-red-950/40 hover:bg-red-600 border border-red-900 text-red-400 hover:text-white px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
                             🗑 حذف قطعی
                         </button>
                         <button id="sync-btn-${chunk.id}" class="kb-write-action bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs transition-all shadow-lg shadow-emerald-600/10 flex items-center gap-1.5">
                             💾 همگام‌سازی برداری
-                        </button>
+                        </button>` : ''}
                     </div>
                 </div>
                 ${dynamicBodyLayout}
-                <div class="flex items-center gap-2 border-t border-slate-900 pt-2">
+                ${canWrite ? `<div class="flex items-center gap-2 border-t border-slate-900 pt-2">
                     <span class="text-[10px] text-slate-500">تغییر دهنده نهایی:</span>
                     <input type="text" id="operator-field-${chunk.id}" value="Hooman (AI Engineer)" class="bg-slate-900 text-[10px] text-slate-300 px-2 py-0.5 rounded border border-slate-800 focus:outline-none focus:border-blue-500 w-44" />
-                </div>
+                </div>` : ''}
             `;
 
             UI.workspace.appendChild(card);
 
-            document.getElementById(`sync-btn-${chunk.id}`).addEventListener('click', (e) => executeAtomicPipelineSync(chunk, e.target));
+            if (canWrite) document.getElementById(`sync-btn-${chunk.id}`).addEventListener('click', (e) => executeAtomicPipelineSync(chunk, e.target));
             document.getElementById(`history-btn-${chunk.id}`).addEventListener('click', () => launchHistoryTrackingModal(chunk.id));
-            document.getElementById(`delete-btn-${chunk.id}`).addEventListener('click', () => dispatchDeleteExecutionPipeline(chunk.id));
+            if (canWrite) document.getElementById(`delete-btn-${chunk.id}`).addEventListener('click', () => dispatchDeleteExecutionPipeline(chunk.id));
         });
     }
 
@@ -344,7 +347,9 @@ document.addEventListener('DOMContentLoaded', () => {
             const row = document.createElement('div');
             row.className = 'bg-slate-900 p-4 rounded-lg border border-slate-800 flex flex-col gap-2 justify-between items-start md:flex-row md:items-center transition-all hover:border-slate-700';
 
-            let textSnippet = ver.is_qa ? `<strong>سوال:</strong> ${ver.question}<br><strong>پاسخ:</strong> ${ver.answer}` : ver.answer;
+            const textSnippet = ver.is_qa
+                ? `<strong>سوال:</strong> ${escapeHTML(ver.question)}<br><strong>پاسخ:</strong> ${escapeHTML(ver.answer)}`
+                : escapeHTML(ver.answer);
             const dateParsed = new Date(ver.created_at).toLocaleString('fa-IR');
 
             row.innerHTML = `
@@ -354,17 +359,17 @@ document.addEventListener('DOMContentLoaded', () => {
                         <span class="text-[11px] text-slate-400 font-medium">توسط: ${escapeHTML(ver.changed_by)}</span>
                         <span class="text-[10px] text-slate-500" dir="ltr">${dateParsed}</span>
                     </div>
-                    <div class="text-xs text-slate-300 bg-slate-950 p-2.5 rounded border border-slate-800 max-h-24 overflow-y-auto leading-relaxed">
+                    <div class="kb-readable-content text-xs text-slate-300 bg-slate-950 p-2.5 rounded border border-slate-800 max-h-24 overflow-y-auto leading-relaxed">
                         ${textSnippet}
                     </div>
                 </div>
-                <button id="revert-btn-${ver.id}" class="kb-write-action bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-md mt-2 md:mt-0 transition-all active:scale-95 whitespace-nowrap">
+                ${canWrite ? `<button id="revert-btn-${ver.id}" class="kb-write-action bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-md mt-2 md:mt-0 transition-all active:scale-95 whitespace-nowrap">
                     ◄ بازگردانی به این نسخه
-                </button>
+                </button>` : ''}
             `;
             UI.historyList.appendChild(row);
 
-            document.getElementById(`revert-btn-${ver.id}`).addEventListener('click', () => executeStateReversion(ver.id));
+            if (canWrite) document.getElementById(`revert-btn-${ver.id}`).addEventListener('click', () => executeStateReversion(ver.id));
         });
     }
 

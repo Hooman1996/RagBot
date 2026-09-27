@@ -17,11 +17,12 @@
             <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-lg text-white shadow-md shadow-blue-500/20">N</div>
             <div>
                 <h1 class="text-md font-bold tracking-wide">سامانه هوشمند نگاه یار</h1>
-                <p class="text-xs text-slate-400">پنل مدیریت پیشرفته پایگاه دانش و همگام‌سازی برداری</p>
+                <p class="text-xs text-slate-400">{% if 'kb_write' in permissions %}پنل مدیریت پیشرفته پایگاه دانش و همگام‌سازی برداری{% else %}مرور و جستجوی پایگاه دانش{% endif %}</p>
             </div>
         </div>
         <div class="web-header-controls web-header-controls--kb">
             {% if 'chat' in permissions %}<a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all"><svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#back"></use></svg> بازگشت به میز کار چت</a>{% endif %}
+            {% if 'analytics' in permissions %}<a href="/analytics" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all">تحلیل‌ها</a>{% endif %}
             {% set logout_label = "خروج" %}{% include "_logout_button.html" %}
         </div>
     </header>
@@ -31,7 +32,7 @@
         <aside class="w-80 bg-slate-950/50 border-l border-slate-800 p-4 flex flex-col">
             <div class="mb-4">
                 <h3 class="text-xs uppercase tracking-wider font-bold text-slate-400 mb-1">فهرست اسناد فعال</h3>
-                <p class="text-[11px] text-slate-500">سند مورد نظر خود را جهت مدیریت تکه‌ها انتخاب نمایید.</p>
+                <p class="text-[11px] text-slate-500">سند مورد نظر خود را برای مشاهده تکه‌ها انتخاب کنید.</p>
             </div>
             <div id="document-sidebar-list" class="flex-1 space-y-1.5 overflow-y-auto pr-1">
                 <div class="text-center py-8 text-slate-500 text-xs animate-pulse">در حال بارگذاری لیست اسناد...</div>
@@ -39,6 +40,7 @@
         </aside>
 
         <main class="flex-1 p-6 flex flex-col bg-slate-900 overflow-y-auto">
+            {% if 'kb_write' not in permissions %}<p id="kb-read-only-indicator" role="status" class="mb-4 rounded-lg border border-blue-700 bg-blue-950/60 px-4 py-3 text-sm text-blue-100">دسترسی فقط خواندنی: می‌توانید اسناد، تکه‌ها و تاریخچه تغییرات را مشاهده و جستجو کنید.</p>{% endif %}
 
             <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-md mb-6 flex gap-3 items-center">
                 <div class="flex-1 relative">
@@ -53,7 +55,7 @@
             <div id="chunks-workspace-wrapper" class="space-y-4">
                 <div class="flex flex-col items-center justify-center py-24 text-slate-500 border border-dashed border-slate-800 rounded-xl bg-slate-950/20">
                     <span class="text-4xl mb-3">📂</span>
-                    <p class="text-sm">جهت مشاهده و مدیریت فیلدهای اطلاعاتی، ابتدا یک سند را از پنل کناری انتخاب کنید.</p>
+                    <p class="text-sm">برای مشاهده تکه‌های اطلاعاتی، ابتدا یک سند را از پنل کناری انتخاب کنید.</p>
                 </div>
             </div>
 
@@ -64,8 +66,8 @@
         <div class="bg-slate-950 w-full max-w-4xl max-h-[85vh] rounded-2xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
                 <div>
-                    <h3 class="text-sm font-bold text-slate-200">تاریخچه تغییرات و مدیریت نسخ چانک برداری</h3>
-                    <p class="text-[11px] text-slate-400 mt-0.5">امکان رصد دقیق تغییرات اعمالی و بازگردانی آنی ساختار بردار متنی به وضعیت‌های گذشته</p>
+                    <h3 class="text-sm font-bold text-slate-200">تاریخچه تغییرات تکه</h3>
+                    <p class="text-[11px] text-slate-400 mt-0.5">{% if 'kb_write' in permissions %}مشاهده نسخه‌های گذشته و بازگردانی محتوا{% else %}مشاهده نسخه‌های گذشته محتوا{% endif %}</p>
                 </div>
                 <button id="close-history-modal" class="text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800 transition-all text-sm font-bold">✕</button>
             </div>
@@ -74,7 +76,7 @@
         </div>
     </div>
 
-    <div id="add-chunk-modal-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
+    {% if 'kb_write' in permissions %}<div id="add-chunk-modal-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
         <div class="bg-slate-950 w-full max-w-2xl rounded-2xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
             <div class="px-6 py-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
                 <div>
@@ -116,6 +118,7 @@
         </div>
     </div>
 
+    {% endif %}
     <div id="global-toast" class="fixed bottom-6 left-6 z-50 transform translate-y-12 opacity-0 transition-all duration-300 pointer-events-none bg-emerald-500 text-slate-950 font-bold text-xs px-5 py-3 rounded-lg shadow-xl shadow-emerald-500/10 flex items-center gap-2">
         <span>✓</span> <span id="toast-text">تغییرات با موفقیت اعمال شد.</span>
     </div>
