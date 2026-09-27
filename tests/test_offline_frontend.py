@@ -15,6 +15,7 @@ from pathlib import Path
 from urllib.parse import unquote, urlsplit
 
 import httpx
+from bs4 import BeautifulSoup
 from starlette.applications import Starlette
 from starlette.requests import Request
 from starlette.routing import Mount
@@ -23,7 +24,7 @@ from starlette.templating import Jinja2Templates
 
 from frontend_paths import PROJECT_DIR, STATIC_DIR, TEMPLATE_DIR
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION
-from versioned_assets import VERSIONED_ASSETS, VersionedStaticFiles, asset_digest, asset_integrity, versioned_asset
+from versioned_assets import VERSIONED_ASSETS, VersionedStaticFiles, asset_digest, asset_integrity, vendor_integrity, versioned_asset
 
 
 AUDIT_SCRIPT = PROJECT_DIR / "scripts" / "audit_offline_frontend.py"
@@ -32,6 +33,7 @@ TEMPLATE_PATHS = {
     "index.html": "/app",
     "analytics.html": "/analytics",
     "kb_manager.html": "/knowledge-base/",
+    "access_denied.html": "/access-denied",
 }
 CSS_URL = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
 CSS_IMPORT = re.compile(r"@import\s+(?:url\(\s*)?(['\"]?)([^'\"\s;)]+)\1", re.I)
@@ -61,6 +63,8 @@ class AssetParser(HTMLParser):
                 self.assets.add(values["href"])
         elif tag in {"img", "source"} and values.get("src"):
             self.assets.add(values["src"])
+        elif tag == "use" and values.get("href"):
+            self.assets.add(values["href"].split("#", 1)[0])
 
 
 def _test_app() -> Starlette:
@@ -72,6 +76,7 @@ def _render_templates() -> dict[str, str]:
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
     templates.env.globals["versioned_asset"] = versioned_asset
     templates.env.globals["asset_integrity"] = asset_integrity
+    templates.env.globals["vendor_integrity"] = vendor_integrity
     rendered: dict[str, str] = {}
     for name, path in TEMPLATE_PATHS.items():
         scope = {
@@ -162,6 +167,31 @@ def test_audit_distinguishes_runtime_resources_from_links_and_comments(tmp_path:
     }
 
 
+
+def test_audit_catches_runtime_resource_forms_and_workers(tmp_path: Path) -> None:
+    audit = _load_audit_module()
+    page = tmp_path / "runtime.html"
+    page.write_text(
+        '<form action="https://api.example.invalid/submit"></form>'
+        '<svg><use href="https://cdn.example.invalid/icons.svg#chat"></use></svg>'
+        '<script>new Worker("https://cdn.example.invalid/worker.js");'
+        'navigator.sendBeacon("https://api.example.invalid/metrics", "x");'
+        'image.src = "https://cdn.example.invalid/image.png";</script>', encoding="utf-8")
+    kinds = {finding.kind for finding in audit.scan_file(page)}
+    assert {"HTML form[action]", "HTML use[href]", "JavaScript network/module target",
+            "JavaScript resource property"} <= kinds
+
+
+def test_rendered_pages_use_fingerprinted_first_party_assets() -> None:
+    for name, html in _render_templates().items():
+        parser = AssetParser()
+        parser.feed(html)
+        for target in parser.assets:
+            relative = urlsplit(target).path.removeprefix("/static/")
+            if relative.startswith(("css/", "js/", "icons.svg")):
+                assert relative.startswith("_v/"), f"unversioned first-party asset on {name}: {target}"
+        assert 'icons.svg' in html or name == 'login.html'
+
 def test_rendered_templates_reference_only_existing_local_assets() -> None:
     for template_name, html in _render_templates().items():
         parser = AssetParser()
@@ -171,6 +201,29 @@ def test_rendered_templates_reference_only_existing_local_assets() -> None:
             asset = _static_path(target)
             assert asset is not None, f"non-static runtime asset in {template_name}: {target}"
             assert asset.is_file(), f"missing asset in {template_name}: {target}"
+
+
+
+def test_rendered_assets_have_integrity_and_icons_resolve() -> None:
+    sprite = BeautifulSoup((STATIC_DIR / "icons.svg").read_text(encoding="utf-8"), "xml")
+    ids = {symbol.get("id") for symbol in sprite.find_all("symbol")}
+    for name, html in _render_templates().items():
+        soup = BeautifulSoup(html, "html.parser")
+        for node in soup.select("script[src], link[rel=stylesheet]"):
+            target = node.get("src") or node.get("href")
+            relative = urlsplit(target).path.removeprefix("/static/")
+            if relative.startswith("_v/"):
+                relative = relative.split("/", 2)[2]
+                expected = asset_integrity(relative)
+            else:
+                expected = vendor_integrity(relative)
+            assert node.get("integrity") == expected, f"missing or stale integrity on {name}: {target}"
+        for use in soup.select("use[href]"):
+            target = use["href"]
+            assert urlsplit(target).path.startswith("/static/_v/") and urlsplit(target).fragment in ids
+            assert use.parent.get("aria-hidden") == "true"
+        if name == "analytics.html":
+            assert len(soup.select(".chart-card__title svg")) == 8
 
 
 def test_all_css_dependencies_exist_and_stay_inside_static_tree() -> None:

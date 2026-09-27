@@ -8,6 +8,7 @@ from datetime import datetime
 from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
+from versioned_assets import asset_integrity, vendor_integrity, versioned_asset
 from pydantic import BaseModel
 from typing import Optional, List
 from qdrant_client.models import PointStruct, PointIdsList
@@ -26,6 +27,9 @@ from new_architecture.knowledge_update import (
 
 router = APIRouter(prefix="/knowledge-base", tags=["Knowledge Base Management"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+templates.env.globals["versioned_asset"] = versioned_asset
+templates.env.globals["asset_integrity"] = asset_integrity
+templates.env.globals["vendor_integrity"] = vendor_integrity
 normalizer = Normalizer()
 logger = logging.getLogger(__name__)
 
@@ -221,7 +225,8 @@ def extract_qa_components(content: str) -> dict:
 @router.get("/", response_class=HTMLResponse)
 async def serve_kb_page(request: Request):
     return templates.TemplateResponse("kb_manager.html", {"request": request,
-                                                          "permissions": permissions_for(request.state.web_user.role)})
+                                                          "permissions": permissions_for(request.state.web_user.role)},
+                                      headers={"Cache-Control": "no-store"})
 
 
 @router.get("/api/documents")

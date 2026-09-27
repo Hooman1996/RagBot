@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Analytics – Negah Bank AI</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous" />
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/base.css') }}" integrity="{{ asset_integrity('css/base.css') }}" crossorigin="anonymous" />
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/app.css') }}" integrity="{{ asset_integrity('css/app.css') }}" crossorigin="anonymous" />
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/analytics.css') }}" integrity="{{ asset_integrity('css/analytics.css') }}" crossorigin="anonymous" />
@@ -29,12 +29,15 @@
 
         <div class="sidebar__nav">
             {% if 'chat' in permissions %}<a href="/app" class="sidebar__nav-item">
+                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#chat"></use></svg>
                 <span>Chat</span>
             </a>{% endif %}
             {% if 'kb_page' in permissions %}<a href="/knowledge-base" class="sidebar__nav-item">
+                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#knowledge"></use></svg>
                 <span>Knowledge</span>
             </a>{% endif %}
             <a href="/analytics" class="sidebar__nav-item active">
+                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#analytics"></use></svg>
                 <span>Analytics</span>
             </a>
         </div>
@@ -49,7 +52,7 @@
             <div class="topbar__actions">
                 <div class="web-header-controls">
                     {% set logout_label = "Log out" %}{% include "_logout_button.html" %}
-                    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">🌙</button>
+                    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode"><svg class="toggle-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#moon"></use></svg></button>
                 </div>
                 <label class="analytics-range-label" for="timeRange">Reporting window</label>
                 <select id="timeRange" class="analytics-select">
@@ -58,12 +61,12 @@
                     <option value="7">Last 7 days</option>
                 </select>
                 <button id="refreshAnalytics" class="status-chip" style="cursor:pointer;border:none;">
-                    ↻ Refresh
+                    <svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#refresh"></use></svg> Refresh
                 </button>
             </div>
         </div>
 
-        <div class="analytics-page" id="analyticsRoot" data-analytics-contract="{{ analytics_contract_version }}">
+        <div class="analytics-page" id="analyticsRoot" data-analytics-contract="{{ analytics_contract_version }}" data-icons-url="{{ versioned_asset(request, 'icons.svg') }}">
             <p id="analyticsStatus" class="analytics-status" role="status" aria-live="polite">Loading analytics…</p>
             <p id="analyticsTimezone" class="analytics-meta"></p>
 
@@ -73,12 +76,12 @@
             <!-- CHARTS -->
             <div class="chart-row">
                 <div class="chart-card wide">
-                    <p class="chart-card__title">Queries per day</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#queries"></use></svg>Queries per day</p>
                     <p class="chart-card__meta" id="queriesDayMeta"></p>
                     <canvas id="chartQueriesDay"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Feedback outcomes</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#feedback"></use></svg>Feedback outcomes</p>
                     <p class="chart-card__meta" id="feedbackMeta"></p>
                     <canvas id="chartFeedback"></canvas>
                 </div>
@@ -86,17 +89,17 @@
 
             <div class="chart-row three-cards">
                 <div class="chart-card">
-                    <p class="chart-card__title">Conversation depth</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#depth"></use></svg>Conversation depth</p>
                     <p class="chart-card__meta" id="depthMeta"></p>
                     <canvas id="chartDepth"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Completion duration</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#duration"></use></svg>Completion duration</p>
                     <p class="chart-card__meta" id="durationMeta"></p>
                     <canvas id="chartDuration"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Users who queried per day</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#users"></use></svg>Users who queried per day</p>
                     <p class="chart-card__meta" id="usersDayMeta"></p>
                     <canvas id="chartUsersDay"></canvas>
                 </div>
@@ -104,12 +107,12 @@
 
             <div class="chart-row">
                 <div class="chart-card wide">
-                    <p class="chart-card__title">Query states</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#states"></use></svg>Query states</p>
                     <p class="chart-card__meta" id="statesMeta"></p>
                     <canvas id="chartStates"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Weekday comparison</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#weekly"></use></svg>Weekday comparison</p>
                     <p class="chart-card__meta" id="weeklyMeta">Independent 7-day windows (UTC)</p>
                     <canvas id="chartWeekly"></canvas>
                 </div>
@@ -117,7 +120,7 @@
 
             <div class="chart-row">
                 <div class="chart-card extra-wide">
-                    <p class="chart-card__title">Weekday × hour activity</p>
+                    <p class="chart-card__title"><svg class="chart-card__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#heatmap"></use></svg>Weekday × hour activity</p>
                     <p class="chart-card__meta" id="heatmapMeta"></p>
                     <div id="heatmapContainer" class="heatmap-wrapper"></div>
                     <details id="heatmapDetails" class="heatmap-details"><summary>Read weekday and hour counts</summary><div id="heatmapSummary"></div></details>
@@ -133,16 +136,16 @@
   const themeBtn = document.getElementById('themeToggleBtn');
   if (localStorage.getItem('theme') === 'light') {
     document.body.classList.add('light-mode');
-    themeBtn.textContent = '☀️';
+    themeBtn.querySelector('use').setAttribute('href', '{{ versioned_asset(request, 'icons.svg') }}#sun');
   }
   themeBtn.addEventListener('click', () => {
     const isLight = document.body.classList.toggle('light-mode');
-    themeBtn.textContent = isLight ? '☀️' : '🌙';
+    themeBtn.querySelector('use').setAttribute('href', '{{ versioned_asset(request, 'icons.svg') }}#' + (isLight ? 'sun' : 'moon'));
     localStorage.setItem('theme', isLight ? 'light' : 'dark');
     if (window._analyticsDashboard) window._analyticsDashboard.reload();
   });
 </script>
-<script src="{{ url_for('static', path='vendor/chart.js/4.5.1/chart.umd.js') }}"></script>
+<script src="{{ url_for('static', path='vendor/chart.js/4.5.1/chart.umd.js') }}" integrity="{{ vendor_integrity('vendor/chart.js/4.5.1/chart.umd.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/analytics.js') }}" integrity="{{ asset_integrity('js/analytics.js') }}" crossorigin="anonymous"></script>
 <script>
   // Detect a missing or stale dashboard script even when it cannot run its own guard.

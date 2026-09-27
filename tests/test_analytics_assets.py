@@ -82,7 +82,8 @@ def test_served_analytics_page_assets_api_and_render_path(setup, monkeypatch, po
                 assert "chartFeedback" in served_script and "chartWeekly" in served_script
                 invalid = path.replace(digest, "0" * 64 if digest != "0" * 64 else "1" * 64, 1)
                 assert client.get(invalid).status_code == 404
-        assert seen == VERSIONED_ASSETS
+        assert seen == {"css/base.css", "css/app.css", "css/analytics.css",
+                        "css/web_controls.css", "js/web_auth.js", "js/analytics.js"}
         assert served_script is not None
         assert any("vendor/chart.js/4.5.1/chart.umd.js" in asset for asset in assets)
 
@@ -110,7 +111,7 @@ def test_served_analytics_page_assets_api_and_render_path(setup, monkeypatch, po
         text=True, capture_output=True, timeout=15,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "# tests 6" in result.stdout
+    assert "# tests 7" in result.stdout
 
 
 def test_asset_digest_changes_with_content(monkeypatch):

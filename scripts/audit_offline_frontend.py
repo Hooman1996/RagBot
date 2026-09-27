@@ -76,10 +76,14 @@ def scan_css(path: Path, text: str) -> list[Finding]:
 
 SCRIPT_CALL = re.compile(
     r"(?:fetch|import|importScripts|axios(?:\.[A-Za-z]+)?|"
-    r"new\s+(?:Worker|SharedWorker|WebSocket|EventSource))\s*\(\s*(['\"])(.*?)\1",
+    r"new\s+(?:Worker|SharedWorker|WebSocket|EventSource)|"
+    r"navigator\.(?:sendBeacon|serviceWorker\.register))\s*\(\s*(['\"])(.*?)\1",
     re.I | re.S,
 )
 STATIC_IMPORT = re.compile(r"(?:import|export)\s+(?:[^;]*?\s+from\s+)?(['\"])(.*?)\1", re.I)
+NETWORK_PROPERTY = re.compile(
+    r'(?:\.src|\.href|\.baseURL)\s*=\s*([\"\'])(.*?)\1', re.I
+)
 XHR_OPEN = re.compile(r"\.open\s*\(\s*(['\"])[A-Z]+\1\s*,\s*(['\"])(.*?)\2", re.I)
 
 
@@ -90,6 +94,7 @@ def scan_javascript(path: Path, text: str, line_offset: int = 0) -> list[Finding
         ("JavaScript network/module target", SCRIPT_CALL, 2),
         ("JavaScript module target", STATIC_IMPORT, 2),
         ("XMLHttpRequest target", XHR_OPEN, 3),
+        ("JavaScript resource property", NETWORK_PROPERTY, 2),
     ):
         for match in pattern.finditer(clean):
             target = match.group(target_group).strip()
@@ -111,6 +116,10 @@ class RuntimeHTMLParser(HTMLParser):
         "iframe": {"src"},
         "embed": {"src"},
         "object": {"data"},
+        "use": {"href", "xlink:href"},
+        "form": {"action"},
+        "button": {"formaction"},
+        "input": {"src", "formaction"},
     }
 
     def __init__(self, path: Path) -> None:
@@ -128,6 +137,10 @@ class RuntimeHTMLParser(HTMLParser):
             self.script_line = self.getpos()[0]
             self.script_parts = []
         allowed = self.RUNTIME_ATTRIBUTES.get(tag, set())
+        if tag == "meta" and values.get("http-equiv", "").lower() == "refresh":
+            target = values.get("content", "").split("url=", 1)[-1].strip()
+            if _is_public(target):
+                self.findings.append(Finding(self.path, self.getpos()[0], "HTML meta refresh", target))
         if tag == "link":
             rel = set(values.get("rel", "").lower().split())
             if rel and not rel.intersection({"stylesheet", "preload", "modulepreload", "icon", "manifest"}):

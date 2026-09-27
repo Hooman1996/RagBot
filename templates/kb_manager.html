@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Negah Yar AI - مدیریت پایگاه دانش</title>
-    <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind/3.4.17/tailwind.min.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/kb_manager.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}">
-    <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind/3.4.17/tailwind.min.css') }}" integrity="{{ vendor_integrity('vendor/tailwind/3.4.17/tailwind.min.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/kb_manager.css') }}" integrity="{{ asset_integrity('css/kb_manager.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
+    <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
 <body data-can-write="{{ 'true' if 'kb_write' in permissions else 'false' }}" class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none">
 
@@ -21,7 +21,7 @@
             </div>
         </div>
         <div class="web-header-controls web-header-controls--kb">
-            {% if 'chat' in permissions %}<a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all">◄ بازگشت به میز کار چت</a>{% endif %}
+            {% if 'chat' in permissions %}<a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all"><svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#back"></use></svg> بازگشت به میز کار چت</a>{% endif %}
             {% set logout_label = "خروج" %}{% include "_logout_button.html" %}
         </div>
     </header>
@@ -120,6 +120,6 @@
         <span>✓</span> <span id="toast-text">تغییرات با موفقیت اعمال شد.</span>
     </div>
 
-    <script src="{{ url_for('static', path='js/kb_manager.js') }}"></script>
+    <script src="{{ versioned_asset(request, 'js/kb_manager.js') }}" integrity="{{ asset_integrity('js/kb_manager.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

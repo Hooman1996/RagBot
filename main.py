@@ -70,7 +70,7 @@ from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
-from versioned_assets import VersionedStaticFiles, asset_integrity, versioned_asset
+from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
 from web_permissions import permissions_for
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
@@ -518,6 +518,7 @@ async def request_trace_middleware(request: Request, call_next):
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["versioned_asset"] = versioned_asset
 templates.env.globals["asset_integrity"] = asset_integrity
+templates.env.globals["vendor_integrity"] = vendor_integrity
 app.mount("/static", VersionedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Mount API Routers
@@ -618,13 +619,15 @@ async def logout(request: Request, user: WebUser):
 
 @app.get("/", response_class=HTMLResponse)
 async def home(request: Request):
-    return templates.TemplateResponse("login.html", {"request": request})
+    return templates.TemplateResponse("login.html", {"request": request},
+                                      headers={"Cache-Control": "no-store"})
 
 
 @app.get("/app", response_class=HTMLResponse)
 async def app_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request,
-                                                      "permissions": permissions_for(request.state.web_user.role)})
+                                                      "permissions": permissions_for(request.state.web_user.role)},
+                                      headers={"Cache-Control": "no-store"})
 
 
 @app.get("/analytics", response_class=HTMLResponse)

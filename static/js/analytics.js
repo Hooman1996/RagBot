@@ -82,6 +82,13 @@
     items.forEach(([label, value, detail]) => {
       const card = document.createElement("div");
       card.className = "kpi-card";
+      const icon = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+      icon.classList.add("kpi-card__icon");
+      icon.setAttribute("aria-hidden", "true");
+      const use = document.createElementNS("http://www.w3.org/2000/svg", "use");
+      use.setAttribute("href", $("analyticsRoot").dataset.iconsUrl + "#" + ({"Queries":"queries","Users who queried":"users","Average completion":"duration","Rated responses":"feedback","Indexed documents":"documents"})[label]);
+      icon.appendChild(use);
+      card.appendChild(icon);
       for (const [cls, text] of [["kpi-card__label", label], ["kpi-card__value", value], ["kpi-card__detail", detail]]) {
         const part = document.createElement("div");
         part.className = cls;
@@ -224,7 +231,7 @@
       root.appendChild(status);
     }
     if (status) status.textContent =
-      "Analytics version mismatch. Reload this page (Ctrl+Shift+R); if it persists, clear this site's cache or contact support.";
+      "Analytics version mismatch. Reload this page; if it persists, contact support.";
     console.error("Analytics contract mismatch", { html: htmlVersion, script: CONTRACT_VERSION, api: apiVersion });
   }
 

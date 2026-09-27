@@ -66,3 +66,18 @@ body[data-can-write="false"] .kb-write-action { display: none !important; }
   .web-header-controls { flex-wrap: wrap; }
   .web-logout span { display: none; }
 }
+
+/* Match adjacent header controls in every page and keep the icon visible in RTL. */
+.web-header-controls .web-logout { box-sizing: border-box; min-height: 40px; min-width: 44px; padding-inline: 11px; flex: 0 0 auto; }
+.web-header-controls .web-logout svg { display: block; width: 18px; height: 18px; flex: 0 0 18px; }
+.web-header-controls .web-logout span { display: inline-block; line-height: 1.2; }
+@media (max-width: 420px) {
+  .web-header-controls .web-logout { min-height: 44px; min-width: 44px; padding-inline: 10px; }
+  .web-header-controls .web-logout span { display: none; }
+}
+
+.web-header-controls .theme-toggle { min-width: 44px; min-height: 44px; flex-basis: 44px; display: inline-flex; align-items: center; justify-content: center; }
+.web-header-controls .theme-toggle svg { width: 18px; height: 18px; }
+.sidebar__nav-item:focus-visible, .analytics-select:focus-visible, #refreshAnalytics:focus-visible, .web-header-controls--kb a:focus-visible { outline: 2px solid var(--color-accent-primary, #38bdf8); outline-offset: 2px; }
+.web-header-controls--kb a { display: inline-flex; align-items: center; min-height: 44px; }
+@media (max-width: 700px) { .main-content #refreshAnalytics.status-chip { display: inline-flex; align-items: center; min-height: 44px; } }

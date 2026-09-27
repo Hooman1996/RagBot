@@ -15,10 +15,14 @@ from starlette.requests import Request
 from frontend_paths import STATIC_DIR
 
 
-# Keep this list deliberately narrow: vendor Chart.js remains a local static asset.
+# Every first-party file loaded by a browser page uses a content-addressed URL.
+# Local vendor stylesheets retain their versioned vendor directories and manifest hashes.
 VERSIONED_ASSETS = frozenset({
     "css/base.css", "css/app.css", "css/analytics.css", "css/web_controls.css",
-    "js/web_auth.js", "js/analytics.js",
+    "css/login.css", "css/kb_manager.css", "icons.svg",
+    "js/web_auth.js", "js/analytics.js", "js/i18n.js", "js/api.js",
+    "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/app.js",
+    "js/kb_manager.js",
 })
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 
@@ -41,6 +45,16 @@ def asset_integrity(path: str) -> str:
     return "sha256-" + base64.b64encode(digest).decode("ascii")
 
 
+def vendor_integrity(path: str) -> str:
+    """Integrity for pinned local vendor CSS/JS without changing relative font URLs."""
+    if not path.startswith("vendor/") or not path.endswith((".css", ".js")):
+        raise ValueError("Unknown vendor asset")
+    file = (STATIC_DIR / path).resolve()
+    if not file.is_relative_to((STATIC_DIR / "vendor").resolve()):
+        raise ValueError("Invalid vendor asset path")
+    return "sha256-" + base64.b64encode(hashlib.sha256(file.read_bytes()).digest()).decode("ascii")
+
+
 def versioned_asset(request: Request, path: str):
     return request.url_for("static", path=f"_v/{asset_digest(path)}/{path}")
 
@@ -48,7 +62,9 @@ def versioned_asset(request: Request, path: str):
 class VersionedStaticFiles(StaticFiles):
     async def get_response(self, path: str, scope):
         if not path.startswith("_v/"):
-            return await super().get_response(path, scope)
+            response = await super().get_response(path, scope)
+            response.headers["Cache-Control"] = "no-store"
+            return response
         parts = path.split("/", 2)
         if len(parts) != 3 or not _DIGEST.fullmatch(parts[1]) or parts[2] not in VERSIONED_ASSETS:
             return Response(status_code=404, headers={"Cache-Control": "no-store"})

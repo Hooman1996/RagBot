@@ -38,6 +38,7 @@ function makeDashboard(responseFactory, options = {}) {
     nodes: [], readyState: 'complete',
     body: { classList: { contains: () => false } },
     createElement(tag) { return new Element(tag, this); },
+    createElementNS(_namespace, tag) { return new Element(tag, this); },
     getElementById(id) { return this.nodes.find((n) => n.id === id); },
     querySelectorAll(selector) {
       if (selector === '.chart-message') return this.nodes.filter((n) => n.parentElement && n.className.includes('chart-message'));
@@ -52,6 +53,7 @@ function makeDashboard(responseFactory, options = {}) {
     .forEach((id) => new Element('div', document, id));
   document.getElementById('timeRange').value = '7';
   document.getElementById('analyticsRoot').dataset.analyticsContract = options.contract || 'main-analytics/v3';
+  document.getElementById('analyticsRoot').dataset.iconsUrl = '/static/_v/test/icons.svg';
   for (const id of options.cardIds || ['chartQueriesDay', 'chartFeedback', 'chartDepth', 'chartDuration', 'chartUsersDay', 'chartStates', 'chartWeekly']) {
     const card = new Element('div', document);
     card.className = 'chart-card';
@@ -94,6 +96,9 @@ test('new charts, rated denominator, and keyboard-readable heatmap render', asyn
   const view = makeDashboard(async () => ({ ok: true, json: async () => payload(2) }));
   await tick();
   assert.equal(view.charts.length, 7);
+  const cards = view.document.getElementById('kpiRow').children;
+  assert.equal(cards.length, 5);
+  assert.equal(cards.filter((card) => card.children[0].tagName === 'svg' && card.children[0].attributes['aria-hidden'] === 'true').length, 5);
   assert.deepEqual(view.charts.map((c) => c.canvas.id), ['chartQueriesDay', 'chartFeedback', 'chartDepth', 'chartDuration', 'chartUsersDay', 'chartStates', 'chartWeekly']);
   assert.match(view.document.getElementById('feedbackMeta').textContent, /0 rated responses \/ 2 queries/);
   assert.match(view.document.getElementById('analyticsTimezone').textContent, /Timezone: UTC/);
@@ -198,3 +203,17 @@ if (servedBundle) {
     }
   });
 }
+
+
+test('all reporting windows request their own data and keep populated cards visible', async () => {
+  const urls = [];
+  const view = makeDashboard(async (url) => { urls.push(url); return { ok: true, json: async () => payload(2) }; });
+  await tick();
+  for (const days of ['14', '30']) {
+    view.document.getElementById('timeRange').value = days;
+    await view.window._analyticsDashboard.reload();
+    assert.equal(view.document.getElementById('kpiRow').children.length, 5);
+    assert.equal(view.charts.length, 7 * (urls.length)); // Chart mocks record each successful render.
+  }
+  assert.deepEqual(urls, ['/api/analytics?days=7', '/api/analytics?days=14', '/api/analytics?days=30']);
+});

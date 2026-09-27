@@ -4,9 +4,9 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Account access – Negah Bank AI</title>
-  <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
-  <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}">
-  <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
+  <link rel="stylesheet" href="{{ versioned_asset(request, 'css/base.css') }}" integrity="{{ asset_integrity('css/base.css') }}" crossorigin="anonymous">
+  <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
+  <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
 <body style="max-width:40rem;margin:10vh auto;padding:1rem;background:var(--color-bg-base);color:var(--text-primary)">
   <div class="web-header-controls" style="justify-content:flex-start">

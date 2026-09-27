@@ -4,11 +4,11 @@
     <meta charset="UTF-8">
     <title>Negah Bank AI</title>
 
-    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
-    <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}">
-    <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/base.css') }}" integrity="{{ asset_integrity('css/base.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/app.css') }}" integrity="{{ asset_integrity('css/app.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
+    <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -26,14 +26,17 @@
 
         <div class="sidebar__nav">
             <a href="/app" class="sidebar__nav-item active">
+                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#chat"></use></svg>
                 <span data-i18n="nav_chat">Chat</span>
             </a>
 
             {% if 'kb_page' in permissions %}<a href="/knowledge-base" class="sidebar__nav-item">
+                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#knowledge"></use></svg>
                 <span data-i18n="nav_knowledge">Knowledge</span>
             </a>{% endif %}
 
             {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">
+                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#analytics"></use></svg>
                 <span data-i18n="nav_analytics">Analytics</span>
             </a>{% endif %}
         </div>
@@ -70,7 +73,7 @@
                 <div class="web-header-controls">
                     {% set logout_label = "Log out" %}{% set logout_localized = true %}{% include "_logout_button.html" %}
                     <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">
-                        <span class="toggle-icon">🌙</span>
+                        <svg class="toggle-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#moon"></use></svg>
                     </button>
                     <div class="lang-toggle-container" id="langToggleContainer">
                         <button class="lang-option" data-lang="fa" id="langFaBtn">FA</button>
@@ -167,13 +170,13 @@
 
 </div>
 
-<script src="{{ url_for('static', path='js/i18n.js') }}"></script>
+<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
 
-<script src="{{ url_for('static', path='js/api.js') }}"></script>
-<script src="{{ url_for('static', path='js/sidebar.js') }}"></script>
-<script src="{{ url_for('static', path='js/categoryFilter.js') }}"></script>
-<script src="{{ url_for('static', path='js/chat.js') }}"></script>
-<script src="{{ url_for('static', path='js/app.js') }}"></script>
+<script src="{{ versioned_asset(request, 'js/api.js') }}" integrity="{{ asset_integrity('js/api.js') }}" crossorigin="anonymous"></script>
+<script src="{{ versioned_asset(request, 'js/sidebar.js') }}" integrity="{{ asset_integrity('js/sidebar.js') }}" crossorigin="anonymous"></script>
+<script src="{{ versioned_asset(request, 'js/categoryFilter.js') }}" integrity="{{ asset_integrity('js/categoryFilter.js') }}" crossorigin="anonymous"></script>
+<script src="{{ versioned_asset(request, 'js/chat.js') }}" integrity="{{ asset_integrity('js/chat.js') }}" crossorigin="anonymous"></script>
+<script src="{{ versioned_asset(request, 'js/app.js') }}" integrity="{{ asset_integrity('js/app.js') }}" crossorigin="anonymous"></script>
 
 <script>
     // Theme toggle (unchanged)
@@ -183,12 +186,12 @@
 
     if (localStorage.getItem('theme') === 'light') {
         body.classList.add('light-mode');
-        themeIcon.textContent = '☀️';
+        themeIcon.firstElementChild.setAttribute('href', '{{ versioned_asset(request, 'icons.svg') }}#sun');
     }
 
     themeBtn.addEventListener('click', () => {
         const isLight = body.classList.toggle('light-mode');
-        themeIcon.textContent = isLight ? '☀️' : '🌙';
+        themeIcon.firstElementChild.setAttribute('href', '{{ versioned_asset(request, 'icons.svg') }}#' + (isLight ? 'sun' : 'moon'));
         localStorage.setItem('theme', isLight ? 'light' : 'dark');
     });
 

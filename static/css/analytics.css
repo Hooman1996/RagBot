@@ -346,3 +346,9 @@
 .analytics-page.contract-mismatch .chart-row,
 .analytics-page.contract-mismatch .global-error { display: none; }
 .analytics-page.contract-mismatch .analytics-status { color: #f87171; font-weight: 600; }
+
+/* Shared local SVG sprite for panel headings and KPI metrics. */
+.chart-card__title { display: flex; align-items: center; gap: 8px; }
+.chart-card__icon { width: 18px; height: 18px; flex: 0 0 18px; color: var(--color-accent-primary, #38bdf8); }
+.kpi-card__icon { width: 22px; height: 22px; margin-bottom: 4px; color: var(--color-accent-primary, #38bdf8); }
+.control-icon { width: 16px; height: 16px; display: inline-block; vertical-align: -3px; margin-inline-end: 4px; }
