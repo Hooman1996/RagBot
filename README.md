@@ -462,6 +462,7 @@ after application-side changes. See:
 - [Environment variable reference](docs/configuration/ENVIRONMENT_VARIABLES.md)
 - [Environment audit](docs/configuration/ENVIRONMENT_AUDIT.md)
 - [Browser role permissions](docs/web-role-permissions.md)
+- [Development browser-user operator guide](docs/manage-web-users.md)
 - [Secret-free RTX 5880 overlay](.env.recommended.rtx5880-staging)
 
 ## API
