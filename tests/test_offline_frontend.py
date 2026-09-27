@@ -226,6 +226,28 @@ def test_rendered_assets_have_integrity_and_icons_resolve() -> None:
             assert len(soup.select(".chart-card__title svg")) == 8
 
 
+
+def test_knowledge_base_loads_fixed_control_icon_sizing() -> None:
+    """Catch CSS rules accidentally placed only in an unrelated page bundle."""
+    soup = BeautifulSoup(_render_templates()["kb_manager.html"], "html.parser")
+    loaded_css = []
+    for link in soup.select('link[rel="stylesheet"]'):
+        path = _static_path(link["href"])
+        assert path is not None
+        loaded_css.append(path)
+    assert STATIC_DIR / "css/web_controls.css" in loaded_css
+    assert STATIC_DIR / "css/analytics.css" not in loaded_css
+    rules = []
+    for path in loaded_css:
+        text = path.read_text(encoding="utf-8")
+        rules.extend(re.findall(r"(?m)^\s*\.control-icon\s*\{([^{}]*)\}", text))
+    assert rules, "KB page does not load a .control-icon sizing rule"
+    declarations = dict(re.findall(r"([a-z-]+)\s*:\s*([^;]+);", rules[-1]))
+    assert declarations["width"].strip() == "16px"
+    assert declarations["height"].strip() == "16px"
+    assert declarations["flex"].strip() == "0 0 16px"
+
+
 def test_all_css_dependencies_exist_and_stay_inside_static_tree() -> None:
     checked: set[Path] = set()
     pending = list(STATIC_DIR.rglob("*.css"))

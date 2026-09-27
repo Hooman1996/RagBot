@@ -85,3 +85,10 @@ body[data-can-write="false"] .kb-write-action { display: none !important; }
 .sidebar__chat-item__icon svg, .sidebar__chat-item__menu-item .menu-icon svg, .lock-notice__icon { width: 18px; height: 18px; display: inline-block; }
 .sidebar__chat-item__menu-btn { min-width: 44px; min-height: 44px; }
 .sidebar__chat-item__menu-btn:focus-visible, .sidebar__chat-item__menu-item:focus-visible { outline: 2px solid var(--color-accent-primary, #38bdf8); outline-offset: 2px; }
+
+/* Header action icons are shared by analytics and the knowledge-base page. */
+.control-icon { display: inline-block; width: 16px; height: 16px; flex: 0 0 16px; }
+.web-header-controls--kb a { box-sizing: border-box; display: inline-flex; align-items: center; justify-content: center; gap: 6px; min-height: 44px; max-width: 100%; flex: 0 1 auto; line-height: 1.25; text-align: center; white-space: normal; }
+.kb-header { flex-wrap: wrap; gap: 8px; }
+.kb-header > .flex, .kb-header > .flex > div:last-child { min-width: 0; }
+.web-header-controls--kb { flex-wrap: wrap; max-width: 100%; }
