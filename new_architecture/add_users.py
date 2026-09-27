@@ -16,6 +16,7 @@ Usage:
 """
 
 import sys
+from getpass import getpass
 from pathlib import Path
 import os
 from dotenv import load_dotenv
@@ -41,13 +42,12 @@ import json
 # DB_PORT = 5432
 # DB_NAME = "rag_db"
 # DB_USER = "postgres"
-# DB_PASSWORD = "postgres"
 
 DB_HOST = os.getenv("POSTGRES_HOST", "localhost")
 DB_PORT = os.getenv("POSTGRES_PORT", "5432")
 DB_NAME = os.getenv("POSTGRES_DB", "hihelp_db")
 DB_USER = os.getenv("POSTGRES_USER", "postgres")
-DB_PASSWORD = os.getenv("POSTGRES_PASSWORD", "postgres")
+DB_PASSWORD = os.getenv("POSTGRES_PASSWORD")
 
 # ═══════════════════════════════════════════════════════════
 # HELPER FUNCTIONS
@@ -68,6 +68,16 @@ def hash_password(password: str) -> str:
     return hashed.decode('utf-8')
 
 
+def password_for_seed(username: str) -> str:
+    """Get a new account secret from the environment or a private terminal prompt."""
+    password = os.getenv(f"RAGBOT_SEED_PASSWORD_{username.upper()}")
+    if password is None:
+        password = getpass(f"New password for {username}: ")
+    if len(password) < 12:
+        raise ValueError("Seed passwords must have at least 12 characters")
+    return password
+
+
 def generate_uuid() -> str:
     """Generate a unique UUID"""
     return str(uuid.uuid4())
@@ -82,7 +92,6 @@ USERS_TO_ADD = [
     {
         'email': 'admin@example.com',
         'username': 'admin',
-        'password': 'Admin@123',
         'full_name': 'System Administrator',
         'role': 'admin',
         'is_active': True,
@@ -98,7 +107,6 @@ USERS_TO_ADD = [
     {
         'email': 'john.doe@example.com',
         'username': 'johndoe',
-        'password': 'John@123',
         'full_name': 'John Doe',
         'role': 'user',
         'is_active': True,
@@ -114,7 +122,6 @@ USERS_TO_ADD = [
     {
         'email': 'jane.smith@example.com',
         'username': 'janesmith',
-        'password': 'Jane@123',
         'full_name': 'Jane Smith',
         'role': 'user',
         'is_active': True,
@@ -130,7 +137,6 @@ USERS_TO_ADD = [
     {
         'email': 'moderator@example.com',
         'username': 'moderator',
-        'password': 'Mod@123',
         'full_name': 'Content Moderator',
         'role': 'moderator',
         'is_active': True,
@@ -146,7 +152,6 @@ USERS_TO_ADD = [
     {
         'email': 'alice.johnson@example.com',
         'username': 'alicejohnson',
-        'password': 'Alice@123',
         'full_name': 'Alice Johnson',
         'role': 'user',
         'is_active': True,
@@ -294,7 +299,7 @@ def add_users():
             continue
 
         # Hash password
-        password_hash = hash_password(user_data['password'])
+        password_hash = hash_password(password_for_seed(username))
 
         # Generate UUID
         user_uuid = generate_uuid()
@@ -341,7 +346,6 @@ def add_users():
             print(f"   ID: {user_id}")
             print(f"   Username: {username}")
             print(f"   Role: {user_data['role']}")
-            print(f"   Password: {user_data['password']}")
             print()
 
             added_count += 1
@@ -400,27 +404,6 @@ def add_users():
     print("✅ Done!")
     print()
 
-    # Show credentials
-    if added_count > 0:
-        print("=" * 80)
-        print("LOGIN CREDENTIALS")
-        print("=" * 80)
-        print()
-        print("Use these credentials to log in:")
-        print()
-        for user_data in USERS_TO_ADD:
-            if user_data['email'] not in existing_emails and user_data['username'] not in existing_usernames:
-                print(f"  Username: {user_data['username']}")
-                print(f"  Password: {user_data['password']}")
-                print(f"  Role: {user_data['role']}")
-                print()
-        print("=" * 80)
-        print()
-
-
-# ═══════════════════════════════════════════════════════════
-# ADDITIONAL FUNCTIONS
-# ═══════════════════════════════════════════════════════════
 
 def list_users():
     """

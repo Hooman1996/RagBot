@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Account access – Negah Bank AI</title>
+  <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
+  <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}">
+  <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
+</head>
+<body style="max-width:40rem;margin:10vh auto;padding:1rem;background:var(--color-bg-base);color:var(--text-primary)">
+  <div class="web-header-controls" style="justify-content:flex-start">
+    {% set logout_label = "Log out" %}{% include "_logout_button.html" %}
+  </div>
+  <h1>No product access / دسترسی مجاز نیست</h1>
+  <p>Your current role has no assigned product permissions. Contact an administrator.</p>
+</body>
+</html>

@@ -12,7 +12,7 @@
     const browserApi = url.origin === window.location.origin &&
       (url.pathname.startsWith('/api/') || url.pathname.startsWith('/knowledge-base/api/')) &&
       !url.pathname.startsWith('/api/mobile/') &&
-      !url.pathname.startsWith('/api/internal/evaluation/');
+      !url.pathname.startsWith('/api/internal/evaluation/v1/');
     if (browserApi && !['GET', 'HEAD', 'OPTIONS'].includes(method) && url.pathname !== '/api/login') {
       init = {...init, headers: new Headers(init.headers || (input instanceof Request ? input.headers : undefined))};
       init.headers.set('X-CSRF-Token', csrfToken());

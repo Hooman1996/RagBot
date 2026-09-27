@@ -14,7 +14,8 @@ from typing import Annotated
 from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
-from fastapi.responses import JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from web_permissions import permissions_for, landing_for, route_permission
 from starlette.concurrency import run_in_threadpool
 
 SESSION_COOKIE = "ragbot_web_session"
@@ -79,7 +80,9 @@ def _mac(purpose: bytes, value: bytes) -> bytes:
 
 def safe_user(row: dict) -> dict:
     return {"id": row["id"], "username": row["username"],
-            "display_name": row.get("full_name", row.get("display_name")), "role": row.get("role")}
+            "display_name": row.get("full_name", row.get("display_name")), "role": row.get("role"),
+            "permissions": sorted(permissions_for(row.get("role"))),
+            "landing_path": landing_for(row.get("role"))}
 
 
 @dataclass(frozen=True)
@@ -158,31 +161,57 @@ def clear_cookies(response) -> None:
     response.headers["Cache-Control"] = "no-store"
 
 
-def web_route(path: str) -> bool:
-    if path in {"/app", "/analytics", "/knowledge-base", "/knowledge-base/"}:
-        return True
-    if path.startswith("/knowledge-base/"):
-        return True
-    if path.startswith("/api/mobile/") or path.startswith("/api/internal/evaluation/"):
+def web_route(path: str, method: str = "GET") -> bool:
+    if path.startswith("/api/mobile/") or path.startswith("/api/internal/evaluation/v1/"):
         return False
-    if path in {"/api/login", "/api/health"}:
+    if (method, path) in {
+        ("GET", "/"), ("POST", "/api/login"), ("GET", "/api/health"),
+        ("GET", "/docs"), ("GET", "/redoc"), ("GET", "/openapi.json"),
+    }:
         return False
-    return path.startswith("/api/")
+    if method == "GET" and (path == "/static" or path.startswith("/static/")):
+        return False
+    return True
+
+
+def forbidden_page() -> HTMLResponse:
+    return HTMLResponse(
+        '<!doctype html><html lang="en"><meta charset="utf-8">'
+        '<meta name="viewport" content="width=device-width,initial-scale=1">'
+        '<title>Access denied</title><body style="font:1rem system-ui;'
+        'max-width:40rem;margin:10vh auto;padding:1rem">'
+        '<h1>Access denied / دسترسی مجاز نیست</h1>'
+        '<p>Your current role does not allow this page.</p>'
+        '<a href="/access-denied">Account access</a></body></html>',
+        status_code=403, headers={"Cache-Control": "no-store"},
+    )
 
 
 async def web_auth_middleware(request: Request, call_next, db):
     path = request.url.path
-    if not web_route(path):
+    if not web_route(path, request.method):
         return await call_next(request)
     payload = verify_session(request.cookies.get(SESSION_COOKIE, ""))
     row = await run_in_threadpool(db.get_web_user_by_id, payload["uid"]) if payload else None
     if row is None or not row["is_active"]:
-        if path in {"/app", "/analytics", "/knowledge-base", "/knowledge-base/"}:
+        if not path.startswith("/api/") and not path.startswith("/knowledge-base/api/"):
             return RedirectResponse("/", status_code=303)
         return JSONResponse({"detail": "Not authenticated"}, status_code=401)
     request.state.web_user = CurrentWebUser(
         row["id"], row["username"], row.get("full_name"), row.get("role")
     )
+    if (request.method, path) not in {
+        ("GET", "/api/auth/me"), ("POST", "/api/auth/logout"),
+        ("GET", "/access-denied"),
+    }:
+        permission = route_permission(request.method, path)
+        if permission is None or permission not in permissions_for(row.get("role")):
+            if not path.startswith("/api/") and not path.startswith("/knowledge-base/api/"):
+                return forbidden_page()
+            return JSONResponse(
+                {"detail": "Permission denied", "required_permission": permission},
+                status_code=403, headers={"Cache-Control": "no-store"},
+            )
     if request.method in UNSAFE_METHODS:
         csrf = request.cookies.get(CSRF_COOKIE, "")
         header = request.headers.get("X-CSRF-Token", "")

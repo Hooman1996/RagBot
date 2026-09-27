@@ -7,24 +7,12 @@
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}">
+    <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}">
     <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
 </head>
 <body>
 
 <div class="app-shell">
-
-    <div class="top-controls">
-        <button type="button" onclick="webLogout()" title="Log out">Log out</button>
-        <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode">
-            <span class="toggle-icon">🌙</span>
-        </button>
-
-        <div class="lang-toggle-container" id="langToggleContainer">
-            <button class="lang-option" data-lang="fa" id="langFaBtn">FA</button>
-            <span class="lang-separator">|</span>
-            <button class="lang-option" data-lang="en" id="langEnBtn">EN</button>
-        </div>
-    </div>
 
     <div class="sidebar">
 
@@ -41,13 +29,13 @@
                 <span data-i18n="nav_chat">Chat</span>
             </a>
 
-            <a href="/knowledge-base" class="sidebar__nav-item">
+            {% if 'kb_page' in permissions %}<a href="/knowledge-base" class="sidebar__nav-item">
                 <span data-i18n="nav_knowledge">Knowledge</span>
-            </a>
+            </a>{% endif %}
 
-            <a href="/analytics" class="sidebar__nav-item">
+            {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">
                 <span data-i18n="nav_analytics">Analytics</span>
-            </a>
+            </a>{% endif %}
         </div>
 
         <div class="sidebar__section" style="padding: 0.75rem 0.85rem 0.4rem;">
@@ -79,6 +67,18 @@
             <div class="topbar__title" data-i18n="topbar_title">Main Chat Interface</div>
 
             <div class="topbar__actions">
+                <div class="web-header-controls">
+                    {% set logout_label = "Log out" %}{% set logout_localized = true %}{% include "_logout_button.html" %}
+                    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">
+                        <span class="toggle-icon">🌙</span>
+                    </button>
+                    <div class="lang-toggle-container" id="langToggleContainer">
+                        <button class="lang-option" data-lang="fa" id="langFaBtn">FA</button>
+                        <span class="lang-separator">|</span>
+                        <button class="lang-option" data-lang="en" id="langEnBtn">EN</button>
+                    </div>
+                </div>
+
                 <div class="status-chip">
                     <div id="healthDot" class="dot"></div>
                     <span data-i18n="system_status">System Status</span>
@@ -117,7 +117,7 @@
                         </div>
                     </div>
 
-                    <div class="batch-processing-container"
+                    {% if 'batch' in permissions %}<div class="batch-processing-container"
                          style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 0 4px;">
                         <input type="file" id="batch-file-input" accept=".csv, .xlsx, .xls" style="display: none;"/>
 
@@ -134,7 +134,7 @@
                         <span id="batch-status" style="font-size: 0.8rem; color: #64748b; display: none;">
                             ⏳ در حال پردازش فایل، لطفا شکیبا باشید...
                         </span>
-                    </div>
+                    </div>{% endif %}
 
                 </div>
             </div>
@@ -197,6 +197,10 @@
     const langEnBtn = document.getElementById('langEnBtn');
 
     function updateLangToggleUI() {
+        const logoutLabel = I18N.t('logout');
+        const logoutButton = document.querySelector('.web-logout');
+        logoutButton.title = logoutLabel;
+        logoutButton.setAttribute('aria-label', logoutLabel);
         if (I18N.lang === 'fa') {
             langFaBtn.classList.add('active');
             langEnBtn.classList.remove('active');

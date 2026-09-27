@@ -338,7 +338,7 @@
           btnText.textContent = isFa ? 'دسترسی تأیید شد ✓' : 'Access Granted ✓';
           btn.classList.remove('btn--loading');
           btn.classList.add('btn--success');
-          setTimeout(() => { window.location.href = '/app'; }, 800);
+          setTimeout(() => { window.location.href = result.landing_path; }, 800);
         } else {
           throw new Error(result.message || (isFa ? 'اطلاعات نادرست است. لطفاً دوباره تلاش کنید.' : 'Invalid credentials. Please try again.'));
         }

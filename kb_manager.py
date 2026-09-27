@@ -15,6 +15,7 @@ import psycopg2
 import psycopg2.extras
 from parsivar import Normalizer
 from frontend_paths import TEMPLATE_DIR
+from web_permissions import permissions_for
 from new_architecture.knowledge_update import (
     KnowledgeChunkNotFound,
     KnowledgeUpdateCoordinator,
@@ -219,7 +220,8 @@ def extract_qa_components(content: str) -> dict:
 
 @router.get("/", response_class=HTMLResponse)
 async def serve_kb_page(request: Request):
-    return templates.TemplateResponse("kb_manager.html", {"request": request})
+    return templates.TemplateResponse("kb_manager.html", {"request": request,
+                                                          "permissions": permissions_for(request.state.web_user.role)})
 
 
 @router.get("/api/documents")

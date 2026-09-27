@@ -8,15 +8,13 @@
     <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
     <link rel="stylesheet" href="{{ url_for('static', path='css/analytics.css') }}" />
+    <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}" />
     <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
 </head>
 <body>
 
 <div class="app-shell">
 
-    <button type="button" onclick="webLogout()" title="Log out">Log out</button>
-    <!-- Theme Toggle Button -->
-    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode">🌙</button>
 
     <!-- SIDEBAR (same structure as index.html) -->
     <div class="sidebar">
@@ -30,12 +28,12 @@
         </div>
 
         <div class="sidebar__nav">
-            <a href="/app" class="sidebar__nav-item">
+            {% if 'chat' in permissions %}<a href="/app" class="sidebar__nav-item">
                 <span>Chat</span>
-            </a>
-            <a href="/app" class="sidebar__nav-item">
+            </a>{% endif %}
+            {% if 'kb_page' in permissions %}<a href="/knowledge-base" class="sidebar__nav-item">
                 <span>Knowledge</span>
-            </a>
+            </a>{% endif %}
             <a href="/analytics" class="sidebar__nav-item active">
                 <span>Analytics</span>
             </a>
@@ -49,6 +47,10 @@
         <div class="topbar">
             <div class="topbar__title">Analytics Dashboard</div>
             <div class="topbar__actions">
+                <div class="web-header-controls">
+                    {% set logout_label = "Log out" %}{% include "_logout_button.html" %}
+                    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">🌙</button>
+                </div>
                 <select id="timeRange" class="analytics-select">
                     <option value="30">Last 30 days</option>
                     <option value="14">Last 14 days</option>

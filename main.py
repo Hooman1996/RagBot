@@ -71,6 +71,7 @@ from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
+from web_permissions import permissions_for
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
                       set_cookies, clear_cookies, web_auth_middleware, safe_user,
                       validate_config, job_access_token, valid_job_access)
@@ -589,8 +590,12 @@ async def login(req: LoginRequest, request: Request):
         wait_for_completion_on_cancel=True,
     )
     if user:
+        current = await blocking_runner.run(db_manager.get_web_user_by_id, user["id"])
+        if not current or not current["is_active"]:
+            raise HTTPException(status_code=401, detail="Invalid credentials")
         session, csrf = create_web_session(user["id"])
-        response = JSONResponse({"success": True, "user": safe_user(user)})
+        safe = safe_user(current)
+        response = JSONResponse({"success": True, "user": safe, "landing_path": safe["landing_path"]})
         set_cookies(response, session, csrf)
         return response
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
@@ -615,12 +620,20 @@ async def home(request: Request):
 
 @app.get("/app", response_class=HTMLResponse)
 async def app_page(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request})
+    return templates.TemplateResponse("index.html", {"request": request,
+                                                      "permissions": permissions_for(request.state.web_user.role)})
 
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
-    return templates.TemplateResponse("analytics.html", {"request": request})
+    return templates.TemplateResponse("analytics.html", {"request": request,
+                                                          "permissions": permissions_for(request.state.web_user.role)})
+
+
+@app.get("/access-denied", response_class=HTMLResponse)
+async def access_denied_page(request: Request):
+    return templates.TemplateResponse("access_denied.html", {"request": request},
+                                      headers={"Cache-Control": "no-store"})
 
 
 # ----------------------------------------------------------------------

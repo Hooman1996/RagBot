@@ -113,7 +113,7 @@ document.addEventListener('DOMContentLoaded', () => {
         actionRow.className = 'flex justify-between items-center bg-slate-950/60 p-4 border border-slate-800 rounded-xl mb-4';
         actionRow.innerHTML = `
             <div class="text-xs font-semibold text-slate-400">عملیات جاری سند:</div>
-            <button id="global-add-chunk-trigger" class="bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/10">
+            <button id="global-add-chunk-trigger" class="kb-write-action bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/10">
                 ➕ افزودن تکه داده جدید به سند
             </button>
         `;
@@ -228,10 +228,10 @@ document.addEventListener('DOMContentLoaded', () => {
                         <button id="history-btn-${chunk.id}" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
                             ⏳ تاریخچه نسخ
                         </button>
-                        <button id="delete-btn-${chunk.id}" class="bg-red-950/40 hover:bg-red-600 border border-red-900 text-red-400 hover:text-white px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
+                        <button id="delete-btn-${chunk.id}" class="kb-write-action bg-red-950/40 hover:bg-red-600 border border-red-900 text-red-400 hover:text-white px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
                             🗑 حذف قطعی
                         </button>
-                        <button id="sync-btn-${chunk.id}" class="bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs transition-all shadow-lg shadow-emerald-600/10 flex items-center gap-1.5">
+                        <button id="sync-btn-${chunk.id}" class="kb-write-action bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs transition-all shadow-lg shadow-emerald-600/10 flex items-center gap-1.5">
                             💾 همگام‌سازی برداری
                         </button>
                     </div>
@@ -358,7 +358,7 @@ document.addEventListener('DOMContentLoaded', () => {
                         ${textSnippet}
                     </div>
                 </div>
-                <button id="revert-btn-${ver.id}" class="bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-md mt-2 md:mt-0 transition-all active:scale-95 whitespace-nowrap">
+                <button id="revert-btn-${ver.id}" class="kb-write-action bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-md mt-2 md:mt-0 transition-all active:scale-95 whitespace-nowrap">
                     ◄ بازگردانی به این نسخه
                 </button>
             `;
