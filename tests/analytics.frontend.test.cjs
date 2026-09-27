@@ -4,7 +4,9 @@ const fs = require('node:fs');
 const vm = require('node:vm');
 const path = require('node:path');
 
-const script = fs.readFileSync(path.join(__dirname, '..', 'static/js/analytics.js'), 'utf8');
+const servedBundle = process.env.ANALYTICS_SERVED_BUNDLE
+  ? JSON.parse(fs.readFileSync(process.env.ANALYTICS_SERVED_BUNDLE, 'utf8')) : null;
+const script = servedBundle?.script || fs.readFileSync(path.join(__dirname, '..', 'static/js/analytics.js'), 'utf8');
 
 class Element {
   constructor(tag, document, id = '') {
@@ -18,6 +20,9 @@ class Element {
     this.hidden = false;
     this.textContent = '';
     this.parentElement = null;
+    this.dataset = {};
+    const classes = new Set();
+    this.classList = { add: (value) => classes.add(value), remove: (value) => classes.delete(value), contains: (value) => classes.has(value) };
     document.nodes.push(this);
   }
   appendChild(child) { child.parentElement = this; this.children.push(child); return child; }
@@ -28,7 +33,7 @@ class Element {
   addEventListener() {}
 }
 
-function makeDashboard(responseFactory) {
+function makeDashboard(responseFactory, options = {}) {
   const document = {
     nodes: [], readyState: 'complete',
     body: { classList: { contains: () => false } },
@@ -40,31 +45,38 @@ function makeDashboard(responseFactory) {
       return [];
     },
   };
-  const ids = ['timeRange', 'refreshAnalytics', 'analyticsStatus', 'analyticsTimezone', 'kpiRow',
+  const ids = ['analyticsRoot', 'timeRange', 'refreshAnalytics', 'analyticsStatus', 'analyticsTimezone', 'kpiRow',
     'queriesDayMeta', 'feedbackMeta', 'depthMeta', 'durationMeta', 'usersDayMeta', 'statesMeta',
     'weeklyMeta', 'heatmapMeta', 'heatmapContainer', 'heatmapSummary', 'heatmapDetails'];
-  ids.forEach((id) => new Element('div', document, id));
+  ids.filter((id) => !options.omitNewNodes || !['analyticsStatus', 'heatmapSummary', 'heatmapDetails'].includes(id))
+    .forEach((id) => new Element('div', document, id));
   document.getElementById('timeRange').value = '7';
-  for (const id of ['chartQueriesDay', 'chartFeedback', 'chartDepth', 'chartDuration', 'chartUsersDay', 'chartStates', 'chartWeekly']) {
+  document.getElementById('analyticsRoot').dataset.analyticsContract = options.contract || 'main-analytics/v3';
+  for (const id of options.cardIds || ['chartQueriesDay', 'chartFeedback', 'chartDepth', 'chartDuration', 'chartUsersDay', 'chartStates', 'chartWeekly']) {
     const card = new Element('div', document);
     card.className = 'chart-card';
     card.appendChild(new Element('canvas', document, id));
   }
   const charts = [];
   class Chart {
-    constructor(canvas, config) { this.canvas = canvas; this.config = config; charts.push(this); }
+    constructor(canvas, config) {
+      if (canvas.id === options.chartErrorId) throw new Error("synthetic Chart.js failure");
+      this.canvas = canvas; this.config = config; charts.push(this);
+    }
     destroy() {}
   }
-  const context = { document, Chart, fetch: responseFactory, window: { Chart }, console };
+  const errors = [];
+  const safeConsole = { error: (...args) => errors.push(args) };
+  const context = { document, Chart, fetch: responseFactory, window: { Chart }, console: safeConsole };
   vm.runInNewContext(script, context);
-  return { document, charts, window: context.window };
+  return { document, charts, errors, window: context.window };
 }
 
 const tick = () => new Promise((resolve) => setImmediate(resolve));
 function payload(total) {
   const labels = ['2026-09-21'];
   return {
-    meta: { days: 7, timezone: 'UTC', start: '2026-09-21T00:00:00Z', end: '2026-09-27T10:00:00Z' },
+    meta: { contract_version: 'main-analytics/v3', days: 7, timezone: 'UTC', start: '2026-09-21T00:00:00Z', end: '2026-09-27T10:00:00Z' },
     kpis: { total_queries: total, active_users: total, avg_completion_seconds: total ? 3 : null,
       completion_measured: total, completed_queries: total, rated_responses: 0, documents_indexed: 1 },
     queries_per_day: { labels, data: [total], total },
@@ -85,6 +97,7 @@ test('new charts, rated denominator, and keyboard-readable heatmap render', asyn
   assert.deepEqual(view.charts.map((c) => c.canvas.id), ['chartQueriesDay', 'chartFeedback', 'chartDepth', 'chartDuration', 'chartUsersDay', 'chartStates', 'chartWeekly']);
   assert.match(view.document.getElementById('feedbackMeta').textContent, /0 rated responses \/ 2 queries/);
   assert.match(view.document.getElementById('analyticsTimezone').textContent, /Timezone: UTC/);
+  assert.equal(view.window._analyticsDashboard.contractVersion, 'main-analytics/v3');
   assert.equal(view.document.getElementById('heatmapDetails').hidden, false);
   const table = view.document.getElementById('heatmapSummary').children[0];
   assert.equal(table.tagName, 'table');
@@ -108,3 +121,80 @@ test('empty activity, unavailable duration, and failed load remain distinct', as
   assert.match(view.document.getElementById('analyticsStatus').textContent, /could not be loaded/);
   assert.equal(view.document.getElementById('chartFeedback').parentElement.children.at(-1).className, 'chart-message chart-message--error');
 });
+
+
+test('HTML or API contract mismatch shows one actionable error', async () => {
+  let fetched = false;
+  const staleHtml = makeDashboard(async () => { fetched = true; return { ok: true, json: async () => payload(2) }; }, { contract: 'old-contract' });
+  await tick();
+  assert.equal(fetched, false);
+  assert.equal(staleHtml.charts.length, 0);
+  assert.equal(staleHtml.document.getElementById('analyticsRoot').classList.contains('contract-mismatch'), true);
+  assert.match(staleHtml.document.getElementById('analyticsStatus').textContent, /Reload this page/);
+  const olderHtml = makeDashboard(async () => { throw Error('should not fetch'); }, { contract: 'old-contract', omitNewNodes: true });
+  await tick();
+  assert.match(olderHtml.document.getElementById('analyticsStatus').textContent, /Reload this page/);
+  const oldApi = payload(2);
+  oldApi.meta.contract_version = 'old-contract';
+  const staleApi = makeDashboard(async () => ({ ok: true, json: async () => oldApi }));
+  await tick();
+  assert.equal(staleApi.charts.length, 0);
+  assert.equal(staleApi.document.getElementById('analyticsRoot').classList.contains('contract-mismatch'), true);
+  assert.match(staleApi.document.getElementById('analyticsStatus').textContent, /version mismatch/);
+});
+
+test('chart construction failure names the card and leaves other cards visible', async () => {
+  const view = makeDashboard(async () => ({ ok: true, json: async () => payload(2) }), { chartErrorId: 'chartFeedback' });
+  await tick();
+  assert.equal(view.charts.length, 6);
+  assert.match(view.document.getElementById('chartFeedback').parentElement.children.at(-1).textContent, /could not be rendered/);
+  assert.ok(view.errors.some((args) => args.includes('chartFeedback')));
+  assert.ok(view.charts.some((chart) => chart.canvas.id === 'chartWeekly'));
+});
+
+if (servedBundle) {
+  test('render path uses served HTML, versioned JS, and actual API contract for populated and empty data', async () => {
+    assert.match(servedBundle.html, /data-analytics-contract="main-analytics\/v3"/);
+    assert.deepEqual(servedBundle.cardIds, ['chartQueriesDay', 'chartFeedback', 'chartDepth', 'chartDuration', 'chartUsersDay', 'chartStates', 'chartWeekly']);
+    for (const [data, populated] of [[servedBundle.populated, true], [servedBundle.empty, false]]) {
+      assert.equal(data.meta.contract_version, 'main-analytics/v3');
+      const view = makeDashboard(async () => ({ ok: true, json: async () => data }), { cardIds: servedBundle.cardIds });
+      await tick();
+      const weekly = view.document.getElementById('chartWeekly');
+      const heatmap = view.document.getElementById('heatmapContainer');
+      if (populated) {
+        assert.ok(data.kpis.total_queries > 0);
+        assert.equal(view.charts.length, 7);
+        assert.equal(view.document.getElementById('heatmapDetails').hidden, false);
+        assert.equal(view.document.getElementById('heatmapSummary').children[0].tagName, 'table');
+        assert.ok(view.charts.some((chart) => chart.canvas.id === weekly.id));
+      } else {
+        assert.equal(data.kpis.total_queries, 0);
+        assert.equal(view.charts.length, 0);
+        assert.match(weekly.parentElement.children.at(-1).textContent, /No query activity/);
+        assert.match(heatmap.children[0].textContent, /No query activity/);
+      }
+      assert.doesNotMatch(view.document.getElementById('analyticsStatus').textContent, /version mismatch|could not be loaded/);
+    }
+  });
+}
+
+if (servedBundle) {
+  test('served HTML bootstrap rejects stale or missing browser script', () => {
+    for (const dashboard of [undefined, { reload() {} }]) {
+      const classes = new Set();
+      const root = { dataset: { analyticsContract: 'main-analytics/v3' },
+        classList: { add: (value) => classes.add(value) } };
+      const status = { textContent: '' };
+      const document = { getElementById: (id) => id === 'analyticsRoot' ? root : status };
+      const errors = [];
+      vm.runInNewContext(servedBundle.bootstrap, {
+        document, window: { _analyticsDashboard: dashboard },
+        console: { error: (...args) => errors.push(args) },
+      });
+      assert.equal(classes.has('contract-mismatch'), true);
+      assert.match(status.textContent, /Reload this page/);
+      assert.equal(errors.length, 1);
+    }
+  });
+}

@@ -22,6 +22,8 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from frontend_paths import PROJECT_DIR, STATIC_DIR, TEMPLATE_DIR
+from analytics_metrics import ANALYTICS_CONTRACT_VERSION
+from versioned_assets import VERSIONED_ASSETS, VersionedStaticFiles, asset_digest, asset_integrity, versioned_asset
 
 
 AUDIT_SCRIPT = PROJECT_DIR / "scripts" / "audit_offline_frontend.py"
@@ -62,12 +64,14 @@ class AssetParser(HTMLParser):
 
 
 def _test_app() -> Starlette:
-    return Starlette(routes=[Mount("/static", app=StaticFiles(directory=str(STATIC_DIR)), name="static")])
+    return Starlette(routes=[Mount("/static", app=VersionedStaticFiles(directory=str(STATIC_DIR)), name="static")])
 
 
 def _render_templates() -> dict[str, str]:
     app = _test_app()
     templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
+    templates.env.globals["versioned_asset"] = versioned_asset
+    templates.env.globals["asset_integrity"] = asset_integrity
     rendered: dict[str, str] = {}
     for name, path in TEMPLATE_PATHS.items():
         scope = {
@@ -85,7 +89,8 @@ def _render_templates() -> dict[str, str]:
             "app": app,
         }
         request = Request(scope)
-        rendered[name] = templates.get_template(name).render(request=request)
+        rendered[name] = templates.get_template(name).render(
+            request=request, analytics_contract_version=ANALYTICS_CONTRACT_VERSION)
     return rendered
 
 
@@ -98,7 +103,13 @@ def _static_path(target: str) -> Path | None:
     path = unquote(parsed.path)
     if not path.startswith("/static/"):
         return None
-    candidate = (STATIC_DIR / path.removeprefix("/static/")).resolve()
+    relative = path.removeprefix("/static/")
+    if relative.startswith("_v/"):
+        parts = relative.split("/", 2)
+        assert len(parts) == 3 and parts[2] in VERSIONED_ASSETS
+        assert parts[1] == asset_digest(parts[2]), f"stale fingerprint in {target}"
+        relative = parts[2]
+    candidate = (STATIC_DIR / relative).resolve()
     assert candidate.is_relative_to(STATIC_DIR.resolve()), f"static path traversal: {target}"
     return candidate
 

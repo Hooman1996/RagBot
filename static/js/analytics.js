@@ -1,6 +1,7 @@
 (function () {
   "use strict";
 
+  const CONTRACT_VERSION = "main-analytics/v3";
   const charts = [];
   let requestNumber = 0;
   const number = (value) => Number(value).toLocaleString();
@@ -29,7 +30,10 @@
 
   function plot(id, type, labels, datasets, total, options = {}) {
     if (!total) return panelMessage(id, "No query activity in this period.", "empty");
-    if (!window.Chart) return panelMessage(id, "Chart library unavailable.", "error");
+    if (!window.Chart) {
+      console.error("Analytics Chart.js unavailable for", id);
+      return panelMessage(id, "Chart library unavailable.", "error");
+    }
     const canvas = $(id);
     const colors = theme();
     const cfg = {
@@ -51,8 +55,9 @@
     };
     try {
       charts.push(new Chart(canvas, { type, data: { labels, datasets }, options: cfg }));
-    } catch (_) {
-      panelMessage(id, "Chart could not be rendered.", "error");
+    } catch (error) {
+      console.error("Analytics chart construction failed", id, error?.name || "Error", error?.message || "unknown error");
+      panelMessage(id, "Chart could not be rendered. Reload this page or contact support.", "error");
     }
   }
 
@@ -206,8 +211,32 @@
     renderHeatmap(d.heatmap);
   }
 
+  function showVersionMismatch(htmlVersion, apiVersion) {
+    clearCharts();
+    const root = $("analyticsRoot");
+    root?.classList.add("contract-mismatch");
+    let status = $("analyticsStatus");
+    if (!status && root) {
+      status = document.createElement("p");
+      status.id = "analyticsStatus";
+      status.className = "analytics-status";
+      status.setAttribute("role", "alert");
+      root.appendChild(status);
+    }
+    if (status) status.textContent =
+      "Analytics version mismatch. Reload this page (Ctrl+Shift+R); if it persists, clear this site's cache or contact support.";
+    console.error("Analytics contract mismatch", { html: htmlVersion, script: CONTRACT_VERSION, api: apiVersion });
+  }
+
   async function render() {
     const thisRequest = ++requestNumber;
+    const root = $("analyticsRoot");
+    const htmlVersion = root?.dataset?.analyticsContract;
+    if (htmlVersion !== CONTRACT_VERSION) {
+      showVersionMismatch(htmlVersion, null);
+      return;
+    }
+    root.classList.remove("contract-mismatch");
     clearCharts();
     $("kpiRow").replaceChildren();
     $("heatmapContainer").textContent = "Loading…";
@@ -223,11 +252,16 @@
       if (!response.ok) throw new Error("analytics request failed");
       const data = await response.json();
       if (thisRequest !== requestNumber) return;
+      if (data.meta?.contract_version !== CONTRACT_VERSION) {
+        showVersionMismatch(htmlVersion, data.meta?.contract_version);
+        return;
+      }
       clearCharts();
       renderData(data);
       message("analyticsStatus", `Analytics loaded for ${days} days in UTC.`);
-    } catch (_) {
+    } catch (error) {
       if (thisRequest !== requestNumber) return;
+      console.error("Analytics load/render failed", error?.name || "Error", error?.message || "unknown error");
       clearCharts();
       $("kpiRow").replaceChildren();
       message("analyticsTimezone", "");
@@ -247,5 +281,5 @@
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
-  window._analyticsDashboard = { reload: render };
+  window._analyticsDashboard = { reload: render, contractVersion: CONTRACT_VERSION };
 })();

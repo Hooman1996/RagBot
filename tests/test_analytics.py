@@ -138,6 +138,7 @@ def test_mixed_votes_depth_boundaries_timezone_and_incomplete(postgres_connect):
     assert data["meta"]["start"] == "2026-09-21T00:00:00Z"
     assert data["meta"]["end"] == "2026-09-27T10:00:00Z"
     assert data["meta"]["timezone"] == "UTC"
+    assert data["meta"]["contract_version"] == "main-analytics/v3"
     assert data["kpis"]["total_queries"] == 4
     assert data["kpis"]["active_users"] == 2
     assert data["feedback_outcomes"]["data"] == [1, 1, 2]
@@ -203,6 +204,7 @@ def test_api_range_shape_and_role_boundary(setup, monkeypatch, postgres_connect)
                 assert response.status_code == 200
                 assert response.json()["meta"]["days"] == days
                 assert response.json()["meta"]["timezone"] == "UTC"
+                assert response.json()["meta"]["contract_version"] == "main-analytics/v3"
                 assert set(response.json()) == {"meta", "kpis", "queries_per_day", "users_per_day",
                                                 "feedback_outcomes", "conversation_depth", "completion_duration",
                                                 "query_states", "heatmap", "weekly_comparison"}

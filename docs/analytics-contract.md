@@ -54,3 +54,45 @@ Run focused verification with:
 /root/miniconda3/envs/faq/bin/python -m pytest -q tests/test_analytics.py
 node --test tests/analytics.frontend.test.cjs
 ```
+
+## Step 3 repair: browser release coherence
+
+The API metadata carries `contract_version: "main-analytics/v3"`. The protected
+HTML declares the same value, and the dashboard script checks both values before
+rendering. A mismatch shows one reload/cache-clear instruction; a chart-specific
+construction failure names the affected card and records a non-content error in
+the console. The HTML also checks the script handshake so a missing or stale
+script cannot leave a half-rendered dashboard.
+
+First-party CSS and JavaScript on `/analytics` use paths of the form
+`/static/_v/<SHA-256 digest>/js/analytics.js`. The static handler verifies the
+requested digest against the bytes it serves; mismatches return 404. Matching
+assets are immutable under their unique URLs and carry browser Subresource
+Integrity, so stale bytes under a new URL cannot execute. The protected HTML uses
+`Cache-Control: no-store`; vendor Chart.js remains local. The three-column grid
+is filled at desktop width, the third card spans both columns at medium width,
+and all cards stack at narrow width.
+
+For a manual browser release check at [http://localhost:7000/analytics](http://localhost:7000/analytics):
+
+1. Sign in as a development `admin` or `analytics_viewer`. In DevTools Network,
+   inspect the `/analytics` document: it must revalidate with `no-store` and its
+   script URL must include `_v/<64 hexadecimal characters>/js/analytics.js`.
+   Open that exact URL in DevTools Sources; it must contain
+   `main-analytics/v3`, `chartFeedback`, and `chartWeekly`, and must not contain
+   `Heatmap data unavailable`.
+2. Confirm the fingerprinted script and CSS requests return 200 or a cached
+   response for the **same fingerprinted URL**, with immutable caching. Inspect
+   `/api/analytics?days=7`, `14`, and `30`: each must return `meta.contract_version`
+   equal to the HTML/script version. Do not copy response bodies containing
+   account data into reports.
+3. For each filter, confirm all five KPIs plus Queries per day, Feedback outcomes,
+   Conversation depth, Completion duration, Users who queried per day, Query
+   states, Weekday comparison, and Weekday × hour activity show either a chart
+   or an explicit empty/unavailable state. The heatmap's count table opens by
+   keyboard. At desktop width the Query states and Weekday comparison cards fill
+   their row; at medium width the third card in the depth/duration/users row
+   spans both columns; at narrow width cards stack without a blank slot.
+4. A forced API failure should show a load error in every card. A stale API
+   contract or stale/missing script should show one version-mismatch instruction.
+   Use a hard reload (`Ctrl+Shift+R`) after updating the branch.

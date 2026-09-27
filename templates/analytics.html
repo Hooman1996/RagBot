@@ -5,11 +5,11 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Analytics – Negah Bank AI</title>
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', path='css/base.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', path='css/app.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', path='css/analytics.css') }}" />
-    <link rel="stylesheet" href="{{ url_for('static', path='css/web_controls.css') }}" />
-    <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/base.css') }}" integrity="{{ asset_integrity('css/base.css') }}" crossorigin="anonymous" />
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/app.css') }}" integrity="{{ asset_integrity('css/app.css') }}" crossorigin="anonymous" />
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/analytics.css') }}" integrity="{{ asset_integrity('css/analytics.css') }}" crossorigin="anonymous" />
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous" />
+    <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
 <body>
 
@@ -63,7 +63,7 @@
             </div>
         </div>
 
-        <div class="analytics-page" id="analyticsRoot">
+        <div class="analytics-page" id="analyticsRoot" data-analytics-contract="{{ analytics_contract_version }}">
             <p id="analyticsStatus" class="analytics-status" role="status" aria-live="polite">Loading analytics…</p>
             <p id="analyticsTimezone" class="analytics-meta"></p>
 
@@ -84,7 +84,7 @@
                 </div>
             </div>
 
-            <div class="chart-row">
+            <div class="chart-row three-cards">
                 <div class="chart-card">
                     <p class="chart-card__title">Conversation depth</p>
                     <p class="chart-card__meta" id="depthMeta"></p>
@@ -143,6 +143,20 @@
   });
 </script>
 <script src="{{ url_for('static', path='vendor/chart.js/4.5.1/chart.umd.js') }}"></script>
-<script src="{{ url_for('static', path='js/analytics.js') }}"></script>
+<script src="{{ versioned_asset(request, 'js/analytics.js') }}" integrity="{{ asset_integrity('js/analytics.js') }}" crossorigin="anonymous"></script>
+<script>
+  // Detect a missing or stale dashboard script even when it cannot run its own guard.
+  (function () {
+    const root = document.getElementById('analyticsRoot');
+    const expected = root.dataset.analyticsContract;
+    const actual = window._analyticsDashboard?.contractVersion;
+    if (actual !== expected) {
+      root.classList.add('contract-mismatch');
+      document.getElementById('analyticsStatus').textContent =
+        "Analytics version mismatch. Reload this page (Ctrl+Shift+R); if it persists, clear this site's cache or contact support.";
+      console.error('Analytics browser script version mismatch', { expected, actual: actual || 'missing' });
+    }
+  })();
+</script>
 </body>
 </html>

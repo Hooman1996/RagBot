@@ -22,7 +22,6 @@ from contextlib import asynccontextmanager
 from typing import List, Optional
 
 from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, Query, status
-from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.background import BackgroundTasks
@@ -71,6 +70,8 @@ from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
+from versioned_assets import VersionedStaticFiles, asset_integrity, versioned_asset
+from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
 from web_permissions import permissions_for
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
                       set_cookies, clear_cookies, web_auth_middleware, safe_user,
@@ -515,7 +516,9 @@ async def request_trace_middleware(request: Request, call_next):
         reset_current_trace(token)
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
-app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
+templates.env.globals["versioned_asset"] = versioned_asset
+templates.env.globals["asset_integrity"] = asset_integrity
+app.mount("/static", VersionedStaticFiles(directory=str(STATIC_DIR)), name="static")
 
 # Mount API Routers
 app.include_router(kb_router)
@@ -627,7 +630,10 @@ async def app_page(request: Request):
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
     return templates.TemplateResponse("analytics.html", {"request": request,
-                                                          "permissions": permissions_for(request.state.web_user.role)})
+                                                          "permissions": permissions_for(request.state.web_user.role),
+                                                          "analytics_contract_version": ANALYTICS_CONTRACT_VERSION},
+                                      headers={"Cache-Control": "private, no-store, max-age=0",
+                                               "Pragma": "no-cache", "Vary": "Cookie"})
 
 
 @app.get("/access-denied", response_class=HTMLResponse)
@@ -1557,7 +1563,6 @@ def _mass_answer_media_type(ext: str) -> str:
 # Main chatbot analytics (aggregate-only; authorization is enforced by
 # web_auth_middleware using the Step 2 analytics permission).
 # ----------------------------------------------------------------------
-from analytics_metrics import aggregate_analytics
 
 
 @app.get("/api/analytics")

@@ -252,6 +252,7 @@
 @media (max-width: 900px) {
   .chart-card.wide, .chart-card.extra-wide { grid-column: span 1; }
   .chart-row { grid-template-columns: 1fr 1fr; }
+  .chart-row.three-cards > .chart-card:last-child { grid-column: span 2; }
   .kpi-row { grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); }
   .analytics-page { padding: 14px 12px; }
   .hm-label { min-width: 100px; max-width: 100px; font-size: 10px; }
@@ -259,6 +260,7 @@
 }
 @media (max-width: 600px) {
   .chart-row { grid-template-columns: 1fr; }
+  .chart-row.three-cards > .chart-card:last-child { grid-column: span 1; }
   .chart-card.wide, .chart-card.extra-wide { grid-column: span 1; }
   .kpi-row { grid-template-columns: repeat(2, 1fr); }
 }
@@ -338,3 +340,9 @@
 .light-mode .analytics-status, .light-mode .analytics-meta,
 .light-mode .chart-card__meta, .light-mode .kpi-card__detail,
 .light-mode .heatmap-details, .light-mode .analytics-range-label { color: #4b5563; }
+
+/* A contract mismatch is one actionable page error, never half-rendered charts. */
+.analytics-page.contract-mismatch .kpi-row,
+.analytics-page.contract-mismatch .chart-row,
+.analytics-page.contract-mismatch .global-error { display: none; }
+.analytics-page.contract-mismatch .analytics-status { color: #f87171; font-weight: 600; }

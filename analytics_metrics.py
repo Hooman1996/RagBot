@@ -7,6 +7,8 @@ are therefore naive UTC, and only aggregate result rows leave this module.
 from datetime import datetime, time, timedelta, timezone
 
 
+ANALYTICS_CONTRACT_VERSION = "main-analytics/v3"
+
 WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
 HOURS = [f"{hour:02d}:00" for hour in range(24)]
 DEPTH_LABELS = ["1", "2–4", "5–9", "10+"]
@@ -144,6 +146,7 @@ def aggregate_analytics(db_manager, days, now=None):
               for name, count in states if count]
     return {
         "meta": {
+            "contract_version": ANALYTICS_CONTRACT_VERSION,
             "days": days, "timezone": "UTC",
             "start": start.isoformat() + "Z", "end": end.isoformat() + "Z",
             "weekly_independent": True,
