@@ -200,7 +200,7 @@ const Sessions = {
         list.innerHTML = sessions.map(s => `
       <div class="sidebar__chat-item ${s.id === this.currentSessionId ? 'sidebar__chat-item--active' : ''}"
            data-id="${s.id}">
-        <div class="sidebar__chat-item__icon">${s.is_pinned ? '📌' : '💬'}</div>
+        <div class="sidebar__chat-item__icon">${`<svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#${s.is_pinned ? 'pin' : 'chat'}"></use></svg>`}</div>
         <div class="sidebar__chat-item__content" onclick="Sessions.select('${s.id}')">
           <div class="sidebar__chat-item__title">${s.title || 'Untitled Chat'}</div>
           <div class="sidebar__chat-item__meta">
@@ -208,20 +208,20 @@ const Sessions = {
           </div>
         </div>
         <div class="sidebar__chat-item__actions">
-          <button class="sidebar__chat-item__menu-btn" onclick="Sessions.toggleMenu(event, '${s.id}')">
+          <button class="sidebar__chat-item__menu-btn" onclick="Sessions.toggleMenu(event, '${s.id}')" aria-label="Session actions" title="Session actions">
             ⋮
           </button>
           <div class="sidebar__chat-item__menu" id="menu-${s.id}">
             <button class="sidebar__chat-item__menu-item" onclick="Sessions.pinSession(event, '${s.id}')">
-              <span class="menu-icon">${s.is_pinned ? '📍' : '📌'}</span>
+              <span class="menu-icon">${`<svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#${s.is_pinned ? 'unpin' : 'pin'}"></use></svg>`}</span>
               <span>${s.is_pinned ? I18N.t('session_unpin') : I18N.t('session_pin')}</span>
             </button>
             <button class="sidebar__chat-item__menu-item" onclick="Sessions.downloadSession(event, '${s.id}')">
-              <span class="menu-icon">⬇️</span>
+              <span class="menu-icon"><svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#download"></use></svg></span>
               <span>${I18N.t('session_download')}</span>
             </button>
             <button class="sidebar__chat-item__menu-item sidebar__chat-item__menu-item--danger" onclick="Sessions.deleteSession(event, '${s.id}')">
-              <span class="menu-icon">🗑️</span>
+              <span class="menu-icon"><svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#delete"></use></svg></span>
               <span>${I18N.t('session_delete')}</span>
             </button>
           </div>

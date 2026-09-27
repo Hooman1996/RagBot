@@ -13,7 +13,7 @@ its old unversioned links until it is replaced.
 | Page | First-party files | Local vendor files | Icons |
 | --- | --- | --- | --- |
 | Login | `css/base.css`, `css/login.css`, `js/web_auth.js`, `js/api.js` | `vendor/google-fonts/fonts.css` → local Inter and JetBrains Mono WOFF2 | Inline SVG in `login.html` |
-| Chat `/app` | `css/base.css`, `css/app.css`, `css/web_controls.css`, `js/web_auth.js`, `js/i18n.js`, `js/api.js`, `js/sidebar.js`, `js/categoryFilter.js`, `js/chat.js`, `js/app.js` | local Google fonts CSS/WOFF2 | `icons.svg` for navigation, theme, logout; existing in-page controls retain their current glyphs |
+| Chat `/app` | `css/base.css`, `css/app.css`, `css/web_controls.css`, `js/web_auth.js`, `js/i18n.js`, `js/api.js`, `js/sidebar.js`, `js/categoryFilter.js`, `js/chat.js`, `js/app.js` | local Google fonts CSS/WOFF2 | `icons.svg` for navigation, theme, logout, chat history actions, and lock notice |
 | Analytics | `css/base.css`, `css/app.css`, `css/analytics.css`, `css/web_controls.css`, `js/web_auth.js`, `js/analytics.js` | local Google fonts CSS/WOFF2 and `vendor/chart.js/4.5.1/chart.umd.js` | `icons.svg` for navigation, theme, refresh, five KPIs, eight chart headings, logout |
 | Knowledge base | `css/kb_manager.css`, `css/web_controls.css`, `js/web_auth.js`, `js/kb_manager.js` | `vendor/tailwind/3.4.17/tailwind.min.css`, `vendor/vazirmatn/33.003/vazirmatn.css` → local Vazirmatn WOFF2 | `icons.svg` for back and logout |
 | Access denied | `css/base.css`, `css/web_controls.css`, `js/web_auth.js` | none | `icons.svg` for logout |

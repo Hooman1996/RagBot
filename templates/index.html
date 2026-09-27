@@ -10,7 +10,7 @@
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
-<body>
+<body data-icons-url="{{ versioned_asset(request, 'icons.svg') }}">
 
 <div class="app-shell">
 
@@ -51,10 +51,10 @@
         <div class="sidebar__history">
             <div class="sidebar__filter">
                 <select id="session-filter" class="session-filter-select">
-                    <option value="today" data-i18n="filter_today">📅 Today</option>
-                    <option value="yesterday" data-i18n="filter_yesterday">🕘 Yesterday</option>
-                    <option value="last7days" data-i18n="filter_last7">📆 Last 7 days</option>
-                    <option value="older" data-i18n="filter_older">🗄️ Older</option>
+                    <option value="today" data-i18n="filter_today">Today</option>
+                    <option value="yesterday" data-i18n="filter_yesterday">Yesterday</option>
+                    <option value="last7days" data-i18n="filter_last7">Last 7 days</option>
+                    <option value="older" data-i18n="filter_older">Older</option>
                 </select>
             </div>
 
@@ -106,7 +106,7 @@
 
                 <div class="chat-input-area">
                     <div id="lockNotice" class="lock-notice">
-                        <span class="lock-notice__icon">🔒</span>
+                        <svg class="lock-notice__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#lock"></use></svg>
                         <span class="lock-notice__text" data-i18n="lock_text">برای شروع پرسش، حداقل یک سند انتخاب کنید یا فایلی بارگذاری نمایید</span>
                     </div>
 
