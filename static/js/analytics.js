@@ -1,349 +1,251 @@
 (function () {
   "use strict";
 
-  /* ── colour helpers (theme-aware) ─────────────────── */
-  function isDark() {
-    return !document.body.classList.contains("light-mode");
+  const charts = [];
+  let requestNumber = 0;
+  const number = (value) => Number(value).toLocaleString();
+  const $ = (id) => document.getElementById(id);
+  const message = (id, value) => { if ($(id)) $(id).textContent = value; };
+  const theme = () => document.body.classList.contains("light-mode")
+    ? { text: "#4b5563", grid: "rgba(0,0,0,.08)", low: "#e0e7ff", high: "#4338ca" }
+    : { text: "#d1d5db", grid: "rgba(255,255,255,.08)", low: "#1e1e2f", high: "#818cf8" };
+
+  function clearCharts() {
+    charts.splice(0).forEach((chart) => chart.destroy());
+    document.querySelectorAll(".chart-message").forEach((node) => node.remove());
+    document.querySelectorAll(".chart-card canvas").forEach((canvas) => { canvas.hidden = false; });
   }
 
-  function palette() {
-    const d = isDark();
-    return {
-      grid: d ? "rgba(255,255,255,.07)" : "rgba(0,0,0,.08)",
-      text: d ? "#9ca3af" : "#6b7280",
-      line1: "#6366f1",
-      line2: "#22d3ee",
-      bar: "#818cf8",
-      barAlt: "#f472b6",
-      doughnut: ["#6366f1", "#22d3ee", "#f472b6", "#facc15", "#34d399"],
-      heatLow: d ? "#1e1e2f" : "#e0e7ff",
-      heatHigh: d ? "#818cf8" : "#4338ca",
-    };
+  function panelMessage(id, text, kind) {
+    const canvas = $(id);
+    if (!canvas) return;
+    canvas.hidden = true;
+    const node = document.createElement("p");
+    node.className = `chart-message chart-message--${kind}`;
+    node.setAttribute("role", kind === "error" ? "alert" : "status");
+    node.textContent = text;
+    canvas.insertAdjacentElement("afterend", node);
   }
 
-  function chartDefaults() {
-    const c = palette();
-    return {
-      responsive: true,
-      maintainAspectRatio: false,
+  function plot(id, type, labels, datasets, total, options = {}) {
+    if (!total) return panelMessage(id, "No query activity in this period.", "empty");
+    if (!window.Chart) return panelMessage(id, "Chart library unavailable.", "error");
+    const canvas = $(id);
+    const colors = theme();
+    const cfg = {
+      responsive: true, maintainAspectRatio: false,
+      indexAxis: options.horizontal ? "y" : "x",
       plugins: {
-        legend: { labels: { color: c.text, font: { size: 11 } } },
-      },
-      scales: {
-        x: { ticks: { color: c.text, font: { size: 10 } }, grid: { color: c.grid } },
-        y: { ticks: { color: c.text, font: { size: 10 } }, grid: { color: c.grid } },
+        legend: { display: datasets.length > 1 || type === "doughnut",
+                  labels: { color: colors.text } },
+        tooltip: { callbacks: { label(context) {
+          const count = context.parsed?.y ?? context.parsed?.x ?? context.parsed;
+          const label = type === "doughnut" ? context.label : context.dataset.label;
+          return `${label}: ${number(count)}${options.denominator ? ` of ${number(options.denominator)}` : ""}`;
+        } } },
       },
     };
-  }
-
-  let charts = [];
-
-  function destroyAll() {
-    charts.forEach((c) => { try { c?.destroy(); } catch (_) {} });
-    charts = [];
-  }
-
-  function showChartError(containerId, message) {
-    const container = document.getElementById(containerId);
-    if (!container) return;
-    const parent = container.parentElement;
-    if (parent) {
-      while (parent.firstChild) parent.removeChild(parent.firstChild);
-      const errDiv = document.createElement('div');
-      errDiv.className = 'chart-error';
-      errDiv.style.cssText = 'display:flex;align-items:center;justify-content:center;height:100%;color:#ef4444;font-size:13px;';
-      errDiv.textContent = message || 'Chart failed to load';
-      parent.appendChild(errDiv);
-    }
-  }
-
-  function lineChart(id, labels, data, label, color) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
-    if (!labels || !data || labels.length === 0 || data.length === 0) {
-      showChartError(id, 'No data available');
-      return;
-    }
-    const cfg = chartDefaults();
+    if (type !== "doughnut") cfg.scales = {
+      x: { ticks: { color: colors.text }, grid: { color: colors.grid } },
+      y: { beginAtZero: true, ticks: { color: colors.text, precision: 0 }, grid: { color: colors.grid } },
+    };
     try {
-      const ch = new Chart(ctx, {
-        type: "line",
-        data: {
-          labels,
-          datasets: [{
-            label,
-            data,
-            borderColor: color || palette().line1,
-            backgroundColor: (color || palette().line1) + "22",
-            fill: true,
-            tension: 0.35,
-            pointRadius: 0,
-          }],
-        },
-        options: cfg,
-      });
-      charts.push(ch);
-    } catch (e) {
-      console.error(`Failed to create line chart ${id}:`, e);
-      showChartError(id, 'Chart rendering error');
+      charts.push(new Chart(canvas, { type, data: { labels, datasets }, options: cfg }));
+    } catch (_) {
+      panelMessage(id, "Chart could not be rendered.", "error");
     }
   }
 
-  function barChart(id, labels, data, label, color) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
-    if (!labels || !data || labels.length === 0 || data.length === 0) {
-      showChartError(id, 'No data available');
-      return;
-    }
-    const cfg = chartDefaults();
-    try {
-      const ch = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [{
-            label,
-            data,
-            backgroundColor: color || palette().bar,
-            borderRadius: 4,
-          }],
-        },
-        options: cfg,
-      });
-      charts.push(ch);
-    } catch (e) {
-      console.error(`Failed to create bar chart ${id}:`, e);
-      showChartError(id, 'Chart rendering error');
-    }
+  function series(label, data, color, type) {
+    return { label, data, borderColor: color, backgroundColor: color,
+             borderRadius: type === "bar" ? 4 : undefined,
+             tension: type === "line" ? 0.25 : undefined,
+             fill: false };
   }
 
-  function horizontalBar(id, labels, data, label) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
-    if (!labels || !data || labels.length === 0 || data.length === 0) {
-      showChartError(id, 'No data available');
-      return;
-    }
-    const cfg = chartDefaults();
-    cfg.indexAxis = "y";
-    try {
-      const ch = new Chart(ctx, {
-        type: "bar",
-        data: {
-          labels,
-          datasets: [{
-            label,
-            data,
-            backgroundColor: palette().doughnut.concat(palette().doughnut),
-            borderRadius: 4,
-          }],
-        },
-        options: cfg,
-      });
-      charts.push(ch);
-    } catch (e) {
-      console.error(`Failed to create horizontal bar chart ${id}:`, e);
-      showChartError(id, 'Chart rendering error');
-    }
+  function renderKPIs(k) {
+    const row = $("kpiRow");
+    row.replaceChildren();
+    const items = [
+      ["Queries", number(k.total_queries), "Selected window"],
+      ["Users who queried", number(k.active_users), "Distinct users in selected window"],
+      ["Average completion", k.avg_completion_seconds === null ? "Unavailable" : `${k.avg_completion_seconds} s`,
+       k.avg_completion_seconds === null ? "No completed queries with valid timestamps" : `${number(k.completion_measured)} of ${number(k.completed_queries)} completed queries measured`],
+      ["Rated responses", number(k.rated_responses), `${number(k.total_queries)} queries in selected window`],
+      ["Indexed documents", number(k.documents_indexed), "Global count at request time"],
+    ];
+    items.forEach(([label, value, detail]) => {
+      const card = document.createElement("div");
+      card.className = "kpi-card";
+      for (const [cls, text] of [["kpi-card__label", label], ["kpi-card__value", value], ["kpi-card__detail", detail]]) {
+        const part = document.createElement("div");
+        part.className = cls;
+        part.textContent = text;
+        card.appendChild(part);
+      }
+      row.appendChild(card);
+    });
   }
 
-  function doughnutChart(id, labels, data) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
-    if (!labels || !data || labels.length === 0 || data.length === 0) {
-      showChartError(id, 'No data available');
-      return;
-    }
-    const c = palette();
-    try {
-      const ch = new Chart(ctx, {
-        type: "doughnut",
-        data: {
-          labels,
-          datasets: [{
-            data,
-            backgroundColor: c.doughnut,
-            borderWidth: 0,
-          }],
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: { position: "right", labels: { color: c.text, font: { size: 11 } } },
-          },
-        },
-      });
-      charts.push(ch);
-    } catch (e) {
-      console.error(`Failed to create doughnut chart ${id}:`, e);
-      showChartError(id, 'Chart rendering error');
-    }
+  function hexRgb(hex) { return [1, 3, 5].map((i) => parseInt(hex.slice(i, i + 2), 16)); }
+  function heatColor(value, maximum) {
+    const colors = theme();
+    const low = hexRgb(colors.low), high = hexRgb(colors.high), weight = value / maximum;
+    return `rgb(${low.map((part, i) => Math.round(part + (high[i] - part) * weight)).join(",")})`;
   }
 
-  function dualLineChart(id, labels, d1, d2, l1, l2) {
-    const ctx = document.getElementById(id);
-    if (!ctx) return;
-    if (!labels || !d1 || !d2 || labels.length === 0 || d1.length === 0 || d2.length === 0) {
-      showChartError(id, 'No data available');
+  function renderHeatmap(hm) {
+    const root = $("heatmapContainer"), summary = $("heatmapSummary"), details = $("heatmapDetails");
+    root.replaceChildren();
+    summary.replaceChildren();
+    details.hidden = !hm.total;
+    message("heatmapMeta", `${number(hm.total)} queries · UTC weekday and hour`);
+    if (!hm.total) {
+      const empty = document.createElement("p");
+      empty.className = "chart-message chart-message--empty";
+      empty.textContent = "No query activity in this period.";
+      root.appendChild(empty);
       return;
     }
-    const c = palette();
-    const cfg = chartDefaults();
-    try {
-      const ch = new Chart(ctx, {
-        type: "line",
-        data: {
-          labels,
-          datasets: [
-            { label: l1, data: d1, borderColor: c.line1, tension: 0.3, pointRadius: 2 },
-            { label: l2, data: d2, borderColor: c.line2, tension: 0.3, pointRadius: 2 },
-          ],
-        },
-        options: cfg,
-      });
-      charts.push(ch);
-    } catch (e) {
-      console.error(`Failed to create dual line chart ${id}:`, e);
-      showChartError(id, 'Chart rendering error');
-    }
-  }
-
-  function renderHeatmap(container, hm) {
-    if (!container) return;
-    container.innerHTML = "";
-    if (!hm || !hm.matrix || !hm.hours || !hm.subjects) {
-      container.innerHTML = '<div class="chart-error">Heatmap data unavailable</div>';
-      return;
-    }
-    const c = palette();
-    const maxVal = Math.max(...hm.matrix.flat(), 1);
-
+    const maximum = Math.max(1, ...hm.matrix.flat());
     const header = document.createElement("div");
     header.className = "hm-row hm-header";
-    const spacer = document.createElement("div");
-    spacer.className = "hm-label";
-    header.appendChild(spacer);
-    hm.hours.forEach((h, i) => {
-      if (i % 3 !== 0) {
-        const empty = document.createElement("div");
-        empty.className = "hm-cell";
-        header.appendChild(empty);
-        return;
-      }
-      const cell = document.createElement("div");
+    const corner = document.createElement("span");
+    corner.className = "hm-label";
+    corner.textContent = "UTC";
+    header.appendChild(corner);
+    hm.hours.forEach((hour, index) => {
+      const cell = document.createElement("span");
       cell.className = "hm-cell hm-hour";
-      cell.textContent = h.replace(":00", "h");
+      cell.textContent = index % 3 === 0 ? hour.slice(0, 2) : "";
       header.appendChild(cell);
     });
-    container.appendChild(header);
-
-    hm.subjects.forEach((subj, ri) => {
+    root.appendChild(header);
+    hm.weekdays.forEach((weekday, rowIndex) => {
       const row = document.createElement("div");
       row.className = "hm-row";
-      const lbl = document.createElement("div");
-      lbl.className = "hm-label";
-      lbl.textContent = subj;
-      lbl.title = subj;
-      row.appendChild(lbl);
-
-      hm.matrix[ri].forEach((val) => {
-        const cell = document.createElement("div");
+      const label = document.createElement("span");
+      label.className = "hm-label";
+      label.textContent = `${weekday} (${number(hm.weekday_totals[rowIndex])})`;
+      row.appendChild(label);
+      hm.matrix[rowIndex].forEach((count, hourIndex) => {
+        const cell = document.createElement("span");
         cell.className = "hm-cell";
-        const t = val / maxVal;
-        cell.style.background = interpolateColor(c.heatLow, c.heatHigh, t);
-        cell.title = `${subj} — ${val} queries`;
+        cell.style.backgroundColor = heatColor(count, maximum);
+        cell.title = `${weekday}, ${hm.hours[hourIndex]} UTC: ${number(count)} queries`;
+        cell.setAttribute("aria-hidden", "true");
         row.appendChild(cell);
       });
-      container.appendChild(row);
+      root.appendChild(row);
     });
+    const table = document.createElement("table");
+    table.className = "heatmap-table";
+    const caption = document.createElement("caption");
+    caption.textContent = `Query counts by weekday and hour in UTC; ${number(hm.total)} total`;
+    table.appendChild(caption);
+    const head = document.createElement("tr");
+    ["Weekday", ...hm.hours, "Total"].forEach((value) => {
+      const th = document.createElement("th");
+      th.scope = "col";
+      th.textContent = value;
+      head.appendChild(th);
+    });
+    table.appendChild(head);
+    hm.weekdays.forEach((weekday, i) => {
+      const row = document.createElement("tr"), th = document.createElement("th");
+      th.scope = "row";
+      th.textContent = weekday;
+      row.appendChild(th);
+      [...hm.matrix[i], hm.weekday_totals[i]].forEach((count) => {
+        const td = document.createElement("td");
+        td.textContent = number(count);
+        row.appendChild(td);
+      });
+      table.appendChild(row);
+    });
+    summary.appendChild(table);
   }
 
-  function interpolateColor(low, high, t) {
-    const parse = (hex) => {
-      hex = hex.replace("#", "");
-      return [parseInt(hex.substring(0, 2), 16), parseInt(hex.substring(2, 4), 16), parseInt(hex.substring(4, 6), 16)];
-    };
-    const [r1, g1, b1] = parse(low);
-    const [r2, g2, b2] = parse(high);
-    const r = Math.round(r1 + (r2 - r1) * t);
-    const g = Math.round(g1 + (g2 - g1) * t);
-    const b = Math.round(b1 + (b2 - b1) * t);
-    return `rgb(${r},${g},${b})`;
-  }
-
-  function renderKPIs(el, kpis) {
-    if (!kpis) return;
-    const items = [
-      { label: "Total Queries", value: kpis.total_queries?.toLocaleString() || '0', icon: "📊" },
-      { label: "Active Users", value: kpis.active_users?.toLocaleString() || '0', icon: "👥" },
-      { label: "Avg Response", value: (kpis.avg_response_ms || '0') + " s", icon: "⚡" },
-      { label: "Satisfaction", value: (kpis.satisfaction || '0') + " / 5", icon: "⭐" },
-      { label: "Docs Indexed", value: kpis.documents_indexed || '0', icon: "📁" },
-      { label: "Uptime", value: (kpis.uptime_pct || '0') + "%", icon: "🟢" },
-    ];
-    el.innerHTML = items.map(k => `
-      <div class="kpi-card">
-        <div class="kpi-card__icon">${k.icon}</div>
-        <div class="kpi-card__label">${k.label}</div>
-        <div class="kpi-card__value">${k.value}</div>
-      </div>
-    `).join("");
-  }
-
-  async function fetchData() {
-    const rangeEl = document.getElementById("timeRange");
-    const days = rangeEl ? rangeEl.value : "30";
-
-    const res = await fetch(`/api/analytics?days=${days}`);
-    if (!res.ok) throw new Error("Failed to fetch analytics data");
-    return res.json();
+  function renderData(d) {
+    const k = d.kpis;
+    message("analyticsTimezone", `${d.meta.days} UTC calendar days · ${d.meta.start} to ${d.meta.end} · Timezone: ${d.meta.timezone}`);
+    renderKPIs(k);
+    message("queriesDayMeta", `${number(k.total_queries)} queries · selected window`);
+    plot("chartQueriesDay", "line", d.queries_per_day.labels,
+         [series("Queries", d.queries_per_day.data, "#818cf8", "line")], k.total_queries);
+    const feedback = d.feedback_outcomes;
+    message("feedbackMeta", `${number(feedback.rated_responses)} rated responses / ${number(feedback.total_queries)} queries${feedback.other_values ? ` · ${number(feedback.other_values)} unrecognized vote values` : ""}`);
+    plot("chartFeedback", "doughnut", feedback.labels,
+         [series("Queries", feedback.data, ["#34d399", "#f472b6", "#818cf8"], "doughnut")], feedback.total_queries,
+         { denominator: feedback.total_queries });
+    const depth = d.conversation_depth;
+    message("depthMeta", `${number(depth.sessions)} sessions · in-window queries only · ${number(depth.queries_without_session)} queries without session`);
+    plot("chartDepth", "bar", depth.labels, [series("Sessions", depth.data, "#22d3ee", "bar")], depth.sessions,
+         { denominator: depth.sessions });
+    const duration = d.completion_duration;
+    message("durationMeta", duration.measured
+      ? `${number(duration.measured)} of ${number(duration.completed)} completed queries measured · ${number(duration.excluded_completed)} excluded`
+      : `Unavailable: ${duration.unavailable_reason}`);
+    if (duration.measured) plot("chartDuration", "bar", duration.labels,
+      [series("Completed queries", duration.data, "#f472b6", "bar")], duration.measured,
+      { denominator: duration.measured });
+    else panelMessage("chartDuration", `Unavailable: ${duration.unavailable_reason}`, "unavailable");
+    message("usersDayMeta", `${number(k.active_users)} distinct users in selected window; daily users may repeat across days`);
+    plot("chartUsersDay", "line", d.users_per_day.labels,
+         [series("Users", d.users_per_day.data, "#22d3ee", "line")], d.users_per_day.query_total);
+    message("statesMeta", `${number(d.query_states.total)} queries · observed states only`);
+    plot("chartStates", "bar", d.query_states.labels,
+         [series("Queries", d.query_states.data, "#818cf8", "bar")], d.query_states.total,
+         { denominator: d.query_states.total });
+    const weekly = d.weekly_comparison;
+    message("weeklyMeta", `Independent UTC 7-day windows · current ${number(weekly.current_total)} / previous ${number(weekly.previous_total)} queries`);
+    plot("chartWeekly", "line", weekly.labels,
+         [series("Current 7 days", weekly.current, "#818cf8", "line"),
+          series("Previous 7 days", weekly.previous, "#22d3ee", "line")],
+         weekly.current_total + weekly.previous_total);
+    renderHeatmap(d.heatmap);
   }
 
   async function render() {
-    document.querySelectorAll('.chart-error, .global-error').forEach(el => el.remove());
+    const thisRequest = ++requestNumber;
+    clearCharts();
+    $("kpiRow").replaceChildren();
+    $("heatmapContainer").textContent = "Loading…";
+    $("heatmapSummary").replaceChildren();
+    $("heatmapDetails").hidden = true;
+    message("analyticsTimezone", "");
+    message("analyticsStatus", "Loading analytics…");
+    for (const id of ["chartQueriesDay", "chartFeedback", "chartDepth", "chartDuration", "chartUsersDay", "chartStates", "chartWeekly"])
+      panelMessage(id, "Loading…", "loading");
     try {
-      destroyAll();
-      const d = await fetchData();
-      console.log("Analytics data:", d);
-
-      const kpiRow = document.getElementById("kpiRow");
-      if (kpiRow) renderKPIs(kpiRow, d.kpis);
-
-      // Chart.js is now guaranteed to be loaded (local script)
-      lineChart("chartQueriesDay", d.queries_per_day?.labels, d.queries_per_day?.data, "Queries", palette().line1);
-      doughnutChart("chartSatisfaction", d.satisfaction_dist?.labels, d.satisfaction_dist?.data);
-      horizontalBar("chartTopDocs", d.top_documents?.map(x => x.name), d.top_documents?.map(x => x.count), "Queries");
-      barChart("chartResponseTime", d.response_time_buckets?.labels, d.response_time_buckets?.data, "Requests", palette().barAlt);
-      lineChart("chartUsersDay", d.users_per_day?.labels, d.users_per_day?.data, "Users", palette().line2);
-      barChart("chartHourly", d.hourly_traffic?.labels, d.hourly_traffic?.data, "Requests", palette().bar);
-      dualLineChart("chartWeekly", d.weekly_comparison?.labels, d.weekly_comparison?.this_week, d.weekly_comparison?.last_week, "This Week", "Last Week");
-
-      const hmEl = document.getElementById("heatmapContainer");
-      if (hmEl) renderHeatmap(hmEl, d.heatmap);
-    } catch (err) {
-      console.error("Render error:", err);
-      const root = document.getElementById("analyticsRoot");
-      if (root) {
-        const errDiv = document.createElement('div');
-        errDiv.className = 'global-error';
-        errDiv.textContent = 'Failed to load analytics data.';
-        root.prepend(errDiv);
-      }
+      const days = $("timeRange").value;
+      const response = await fetch(`/api/analytics?days=${days}`, { credentials: "same-origin" });
+      if (!response.ok) throw new Error("analytics request failed");
+      const data = await response.json();
+      if (thisRequest !== requestNumber) return;
+      clearCharts();
+      renderData(data);
+      message("analyticsStatus", `Analytics loaded for ${days} days in UTC.`);
+    } catch (_) {
+      if (thisRequest !== requestNumber) return;
+      clearCharts();
+      $("kpiRow").replaceChildren();
+      message("analyticsTimezone", "");
+      message("analyticsStatus", "Analytics could not be loaded. Refresh to retry.");
+      for (const id of ["chartQueriesDay", "chartFeedback", "chartDepth", "chartDuration", "chartUsersDay", "chartStates", "chartWeekly"])
+        panelMessage(id, "Data could not be loaded.", "error");
+      $("heatmapContainer").textContent = "Data could not be loaded.";
+      $("heatmapSummary").replaceChildren();
+      $("heatmapDetails").hidden = true;
     }
   }
 
-  function reload() { render(); }
-
   function init() {
     render();
-    document.getElementById("refreshAnalytics")?.addEventListener("click", render);
-    document.getElementById("timeRange")?.addEventListener("change", render);
+    $("refreshAnalytics")?.addEventListener("click", render);
+    $("timeRange")?.addEventListener("change", render);
   }
-
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
-
-  window._analyticsDashboard = { reload };
+  window._analyticsDashboard = { reload: render };
 })();

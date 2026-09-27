@@ -51,6 +51,7 @@
                     {% set logout_label = "Log out" %}{% include "_logout_button.html" %}
                     <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">🌙</button>
                 </div>
+                <label class="analytics-range-label" for="timeRange">Reporting window</label>
                 <select id="timeRange" class="analytics-select">
                     <option value="30">Last 30 days</option>
                     <option value="14">Last 14 days</option>
@@ -63,6 +64,8 @@
         </div>
 
         <div class="analytics-page" id="analyticsRoot">
+            <p id="analyticsStatus" class="analytics-status" role="status" aria-live="polite">Loading analytics…</p>
+            <p id="analyticsTimezone" class="analytics-meta"></p>
 
             <!-- KPI ROW -->
             <div class="kpi-row" id="kpiRow"></div>
@@ -70,45 +73,54 @@
             <!-- CHARTS -->
             <div class="chart-row">
                 <div class="chart-card wide">
-                    <p class="chart-card__title">Queries per Day</p>
+                    <p class="chart-card__title">Queries per day</p>
+                    <p class="chart-card__meta" id="queriesDayMeta"></p>
                     <canvas id="chartQueriesDay"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Satisfaction Distribution</p>
-                    <canvas id="chartSatisfaction"></canvas>
+                    <p class="chart-card__title">Feedback outcomes</p>
+                    <p class="chart-card__meta" id="feedbackMeta"></p>
+                    <canvas id="chartFeedback"></canvas>
                 </div>
             </div>
 
             <div class="chart-row">
                 <div class="chart-card">
-                    <p class="chart-card__title">Top Documents</p>
-                    <canvas id="chartTopDocs"></canvas>
+                    <p class="chart-card__title">Conversation depth</p>
+                    <p class="chart-card__meta" id="depthMeta"></p>
+                    <canvas id="chartDepth"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Response Time Buckets</p>
-                    <canvas id="chartResponseTime"></canvas>
+                    <p class="chart-card__title">Completion duration</p>
+                    <p class="chart-card__meta" id="durationMeta"></p>
+                    <canvas id="chartDuration"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Active Users per Day</p>
+                    <p class="chart-card__title">Users who queried per day</p>
+                    <p class="chart-card__meta" id="usersDayMeta"></p>
                     <canvas id="chartUsersDay"></canvas>
                 </div>
             </div>
 
             <div class="chart-row">
                 <div class="chart-card wide">
-                    <p class="chart-card__title">Hourly Traffic</p>
-                    <canvas id="chartHourly"></canvas>
+                    <p class="chart-card__title">Query states</p>
+                    <p class="chart-card__meta" id="statesMeta"></p>
+                    <canvas id="chartStates"></canvas>
                 </div>
                 <div class="chart-card">
-                    <p class="chart-card__title">Weekly Comparison</p>
+                    <p class="chart-card__title">Weekday comparison</p>
+                    <p class="chart-card__meta" id="weeklyMeta">Independent 7-day windows (UTC)</p>
                     <canvas id="chartWeekly"></canvas>
                 </div>
             </div>
 
             <div class="chart-row">
                 <div class="chart-card extra-wide">
-                    <p class="chart-card__title">Subject × Hour Heatmap</p>
+                    <p class="chart-card__title">Weekday × hour activity</p>
+                    <p class="chart-card__meta" id="heatmapMeta"></p>
                     <div id="heatmapContainer" class="heatmap-wrapper"></div>
+                    <details id="heatmapDetails" class="heatmap-details"><summary>Read weekday and hour counts</summary><div id="heatmapSummary"></div></details>
                 </div>
             </div>
 

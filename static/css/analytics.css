@@ -306,3 +306,35 @@
 .heatmap-wrapper {
   min-height: 200px;
 }
+/* Metric explanations and explicit data states */
+.analytics-status, .analytics-meta, .chart-card__meta, .kpi-card__detail {
+  color: #9ca3af;
+  font-size: 12px;
+  line-height: 1.4;
+}
+.analytics-status { margin: 0 0 8px; }
+.analytics-meta { margin: 0 0 18px; overflow-wrap: anywhere; }
+.analytics-range-label { font-size: 12px; color: #d1d5db; }
+.chart-card__meta { margin: -8px 0 12px; min-height: 1.4em; }
+.kpi-card__detail { margin-top: 4px; }
+.chart-card canvas[hidden], .heatmap-details[hidden] { display: none !important; }
+.chart-message {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 210px;
+  color: #9ca3af;
+  text-align: center;
+}
+.chart-message--error { color: #f87171; }
+.chart-message--unavailable { color: #fbbf24; }
+.heatmap-details { margin-top: 14px; color: #d1d5db; font-size: 12px; }
+.heatmap-details summary { cursor: pointer; }
+#heatmapSummary { overflow-x: auto; margin-top: 8px; }
+.heatmap-table { border-collapse: collapse; white-space: nowrap; font-size: 11px; }
+.heatmap-table caption { text-align: left; margin-bottom: 6px; }
+.heatmap-table th, .heatmap-table td { padding: 4px 6px; border: 1px solid rgba(148,163,184,.25); text-align: right; }
+.heatmap-table th:first-child { text-align: left; }
+.light-mode .analytics-status, .light-mode .analytics-meta,
+.light-mode .chart-card__meta, .light-mode .kpi-card__detail,
+.light-mode .heatmap-details, .light-mode .analytics-range-label { color: #4b5563; }

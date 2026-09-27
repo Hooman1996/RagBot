@@ -21,7 +21,7 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, status
+from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, Query, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
@@ -1554,298 +1554,28 @@ def _mass_answer_media_type(ext: str) -> str:
 
 
 # ----------------------------------------------------------------------
-# Metrics, KPI Real-time Engine & Monitoring Health Overlays
+# Main chatbot analytics (aggregate-only; authorization is enforced by
+# web_auth_middleware using the Step 2 analytics permission).
 # ----------------------------------------------------------------------
-# @app.get("/api/analytics")
-# async def get_analytics():
-#     import random
-#     from datetime import timedelta
-#     now = datetime.now()
-#     days = [(now - timedelta(days=i)).strftime("%m/%d") for i in range(29, -1, -1)]
-#     hours = [f"{h:02d}:00" for h in range(24)]
-#     weekdays = ["Sat", "Sun", "Mon", "Tue", "Wed", "Thu", "Fri"]
-#     subjects = available_documents[:8] if available_documents else ["Risk", "Lending", "AML", "HR", "IT", "Compliance",
-#                                                                     "Treasury", "Audit"]
-#     return {
-#         "kpis": {
-#             "total_queries": random.randint(8000, 15000),
-#             "active_users": random.randint(120, 400),
-#             "avg_response_ms": random.randint(180, 600),
-#             "satisfaction": round(random.uniform(3.5, 4.9), 1),
-#             "documents_indexed": len(available_documents) or random.randint(20, 80),
-#             "uptime_pct": round(random.uniform(99.0, 99.99), 2),
-#         },
-#         "queries_per_day": {"labels": days, "data": [random.randint(50, 300) for _ in days]},
-#         "users_per_day": {"labels": days, "data": [random.randint(10, 80) for _ in days]},
-#         "heatmap": {"subjects": subjects, "hours": hours,
-#                     "matrix": [[random.randint(0, 40) for _ in hours] for _ in subjects]},
-#         "top_documents": [{"name": s, "count": random.randint(50, 500)} for s in subjects],
-#         "satisfaction_dist": {
-#             "labels": ["1 ★", "2 ★", "3 ★", "4 ★", "5 ★"],
-#             "data": [random.randint(5, 30), random.randint(10, 40), random.randint(30, 80), random.randint(80, 200),
-#                      random.randint(100, 300)],
-#         },
-#         "response_time_buckets": {
-#             "labels": ["<200ms", "200-500ms", "500ms-1s", "1-2s", ">2s"],
-#             "data": [random.randint(100, 400), random.randint(80, 300), random.randint(30, 150), random.randint(10, 60),
-#                      random.randint(2, 20)],
-#         },
-#         "hourly_traffic": {"labels": hours, "data": [random.randint(5, 120) for _ in hours]},
-#         "weekly_comparison": {
-#             "labels": weekdays,
-#             "this_week": [random.randint(80, 300) for _ in weekdays],
-#             "last_week": [random.randint(60, 280) for _ in weekdays],
-#         },
-#     }
-
-from fastapi import Query, HTTPException
+from analytics_metrics import aggregate_analytics
 
 
 @app.get("/api/analytics")
 async def get_analytics(days: int = Query(default=30, ge=7, le=30)):
+    if days not in (7, 14, 30):
+        raise HTTPException(status_code=422, detail="days must be 7, 14, or 30")
     return await blocking_runner.run(_get_analytics_sync, days)
 
 
 def _get_analytics_sync(days: int):
-    import json
-
-    # Enforce allowed filter windows to match UI dropdown values
-    if days not in [7, 14, 30]:
-        days = 30
-
-    time_window = f"{days} days"
-    conn = None
-    cursor = None
     try:
-        conn = db_manager.get_connection()
-        cursor = conn.cursor()
-        # ---------------------------------------------------------
-        # 1. KPI Aggregations (Scoped to date filter)
-        # ---------------------------------------------------------
-        cursor.execute("SELECT COUNT(id) FROM queries WHERE created_at >= NOW() - CAST(%s AS INTERVAL);",
-                       (time_window,))
-        total_queries = int(cursor.fetchone()[0] or 0)
-
-        cursor.execute(
-            "SELECT COUNT(DISTINCT user_id) FROM chat_sessions WHERE created_at >= NOW() - CAST(%s AS INTERVAL);",
-            (time_window,))
-        active_users = int(cursor.fetchone()[0] or 0)
-
-        # Using your exact working timestamp delta logic, filtered by selected time window
-        cursor.execute("""
-                       SELECT AVG(EXTRACT(EPOCH FROM (updated_at - created_at)))
-                       FROM queries
-                       WHERE updated_at > created_at
-                         AND created_at >= NOW() - CAST(%s AS INTERVAL);
-                       """, (time_window,))
-        avg_resp = cursor.fetchone()[0]
-        avg_response_val = round(float(avg_resp), 2) if avg_resp is not None else 0.0
-
-        cursor.execute(
-            "SELECT AVG(rating) FROM feedbacks WHERE rating IS NOT NULL AND created_at >= NOW() - CAST(%s AS INTERVAL);",
-            (time_window,))
-        avg_sat = cursor.fetchone()[0]
-        satisfaction = round(float(avg_sat), 1) if avg_sat is not None else 0.0
-
-        # Total documents indexed remains a global system KPI
-        cursor.execute("SELECT COUNT(id) FROM documents WHERE processing_status = 'completed';")
-        documents_indexed = int(cursor.fetchone()[0] or 0)
-
-        # ---------------------------------------------------------
-        # 2. Daily Traffic
-        # ---------------------------------------------------------
-        cursor.execute("""
-                       SELECT TO_CHAR(DATE(created_at), 'MM/DD'), COUNT(id)
-                       FROM queries
-                       WHERE created_at >= NOW() - CAST(%s AS INTERVAL)
-                       GROUP BY DATE (created_at)
-                       ORDER BY DATE (created_at) ASC;
-                       """, (time_window,))
-        qpd_rows = cursor.fetchall()
-        qpd_labels = [row[0] for row in qpd_rows]
-        qpd_data = [int(row[1]) for row in qpd_rows]
-
-        if not qpd_labels:
-            qpd_labels, qpd_data = ["Today"], [0]
-
-        cursor.execute("""
-                       SELECT TO_CHAR(DATE(created_at), 'MM/DD'), COUNT(DISTINCT user_id)
-                       FROM chat_sessions
-                       WHERE created_at >= NOW() - CAST(%s AS INTERVAL)
-                       GROUP BY DATE (created_at)
-                       ORDER BY DATE (created_at) ASC;
-                       """, (time_window,))
-        upd_rows = cursor.fetchall()
-        upd_labels = [row[0] for row in upd_rows]
-        upd_data = [int(row[1]) for row in upd_rows]
-
-        if not upd_labels:
-            upd_labels, upd_data = ["Today"], [0]
-
-        # ---------------------------------------------------------
-        # 3. Satisfaction Distribution
-        # ---------------------------------------------------------
-        cursor.execute("""
-                       SELECT rating, COUNT(id)
-                       FROM feedbacks
-                       WHERE rating IS NOT NULL
-                         AND created_at >= NOW() - CAST(%s AS INTERVAL)
-                       GROUP BY rating;
-                       """, (time_window,))
-        sat_dist_dict = {int(row[0]): int(row[1]) for row in cursor.fetchall()}
-        sat_data = [sat_dist_dict.get(i, 0) for i in range(1, 6)]
-
-        # ---------------------------------------------------------
-        # 4. Response Time Buckets (In seconds, scoped to filter)
-        # ---------------------------------------------------------
-        cursor.execute("""
-                       WITH times AS (SELECT EXTRACT(EPOCH FROM (updated_at - created_at)) AS duration
-                                      FROM queries
-                                      WHERE updated_at > created_at
-                                        AND created_at >= NOW() - CAST(%s AS INTERVAL))
-                       SELECT COALESCE(SUM(CASE WHEN duration < 0.2 THEN 1 ELSE 0 END), 0),
-                              COALESCE(SUM(CASE WHEN duration >= 0.2 AND duration < 0.5 THEN 1 ELSE 0 END), 0),
-                              COALESCE(SUM(CASE WHEN duration >= 0.5 AND duration < 1.0 THEN 1 ELSE 0 END), 0),
-                              COALESCE(SUM(CASE WHEN duration >= 1.0 AND duration < 2.0 THEN 1 ELSE 0 END), 0),
-                              COALESCE(SUM(CASE WHEN duration >= 2.0 THEN 1 ELSE 0 END), 0)
-                       FROM times;
-                       """, (time_window,))
-        rt_row = cursor.fetchone()
-        rt_data = [int(val) for val in rt_row] if rt_row else [0, 0, 0, 0, 0]
-
-        # ---------------------------------------------------------
-        # 5. Hourly Traffic Patterns
-        # ---------------------------------------------------------
-        cursor.execute("""
-                       SELECT EXTRACT(HOUR FROM created_at), COUNT(id)
-                       FROM queries
-                       WHERE created_at >= NOW() - CAST(%s AS INTERVAL)
-                       GROUP BY EXTRACT(HOUR FROM created_at);
-                       """, (time_window,))
-        hourly_dict = {int(row[0]): int(row[1]) for row in cursor.fetchall()}
-        hourly_labels = [f"{h:02d}:00" for h in range(24)]
-        hourly_data = [hourly_dict.get(h, 0) for h in range(24)]
-
-        # ---------------------------------------------------------
-        # 6. Top Documents & Subject/Hour Heatmap Logic
-        # ---------------------------------------------------------
-        cursor.execute("SELECT id, title FROM documents;")
-        doc_map = {str(row[0]): row[1] for row in cursor.fetchall()}
-
-        cursor.execute("""
-                       SELECT retrieved_documents, EXTRACT(HOUR FROM created_at)
-                       FROM queries
-                       WHERE retrieved_documents IS NOT NULL
-                         AND created_at >= NOW() - CAST(%s AS INTERVAL);
-                       """, (time_window,))
-        doc_counts = {}
-        hourly_doc_counts = []
-
-        for row in cursor.fetchall():
-            retrieved = row[0]
-            hour = int(row[1] if row[1] is not None else 0)
-
-            if isinstance(retrieved, str):
-                try:
-                    retrieved = json.loads(retrieved)
-                except:
-                    retrieved = []
-
-            if isinstance(retrieved, list):
-                for d_id in retrieved:
-                    doc_id_str = str(d_id)
-                    doc_counts[doc_id_str] = doc_counts.get(doc_id_str, 0) + 1
-                    hourly_doc_counts.append((doc_id_str, hour))
-
-        top_docs_sorted = sorted(doc_counts.items(), key=lambda x: x[1], reverse=True)[:8]
-        top_docs = [{"name": doc_map.get(d_id, f"Doc {d_id}"), "count": count} for d_id, count in top_docs_sorted]
-
-        heatmap_subjects = [doc["name"] for doc in top_docs]
-        heatmap_matrix = [[0 for _ in range(24)] for _ in range(len(heatmap_subjects))]
-
-        doc_to_subj_idx = {d_id: idx for idx, (d_id, _) in enumerate(top_docs_sorted)}
-
-        for d_id, hour in hourly_doc_counts:
-            if d_id in doc_to_subj_idx:
-                heatmap_matrix[doc_to_subj_idx[d_id]][hour] += 1
-
-        if not top_docs:
-            top_docs = [{"name": "No documents queried yet", "count": 0}]
-            heatmap_subjects = ["N/A"]
-            heatmap_matrix = [[0 for _ in range(24)]]
-
-        # ---------------------------------------------------------
-        # 7. Weekly Comparison
-        # ---------------------------------------------------------
-        weekdays = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-
-        cursor.execute("""
-                       SELECT EXTRACT(ISODOW FROM created_at), COUNT(id)
-                       FROM queries
-                       WHERE created_at >= NOW() - INTERVAL '7 days'
-                       GROUP BY EXTRACT (ISODOW FROM created_at);
-                       """)
-        tw_dict = {int(row[0]): int(row[1]) for row in cursor.fetchall()}
-        this_week_data = [tw_dict.get(i, 0) for i in range(1, 8)]
-
-        cursor.execute("""
-                       SELECT EXTRACT(ISODOW FROM created_at), COUNT(id)
-                       FROM queries
-                       WHERE created_at >= NOW() - INTERVAL '14 days' AND created_at < NOW() - INTERVAL '7 days'
-                       GROUP BY EXTRACT (ISODOW FROM created_at);
-                       """)
-        lw_dict = {int(row[0]): int(row[1]) for row in cursor.fetchall()}
-        last_week_data = [lw_dict.get(i, 0) for i in range(1, 8)]
-
-        return {
-            "kpis": {
-                "total_queries": total_queries,
-                "active_users": active_users,
-                "avg_response_ms": avg_response_val,  # Required by analytics.js line 169
-                "avg_response_sec": avg_response_val,  # Semantic fallback
-                "satisfaction": satisfaction,
-                "documents_indexed": documents_indexed,
-                "uptime_pct": 99.9,
-            },
-            "queries_per_day": {"labels": qpd_labels, "data": qpd_data},
-            "users_per_day": {"labels": upd_labels, "data": upd_data},
-            "satisfaction_dist": {
-                "labels": ["1 ★", "2 ★", "3 ★", "4 ★", "5 ★"],
-                "data": sat_data
-            },
-            "response_time_buckets": {
-                "labels": ["<0.2s", "0.2-0.5s", "0.5-1.0s", "1.0-2.0s", ">2.0s"],
-                "data": rt_data
-            },
-            "hourly_traffic": {"labels": hourly_labels, "data": hourly_data},
-            "heatmap": {
-                "subjects": heatmap_subjects,
-                "hours": hourly_labels,
-                "matrix": heatmap_matrix
-            },
-            "top_documents": top_docs,
-            "weekly_comparison": {
-                "labels": weekdays,
-                "this_week": this_week_data,
-                "last_week": last_week_data
-            }
-        }
-
+        return aggregate_analytics(db_manager, days)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     except ServiceError:
         raise
     except PostgresError as exc:
-        raise ServiceUnavailableError(
-            "PostgreSQL operation failed"
-        ) from exc
-    except Exception as exc:
-        raise HTTPException(
-            status_code=500, detail="Analytics failed to process"
-        ) from exc
-    finally:
-        if cursor is not None:
-            cursor.close()
-        if conn is not None:
-            conn.close()
+        raise ServiceUnavailableError("PostgreSQL operation failed") from exc
 
 
 @app.get("/api/health")
