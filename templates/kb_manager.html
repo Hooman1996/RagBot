@@ -7,6 +7,7 @@
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind/3.4.17/tailwind.min.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}">
     <link rel="stylesheet" href="{{ url_for('static', path='css/kb_manager.css') }}">
+    <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
 </head>
 <body class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none">
 
@@ -18,6 +19,7 @@
                 <p class="text-xs text-slate-400">پنل مدیریت پیشرفته پایگاه دانش و همگام‌سازی برداری</p>
             </div>
         </div>
+        <button type="button" onclick="webLogout()" class="text-xs text-slate-200">خروج</button>
         <a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all">
             ◄ بازگشت به میز کار چت
         </a>

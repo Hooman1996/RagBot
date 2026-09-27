@@ -1,11 +1,3 @@
-const token = localStorage.getItem("auth_token")
-
-if (!token) {
-
-window.location.href = "/"
-
-}
-
 let currentSession = null
 
 async function loadSessions() {
@@ -13,9 +5,7 @@ async function loadSessions() {
     const response = await fetch("/api/sessions",
     {
 
-        headers: {"Authorization":
-            "Bearer " + token
-        }
+        headers: {}
 
     }
 )
@@ -176,8 +166,7 @@ async function initializeSystem() {
         const response = await fetch('/api/initialize', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': "Bearer " + token
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({ directory_path: directoryPath })
         });
@@ -263,8 +252,7 @@ async function submitQuery() {
         const response = await fetch('/api/query', {
             method: 'POST',
             headers: {
-                'Content-Type': 'application/json',
-                'Authorization': "Bearer " + token
+                'Content-Type': 'application/json'
             },
             body: JSON.stringify({
                 session_id: currentSession,

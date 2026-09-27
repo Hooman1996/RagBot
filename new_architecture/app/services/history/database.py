@@ -275,6 +275,12 @@ class DatabaseManager:
             (user_id,), fetch="one"
         )
 
+    def get_web_user_by_id(self, user_id: int) -> dict | None:
+        return self._execute(
+            "SELECT id, username, full_name, role, is_active FROM users WHERE id = %s",
+            (user_id,), fetch="one",
+        )
+
     def get_user_by_username(self, username: str) -> dict | None:
         return self._execute(
             "SELECT * FROM users WHERE username = %s",
@@ -379,6 +385,14 @@ class DatabaseManager:
             "SELECT * FROM chat_sessions WHERE id = %s",
             (session_id,), fetch="one"
         )
+
+    def query_owned_by_user(self, query_id: int, user_id: int) -> bool:
+        row = self._execute(
+            "SELECT 1 FROM queries q JOIN chat_sessions s "
+            "ON s.id = q.chat_session_id WHERE q.id = %s AND s.user_id = %s",
+            (query_id, user_id), fetch="one",
+        )
+        return row is not None
 
     def get_session_by_uuid(self, session_uuid: str) -> dict | None:
         return self._execute(

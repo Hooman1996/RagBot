@@ -94,7 +94,7 @@
                   <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
                 </svg>
               </div>
-              <span data-en="Bank-grade security with end-to-end encryption" data-fa="امنیت درجه بانکی با رمزنگاری سرتاسری">Bank-grade security with end-to-end encryption</span>
+              <span data-en="Access for authorized staff" data-fa="دسترسی برای کارکنان مجاز">Access for authorized staff</span>
             </div>
             <div class="hero-feature">
               <div class="hero-feature__icon">
@@ -213,7 +213,7 @@
               <rect x="3" y="11" width="18" height="11" rx="2"/>
               <path d="M7 11V7a5 5 0 0 1 10 0v4"/>
             </svg>
-            <span data-en="256-bit encrypted · Zero-knowledge session" data-fa="رمزنگاری ۲۵۶ بیتی · نشست بدون دانش">256-bit encrypted · Zero-knowledge session</span>
+            <span data-en="Protected browser session" data-fa="نشست محافظت‌شده مرورگر">Protected browser session</span>
           </div>
 
         </div>
@@ -225,6 +225,7 @@
   <!-- Toast Container -->
   <div id="toast-container"></div>
 
+  <script src="{{ url_for('static', path='js/web_auth.js') }}"></script>
   <script src="{{ url_for('static', path='js/api.js') }}"></script>
   <script>
     // ── Particles ──────────────────────────────────────────────────────────────
@@ -335,7 +336,6 @@
         if (result.success) {
           if (remember) localStorage.setItem('nb_remember', '1');
           btnText.textContent = isFa ? 'دسترسی تأیید شد ✓' : 'Access Granted ✓';
-          API.initialize("/home/hooman/PycharmProjects/RegAssist/mahboubi_output_texts_checked");
           btn.classList.remove('btn--loading');
           btn.classList.add('btn--success');
           setTimeout(() => { window.location.href = '/app'; }, 800);

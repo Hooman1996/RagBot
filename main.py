@@ -21,10 +21,9 @@ from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
-from fastapi import FastAPI, Request, Depends, HTTPException, File, UploadFile, Form, status
+from fastapi import FastAPI, Request, HTTPException, File, UploadFile, Form, status
 from fastapi.staticfiles import StaticFiles
 from fastapi.templating import Jinja2Templates
-from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from fastapi.responses import HTMLResponse, FileResponse, JSONResponse
 from fastapi.background import BackgroundTasks
 from pydantic import BaseModel, Field
@@ -72,6 +71,9 @@ from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
+from web_auth import (WebUser, current_web_user, create_session as create_web_session,
+                      set_cookies, clear_cookies, web_auth_middleware, safe_user,
+                      validate_config, job_access_token, valid_job_access)
 from document_category import get_document_category
 
 class Config:
@@ -178,7 +180,6 @@ available_documents = []
 chunker = None
 ocr_service = None
 history_rewriting_service = None
-user = None
 
 agent_service = None
 answering_service = None
@@ -214,6 +215,7 @@ async def lifespan(app: FastAPI):
     global text_processor, qdrant_client, blocking_runner, request_limiter
     global tei_http_client, tei_sync_http_client, llm_client
 
+    validate_config()
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
     request_limiter = AdmissionLimiter(
         REQUEST_CONCURRENCY_LIMIT, name="answering"
@@ -476,6 +478,11 @@ request_trace_logger = logging.getLogger("request_trace")
 
 
 @app.middleware("http")
+async def browser_auth_middleware(request: Request, call_next):
+    return await web_auth_middleware(request, call_next, db_manager)
+
+
+@app.middleware("http")
 async def request_trace_middleware(request: Request, call_next):
     trace = RequestTrace(
         request_id=safe_request_id(request.headers.get("X-Request-Id")),
@@ -508,8 +515,6 @@ async def request_trace_middleware(request: Request, call_next):
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 app.mount("/static", StaticFiles(directory=str(STATIC_DIR)), name="static")
-
-oauth2_scheme = OAuth2PasswordBearer(tokenUrl="api/login")
 
 # Mount API Routers
 app.include_router(kb_router)
@@ -572,7 +577,11 @@ class MobileLoginRequest(BaseModel):
 # ----------------------------------------------------------------------
 @app.post("/api/login")
 async def login(req: LoginRequest, request: Request):
-    global user
+    validate_config()
+    origin = request.headers.get("origin")
+    expected_origin = os.getenv("WEB_PUBLIC_ORIGIN") or str(request.base_url).rstrip("/")
+    if origin and origin != expected_origin:
+        raise HTTPException(status_code=403, detail="Invalid origin")
     user = await blocking_runner.run(
         authentication_service.authenticate,
         req.username,
@@ -580,9 +589,23 @@ async def login(req: LoginRequest, request: Request):
         wait_for_completion_on_cancel=True,
     )
     if user:
-        user["success"] = True
-        return user
+        session, csrf = create_web_session(user["id"])
+        response = JSONResponse({"success": True, "user": safe_user(user)})
+        set_cookies(response, session, csrf)
+        return response
     raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+
+
+@app.get("/api/auth/me")
+async def auth_me(user: WebUser):
+    return JSONResponse({"user": safe_user(vars(user))}, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/auth/logout")
+async def logout(request: Request, user: WebUser):
+    response = JSONResponse({"success": True})
+    clear_cookies(response)
+    return response
 
 
 @app.get("/", response_class=HTMLResponse)
@@ -646,7 +669,8 @@ async def get_documents():
 # Core AI Query Cognitive Engine Execution (Web Version Flow)
 # ----------------------------------------------------------------------
 @app.post("/api/query")
-async def query_documents(query_req: QueryRequest, request: Request):
+async def query_documents(query_req: QueryRequest, request: Request, user: WebUser):
+    await require_owned_session(query_req.session_id, user)
     async def operation():
         async with trace_span("pipeline"):
             return await _query_documents(query_req)
@@ -759,34 +783,36 @@ async def _query_documents(query_req: QueryRequest):
 # ----------------------------------------------------------------------
 # Session Management & Interaction History Subsystem
 # ----------------------------------------------------------------------
+async def require_owned_session(session_id, user):
+    try:
+        session_pk = int(session_id)
+    except (TypeError, ValueError):
+        raise HTTPException(status_code=404, detail="Session not found")
+    row = await blocking_runner.run(db_manager.get_session_by_id, session_pk)
+    if not row or row["user_id"] != user.id:
+        raise HTTPException(status_code=404, detail="Session not found")
+    return row
+
+
+async def require_owned_query(query_id, user):
+    owned = await blocking_runner.run(db_manager.query_owned_by_user, query_id, user.id)
+    if not owned:
+        raise HTTPException(status_code=404, detail="Query not found")
+
+
 @app.get("/api/sessions")
-async def get_sessions():
-    global user
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
+async def get_sessions(user: WebUser):
     sessions_dict = await blocking_runner.run(
-        chat_manager.get_user_sessions, user["id"]
+        chat_manager.get_user_sessions, user.id
     )
-    if not sessions_dict:
-        new_session = await blocking_runner.run(
-            chat_manager.create_new_chat,
-            user["id"],
-            model_name="",
-            temperature=0.7,
-            wait_for_completion_on_cancel=True,
-        )
-        sessions_dict = {new_session["id"]: new_session}
     return {"sessions": list(sessions_dict.values())}
 
 
 @app.post("/api/sessions")
-async def create_session(req: SessionCreateRequest):
-    global user
-    if user is None:
-        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED)
+async def create_session(req: SessionCreateRequest, user: WebUser):
     return await blocking_runner.run(
         chat_manager.create_new_chat,
-        user["id"],
+        user.id,
         model_name="",
         temperature=0.7,
         wait_for_completion_on_cancel=True,
@@ -794,7 +820,8 @@ async def create_session(req: SessionCreateRequest):
 
 
 @app.get("/api/sessions/{session_id}")
-async def get_session(session_id: str):
+async def get_session(session_id: str, user: WebUser):
+    await require_owned_session(session_id, user)
     session = await blocking_runner.run(
         chat_manager.get_session, session_id
     )
@@ -804,7 +831,8 @@ async def get_session(session_id: str):
 
 
 @app.post("/api/sessions/{session_id}/message")
-async def add_message(session_id: str, req: MessageRequest):
+async def add_message(session_id: str, req: MessageRequest, user: WebUser):
+    await require_owned_session(session_id, user)
     msg = await blocking_runner.run(
         chat_manager.add_message,
         session_id,
@@ -818,7 +846,8 @@ async def add_message(session_id: str, req: MessageRequest):
 
 
 @app.get("/api/sessions/{session_id}/messages")
-async def get_session_messages(session_id: str):
+async def get_session_messages(session_id: str, user: WebUser):
+    await require_owned_session(session_id, user)
     msgs = await blocking_runner.run(
         chat_manager.get_messages, session_id
     )
@@ -826,7 +855,8 @@ async def get_session_messages(session_id: str):
 
 
 @app.delete("/api/sessions/{session_id}")
-async def delete_session_endpoint(session_id: str):
+async def delete_session_endpoint(session_id: str, user: WebUser):
+    await require_owned_session(session_id, user)
     try:
         await blocking_runner.run(
             chat_manager.delete_chat,
@@ -839,7 +869,8 @@ async def delete_session_endpoint(session_id: str):
 
 
 @app.patch("/api/sessions/{session_id}/pin")
-async def toggle_pin_session(session_id: str):
+async def toggle_pin_session(session_id: str, user: WebUser):
+    await require_owned_session(session_id, user)
     try:
         updated = await blocking_runner.run(
             chat_manager.toggle_pin,
@@ -855,7 +886,8 @@ async def toggle_pin_session(session_id: str):
 # Automated HTML Exporter & Responsive Session Downloader
 # ----------------------------------------------------------------------
 @app.get("/api/sessions/{session_id}/download")
-async def download_session_html(session_id: str):
+async def download_session_html(session_id: str, user: WebUser):
+    await require_owned_session(session_id, user)
     session = await blocking_runner.run(
         chat_manager.get_session, session_id
     )
@@ -934,7 +966,8 @@ async def download_session_html(session_id: str):
 # Quality Feedback & Support Ticket Dispatch Control Layers
 # ----------------------------------------------------------------------
 @app.patch("/api/queries/{query_id}/feedback")
-async def submit_feedback(query_id: int, req: FeedbackRequest):
+async def submit_feedback(query_id: int, req: FeedbackRequest, user: WebUser):
+    await require_owned_query(query_id, user)
     result = await blocking_runner.run(
         db_manager.update_query_feedback,
         query_id,
@@ -947,7 +980,8 @@ async def submit_feedback(query_id: int, req: FeedbackRequest):
 
 
 @app.patch("/api/queries/{query_id}/comment")
-async def submit_comment(query_id: int, req: CommentRequest):
+async def submit_comment(query_id: int, req: CommentRequest, user: WebUser):
+    await require_owned_query(query_id, user)
     result = await blocking_runner.run(
         db_manager.update_query_comment,
         query_id,
@@ -960,7 +994,8 @@ async def submit_comment(query_id: int, req: CommentRequest):
 
 
 @app.post("/api/sessions/{session_id}/satisfaction")
-async def session_satisfaction(session_id: str, req: SatisfactionRequest):
+async def session_satisfaction(session_id: str, req: SatisfactionRequest, user: WebUser):
+    await require_owned_session(session_id, user)
     global agent_service, db_manager
     session_pk = int(session_id)
 
@@ -1080,8 +1115,9 @@ async def extract_text_ocr(file: UploadFile = File(...)):
 @app.post("/api/mass-answer")
 async def process_mass_answer(
         background_tasks: BackgroundTasks,
+        user: WebUser,
         file: UploadFile = File(...),
-        selected_docs: str = Form("[]")
+        selected_docs: str = Form("[]"),
 ):
     df, question_col, docs_list, ext, filename = await _read_mass_answer_input(
         file, selected_docs
@@ -1093,6 +1129,7 @@ async def process_mass_answer(
             docs_list=docs_list,
             ext=ext,
             filename=filename,
+            user_id=user.id,
         )
     return await _process_mass_answer(
         background_tasks,
@@ -1227,7 +1264,7 @@ async def _process_mass_dataframe(
     return path, row_results
 
 
-async def _create_mass_answer_job(*, df, question_col, docs_list, ext, filename):
+async def _create_mass_answer_job(*, df, question_col, docs_list, ext, filename, user_id):
     job_id = str(uuid.uuid4())
     artifact_directory = tempfile.mkdtemp(prefix=f"mass-answer-{job_id}-")
     output_path = os.path.join(
@@ -1286,6 +1323,7 @@ async def _create_mass_answer_job(*, df, question_col, docs_list, ext, filename)
             "total_rows": len(df.index),
             "status_url": f"/api/mass-answer/jobs/{job_id}",
             "result_url": f"/api/mass-answer/jobs/{job_id}/result",
+            "job_access": job_access_token(job_id, user_id),
         },
     )
 
@@ -1453,17 +1491,17 @@ async def cleanup_expired_mass_answer_jobs():
 
 
 @app.get("/api/mass-answer/jobs/{job_id}")
-async def get_mass_answer_job(job_id: str):
+async def get_mass_answer_job(job_id: str, request: Request, user: WebUser):
     job = await blocking_runner.run(db_manager.get_mass_answer_job, job_id)
-    if not job:
+    if not job or not valid_job_access(job_id, user.id, request.headers.get("X-Job-Access", "")):
         raise HTTPException(status_code=404, detail="Mass-answer job not found")
     return _mass_job_public(job)
 
 
 @app.get("/api/mass-answer/jobs/{job_id}/result")
-async def download_mass_answer_job(job_id: str):
+async def download_mass_answer_job(job_id: str, request: Request, user: WebUser):
     job = await blocking_runner.run(db_manager.get_mass_answer_job, job_id)
-    if not job:
+    if not job or not valid_job_access(job_id, user.id, request.headers.get("X-Job-Access", "")):
         raise HTTPException(status_code=404, detail="Mass-answer job not found")
     if job["status"] != "completed":
         raise HTTPException(status_code=409, detail="Mass-answer job is not complete")
@@ -1479,9 +1517,9 @@ async def download_mass_answer_job(job_id: str):
 
 
 @app.delete("/api/mass-answer/jobs/{job_id}")
-async def delete_mass_answer_job(job_id: str):
+async def delete_mass_answer_job(job_id: str, request: Request, user: WebUser):
     job = await blocking_runner.run(db_manager.get_mass_answer_job, job_id)
-    if not job:
+    if not job or not valid_job_access(job_id, user.id, request.headers.get("X-Job-Access", "")):
         raise HTTPException(status_code=404, detail="Mass-answer job not found")
     await mass_answer_job_manager.cancel(job_id)
     await blocking_runner.run(

@@ -114,7 +114,11 @@ const Sessions = {
     // load from API, store, and apply filter
     async load() {
         try {
-            const data = await API.getSessions();
+            let data = await API.getSessions();
+            if (!data.sessions || data.sessions.length === 0) {
+                await API.createSession();
+                data = await API.getSessions();
+            }
             this.rawSessions = data.sessions || [];
             this.applyFilterAndRender();
         } catch (err) {
