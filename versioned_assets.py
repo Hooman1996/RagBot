@@ -19,7 +19,7 @@ from frontend_paths import STATIC_DIR
 # Local vendor stylesheets retain their versioned vendor directories and manifest hashes.
 VERSIONED_ASSETS = frozenset({
     "css/base.css", "css/app.css", "css/analytics.css", "css/web_controls.css",
-    "css/login.css", "css/kb_manager.css", "icons.svg",
+    "css/login.css", "css/kb_manager.css", "icons.svg", "negah-bank-icon.jpg",
     "js/web_auth.js", "js/analytics.js", "js/i18n.js", "js/api.js",
     "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/app.js",
     "js/kb_manager.js",
