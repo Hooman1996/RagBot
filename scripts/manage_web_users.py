@@ -11,7 +11,6 @@ from __future__ import annotations
 import argparse
 import getpass
 import hmac
-import os
 from pathlib import Path
 import re
 import sys
@@ -21,6 +20,7 @@ from uuid import uuid4
 from dotenv import dotenv_values
 
 ROOT = Path(__file__).resolve().parents[1]
+ENV_FILE = ROOT / '.env'
 sys.path.insert(0, str(ROOT))
 from web_permissions import ROLE_PERMISSIONS, landing_for  # noqa: E402
 
@@ -43,10 +43,10 @@ def build_parser():
                      "reviewed change to web_permissions.py. Passwords are prompted "
                      "privately and are never accepted as arguments."),
     )
-    parser.add_argument('--env-file', type=Path, default=ROOT / '.env',
-                        help='Private development .env containing POSTGRES_* settings (default: checkout .env)')
     sub = parser.add_subparsers(dest='command', required=True, parser_class=SafeParser)
     sub.add_parser('roles', help='List roles, effective permissions, and landing paths; no DB connection')
+    users = sub.add_parser('users', help='List browser accounts with roles and effective permissions')
+    users.add_argument('--limit', type=int, default=100, help='Maximum accounts to show (1–500; default: 100)')
     show = sub.add_parser('show', help='Show one browser account without secrets')
     show.add_argument('--username', required=True)
     create = sub.add_parser('create', help='Preview creation by default; --apply prompts twice for password')
@@ -58,11 +58,7 @@ def build_parser():
     change.add_argument('--username', required=True)
     change.add_argument('--role', required=True, choices=sorted(ROLE_PERMISSIONS))
     for item in (create, change):
-        item.add_argument('--apply', action='store_true', help='Commit after identity checks and typed confirmation')
-        item.add_argument('--expect-db', help='Expected database name from an independently verified development target')
-        item.add_argument('--expect-host', help='Expected configured POSTGRES_HOST')
-        item.add_argument('--expect-server-address', help='Expected address reported by PostgreSQL itself')
-        item.add_argument('--expect-server-port', type=int, help='Expected port reported by PostgreSQL itself')
+        item.add_argument('--apply', action='store_true', help='Commit after reviewing the .env target and typing confirmation')
     return parser
 
 
@@ -105,7 +101,8 @@ def hash_password(password):
     return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('ascii')
 
 
-def load_config(path):
+def load_config(path=None):
+    path = path or ENV_FILE
     if not path.is_file():
         raise CliError('Private .env file is unavailable.')
     values = dotenv_values(path)
@@ -140,30 +137,18 @@ def database_identity(conn, config):
     return identity
 
 
-def require_expected(args, config):
-    if not args.apply:
-        return
-    if not all((args.expect_db, args.expect_host, args.expect_server_address, args.expect_server_port)):
-        raise CliError('--apply requires --expect-db, --expect-host, --expect-server-address, and --expect-server-port.')
-    if (args.expect_db, args.expect_host) != (config['POSTGRES_DB'], config['POSTGRES_HOST']):
-        raise CliError('Expected database name or configured host does not match the private .env; no connection made.')
-
-
-def verify_identity(identity, args):
-    if not args.apply:
-        return
+def verify_identity(identity, config):
     actual_db, actual_address, actual_port, actual_host = identity
-    if (not actual_db or not actual_address or not actual_port or
-            (actual_db, actual_address, actual_port, actual_host) !=
-            (args.expect_db, args.expect_server_address, args.expect_server_port, args.expect_host)):
-        raise CliError('Connected server identity does not exactly match the expected development target.')
+    if (not actual_address or actual_db != config['POSTGRES_DB'] or
+            actual_port != int(config['POSTGRES_PORT']) or
+            actual_host != config['POSTGRES_HOST']):
+        raise CliError('Connected PostgreSQL target does not match the development .env.')
 
 
-def confirmation(command, username, role, identity):
+def confirmation(command, username):
     if not sys.stdin.isatty():
         raise CliError('Apply requires an interactive terminal for typed confirmation.')
-    database, address, port, _ = identity
-    phrase = f'APPLY {command} {username} {role} ON {database}@{address}:{port}'
+    phrase = f'{command} {username}'
     print(f'Type exactly: {phrase}')
     if input('Confirmation: ') != phrase:
         raise CliError('Confirmation did not match; no change committed.')
@@ -176,6 +161,12 @@ def fetch_account(conn, username, *, lock=False):
     with conn.cursor() as cursor:
         cursor.execute(sql, (username,))
         return cursor.fetchone()
+
+
+def fetch_users(conn, limit):
+    with conn.cursor() as cursor:
+        cursor.execute('SELECT id, username, is_active, role FROM users ORDER BY id LIMIT %s', (limit,))
+        return cursor.fetchall()
 
 
 def print_account(row):
@@ -209,22 +200,30 @@ def duplicate_error(exc):
 
 
 def run_database_command(args):
-    username = validate_username(args.username)
+    username = validate_username(args.username) if args.command != 'users' else None
+    if args.command == 'users' and not 1 <= args.limit <= 500:
+        raise CliError('Limit must be between 1 and 500.')
     if args.command == 'create':
         validate_email(args.email)
         validate_text(args.full_name, 'Full name', 255, spaces=True)
-    config = load_config(args.env_file)
-    if args.command != 'show':
-        require_expected(args, config)
+    config = load_config()
+    print(f'Configuration: {ENV_FILE}')
     conn = None
     try:
         conn = connect(config)
         identity = database_identity(conn, config)
-        if args.command != 'show':
-            verify_identity(identity, args)
+        if args.command in ('create', 'set-role') and args.apply:
+            verify_identity(identity, config)
         if args.command == 'show':
             row = fetch_account(conn, username)
             print_account(row)
+            return
+        if args.command == 'users':
+            rows = fetch_users(conn, args.limit)
+            for row in rows:
+                print_account(row)
+            if not rows:
+                print('No accounts found.')
             return
         if args.command == 'create':
             check_duplicate(conn, username, args.email)
@@ -237,12 +236,12 @@ def run_database_command(args):
         # Finish the read transaction before waiting for a person or a password.
         conn.rollback()
         if not args.apply:
-            print('Dry run: no change committed. Use --apply with exact target identity to proceed.')
+            print('Dry run: no change committed. Use --apply to confirm this .env target and proceed.')
             return
-        confirmation(args.command, username, args.role, identity)
+        confirmation(args.command, username)
         password_hash = hash_password(prompt_password()) if args.command == 'create' else None
         # Start a fresh, short transaction and recheck the target and account.
-        verify_identity(database_identity(conn, config), args)
+        verify_identity(database_identity(conn, config), config)
         if args.command == 'create':
             check_duplicate(conn, username, args.email)
             now = datetime.now(timezone.utc).replace(tzinfo=None)
