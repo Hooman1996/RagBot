@@ -33,8 +33,34 @@ RagBot makes no outbound connection to Eval. Dependency direction is strictly
   `/api/v1/evaluation/*`, including long-lived SSE connections.
 - RagBot does not need Eval DNS, credentials, or network routes.
 
-Use service addresses reachable from each container; loopback addresses are
-only valid when the target really shares that container.
+Development on the current single Linux host:
+
+```text
+Browser -> localhost:8088 -> Eval frontend -> eval-api
+Eval API/worker -> host.docker.internal -> host PostgreSQL:5432
+Eval worker -> host.docker.internal -> host RagBot:7000
+```
+
+The Eval Compose backend anchor maps `host.docker.internal` to the Docker host
+gateway. In this topology, use `POSTGRES_HOST=host.docker.internal`,
+`POSTGRES_PORT=5432`, and
+`EVAL_RAGBOT_BASE_URL=http://host.docker.internal:7000`.
+
+Production topology:
+
+```text
+Browser -> Eval public domain -> Eval frontend -> private eval-api service
+Eval API/worker -> production PostgreSQL internal endpoint
+Eval worker -> production RagBot internal endpoint
+```
+
+Use infrastructure-provided internal DNS or service names reachable from the
+Eval containers, such as `POSTGRES_HOST=postgres.internal` and
+`EVAL_RAGBOT_BASE_URL=http://ragbot.internal:8080`. These are examples, not
+actual Negah production hostnames. Neither `localhost` nor
+`host.docker.internal` is the production default. If production deliberately
+uses its Docker host as an endpoint, the host-gateway mapping can still be
+used. Verify actual routes from the Eval containers.
 
 ## Images and process roles
 
@@ -51,16 +77,22 @@ release-readiness task.
 
 Eval may share a physical PostgreSQL server with RagBot, but it owns only the
 `evaluation` schema. There are no foreign keys into RagBot application schemas.
-Migrations never run automatically at container startup. Initialization is an
-explicit, gated operation using the backend's existing status/initialize
-workflow. Application rollback preserves evaluation data; never reset or drop
-the schema as part of rollback.
+Migrations never run automatically at container startup. For first deployment,
+set `EVAL_ALLOW_DB_INIT=true` in the Eval deployment configuration and deploy
+Eval API and worker. Open the Eval UI and confirm
+`CREATE_EVALUATION_TABLES`. The Eval backend runs its predefined Alembic
+migration only for the `evaluation` schema; the browser runs no arbitrary SQL.
+Confirm the status becomes `READY`, then set `EVAL_ALLOW_DB_INIT=false` and
+recreate Eval API and worker with normal production settings. RagBot does not
+perform Eval initialization. Do not edit its root `.env` or restart RagBot for
+this lifecycle. Application rollback preserves evaluation data; never reset or
+drop the schema as part of rollback.
 
 ## HTTP compatibility contract
 
 RagBot exposes to Eval:
 
-- `GET /api/documents`
+- `GET /api/internal/evaluation/v1/datasources`
 - `POST /api/internal/evaluation/v1/turn`
 - `GET /api/internal/evaluation/v1/runtime-snapshot`
 

@@ -93,7 +93,7 @@ class RagBotClientError(RuntimeError):
 class RagBotEvaluationClient:
     TURN_PATH = "/api/internal/evaluation/v1/turn"
     SNAPSHOT_PATH = "/api/internal/evaluation/v1/runtime-snapshot"
-    DATASOURCES_PATH = "/api/documents"
+    DATASOURCES_PATH = "/api/internal/evaluation/v1/datasources"
 
     def __init__(
         self,

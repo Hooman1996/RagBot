@@ -193,6 +193,7 @@ class RagBotClientContractTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(result.git_commit_sha, "abc123")
 
     async def test_datasource_shape_is_parsed(self):
+        self.assertEqual(RagBotEvaluationClient.DATASOURCES_PATH, "/api/internal/evaluation/v1/datasources")
         def handler(request: httpx.Request) -> httpx.Response:
             self.assertEqual(request.method, "GET")
             self.assertEqual(request.url.host, "ragbot.test")

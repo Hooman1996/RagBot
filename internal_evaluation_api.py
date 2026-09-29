@@ -25,6 +25,8 @@ from conversation_history import (
     trim_agent_messages,
 )
 from new_architecture.app.config import Config
+from new_architecture.knowledge_sources import build_datasource_listing
+from document_category import get_document_category
 from pipeline_observer import (
     STAGE_ORDER,
     PipelineStage,
@@ -574,6 +576,17 @@ def build_runtime_snapshot(
         },
         "git_commit_sha": commit_sha,
     }
+
+
+@router.get("/datasources")
+async def list_datasources(request: Request) -> dict[str, Any]:
+    documents = await request.app.state.blocking_runner.run(
+        request.app.state.db_manager.get_available_documents
+    )
+    return build_datasource_listing(
+        [document["title"] for document in documents],
+        get_document_category,
+    )
 
 
 @router.get("/runtime-snapshot", response_model=RuntimeSnapshotResponse)

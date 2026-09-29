@@ -383,6 +383,7 @@ async def lifespan(app: FastAPI):
         )
         mass_answer_job_manager = MassAnswerJobManager()
 
+        app.state.db_manager = db_manager
         app.state.agent_service = agent_service
         app.state.answering_service = answering_service
         app.state.mass_answer_processor = mass_answer_processor

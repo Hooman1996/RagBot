@@ -46,7 +46,7 @@ export function DatabaseGate({ children }: PropsWithChildren) {
         {data.allow_initialize ? (
           <Button onClick={() => setModalOpen(true)}>{upgrade ? "ارتقای جداول ارزیابی" : "ایجاد جداول ارزیابی"}</Button>
         ) : (
-          <div className="operator-note"><LockKey size={22} /><div><strong>راه‌اندازی از رابط غیرفعال است</strong><p>اپراتور باید <code>EVAL_ALLOW_DB_INIT=true</code> را در فایل ریشه <code>.env</code> تنظیم کند، برنامه RagBot را در چرخه استقرار عادی بعدی راه‌اندازی مجدد کند و سپس این صفحه را بازخوانی کند. امکان اجرای SQL دلخواه در این رابط وجود ندارد.</p></div></div>
+          <div className="operator-note"><LockKey size={22} /><div><strong>راه‌اندازی از رابط غیرفعال است</strong><p>اپراتور باید <code>EVAL_ALLOW_DB_INIT=true</code> را در تنظیمات استقرار Eval تنظیم کند، سرویس‌های Eval API و worker را بازسازی کند و سپس این صفحه را بازخوانی کند. امکان اجرای SQL دلخواه در این رابط وجود ندارد.</p></div></div>
         )}
         <div className="button-row"><Button variant="secondary" onClick={() => void status.refetch()}>بررسی دوباره</Button></div>
       </section>

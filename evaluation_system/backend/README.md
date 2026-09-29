@@ -93,7 +93,7 @@ the runtime image.
 The backend exposes the browser/control-plane namespace
 `/api/v1/evaluation/*`. Its RagBot client depends only on:
 
-- `GET /api/documents`
+- `GET /api/internal/evaluation/v1/datasources`
 - `POST /api/internal/evaluation/v1/turn`
 - `GET /api/internal/evaluation/v1/runtime-snapshot`
 
