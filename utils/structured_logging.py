@@ -14,7 +14,7 @@ from datetime import datetime, timezone
 from logging.handlers import QueueHandler, QueueListener
 from typing import Any, TextIO
 
-from .log_sanitizer import REDACTED, sanitize
+from .log_sanitizer import REDACTED, sanitize, scrub_text
 from .request_instrumentation import current_trace
 
 SCHEMA_VERSION = "1.0"
@@ -102,6 +102,11 @@ class JsonEventFormatter(logging.Formatter):
             if not isinstance(event, str) or not event.isascii() or len(event) > 64:
                 event = "application_log"
             data = raw.get("data", {}) if isinstance(raw, dict) else {}
+            upstream_id = getattr(record, "ragbot_upstream_request_id", None)
+            safe_upstream_id = (
+                scrub_text(upstream_id, hmac_secret=self.settings.pii_hmac_secret, max_chars=128)
+                if isinstance(upstream_id, str) else None
+            )
             output: dict[str, Any] = {
                 "@timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
                 "schema_version": SCHEMA_VERSION,
@@ -110,7 +115,7 @@ class JsonEventFormatter(logging.Formatter):
                 "event": event,
                 "level": record.levelname,
                 "request_id": getattr(record, "ragbot_request_id", None),
-                "upstream_request_id": getattr(record, "ragbot_upstream_request_id", None),
+                "upstream_request_id": safe_upstream_id,
                 "process": {"pid": record.process},
             }
             if raw is not None:

@@ -499,6 +499,7 @@ app.include_router(internal_evaluation_router)
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---
 @app.exception_handler(BankException)
 async def bank_exception_handler(request: Request, exc: BankException):
+    trace = current_trace()
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -506,7 +507,7 @@ async def bank_exception_handler(request: Request, exc: BankException):
             "errorDesc": exc.error_desc,
             "errorDetails": {
                 "timestamp": datetime.utcnow().isoformat(),
-                "requestId": request.headers.get("X-Request-Id", "unknown_request"),
+                "requestId": trace.request_id if trace is not None else "unknown_request",
                 "message": str(exc.error_desc),
                 "exception": "BankException",
                 "details": None
@@ -517,6 +518,7 @@ async def bank_exception_handler(request: Request, exc: BankException):
 
 @app.exception_handler(ServiceError)
 async def service_exception_handler(request: Request, exc: ServiceError):
+    trace = current_trace()
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -524,9 +526,7 @@ async def service_exception_handler(request: Request, exc: ServiceError):
             "errorDesc": exc.public_message,
             "errorDetails": {
                 "timestamp": datetime.utcnow().isoformat(),
-                "requestId": request.headers.get(
-                    "X-Request-Id", "unknown_request"
-                ),
+                "requestId": trace.request_id if trace is not None else "unknown_request",
                 "message": exc.public_message,
                 "exception": type(exc).__name__,
                 "details": None,

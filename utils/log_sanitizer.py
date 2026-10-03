@@ -20,9 +20,11 @@ _SECRET_KEYS = frozenset({
     "cookie", "setcookie", "csrf", "csrftoken", "token", "accesstoken",
     "refreshtoken", "idtoken", "apikey", "secret", "clientsecret",
     "postgrespassword", "qdrantapikey", "logpiihmacsecret", "websessionsecret",
+    "jobaccess",
 })
 _PII_KEYS = frozenset({
     "nationalcode", "phone", "phonenumber", "mobile", "mobilenumber", "email",
+    "username", "fullname", "displayname",
 })
 _EMAIL = re.compile(r"(?<![\w.@])(?:[A-Za-z0-9._%+-]{1,64})@(?:[A-Za-z0-9.-]{1,253}\.[A-Za-z]{2,24})(?![\w.@])")
 _MOBILE = re.compile(rf"(?<![{_DIGIT}])(?:\+[9۹٩][8۸٨]|[0۰٠][0۰٠][9۹٩][8۸٨]|[0۰٠])[\s-]?[9۹٩](?:[{_DIGIT}][\s-]?){{9}}(?![{_DIGIT}])")
@@ -31,7 +33,7 @@ _CARD = re.compile(rf"(?<![{_DIGIT}])(?:[{_DIGIT}][ -]?){{15}}[{_DIGIT}](?![{_DI
 _IBAN = re.compile(rf"(?<![A-Za-z0-9])IR[{_DIGIT}]{{24}}(?![A-Za-z0-9])", re.IGNORECASE)
 _JWT = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])")
 _BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{12,}=*", re.IGNORECASE)
-_INLINE_SECRET = re.compile(r"\b(?:password|passwd|api[_-]?key|client[_-]?secret|authorization|cookie|csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token)\b(?:\\?[\"'])?\s*[:=]\s*(?:Bearer\s+)?(?:\\?\"[^\"]*\"|\\?'[^']*'|[^\s,;}]+)", re.IGNORECASE)
+_INLINE_SECRET = re.compile(r"\b(?:password|passwd|api[_-]?key|(?:client|web[_-]?session|log[_-]?pii[_-]?hmac)?[_-]?secret|authorization|cookie|csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token|username|full[_-]?name|display[_-]?name|job[_-]?access)\b(?:\\?[\"'])?\s*[:=]\s*(?:Bearer\s+)?(?:\\?\"[^\"]*\"|\\?'[^']*'|[^\s,;}]+)", re.IGNORECASE)
 _KEY_NORMALIZE = re.compile(r"[^a-z0-9]")
 _PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
