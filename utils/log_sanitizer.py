@@ -31,7 +31,7 @@ _CARD = re.compile(rf"(?<![{_DIGIT}])(?:[{_DIGIT}][ -]?){{15}}[{_DIGIT}](?![{_DI
 _IBAN = re.compile(rf"(?<![A-Za-z0-9])IR[{_DIGIT}]{{24}}(?![A-Za-z0-9])", re.IGNORECASE)
 _JWT = re.compile(r"(?<![A-Za-z0-9_-])[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}(?![A-Za-z0-9_-])")
 _BEARER = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/-]{12,}=*", re.IGNORECASE)
-_INLINE_SECRET = re.compile(r"\b(?:password|passwd|api[_-]?key|client[_-]?secret|authorization|cookie|csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token)\b\s*[:=]\s*(?:Bearer\s+)?[^\s,;]+", re.IGNORECASE)
+_INLINE_SECRET = re.compile(r"\b(?:password|passwd|api[_-]?key|client[_-]?secret|authorization|cookie|csrf(?:[_-]?token)?|access[_-]?token|refresh[_-]?token)\b(?:\\?[\"'])?\s*[:=]\s*(?:Bearer\s+)?(?:\\?\"[^\"]*\"|\\?'[^']*'|[^\s,;}]+)", re.IGNORECASE)
 _KEY_NORMALIZE = re.compile(r"[^a-z0-9]")
 _PERSIAN_DIGITS = str.maketrans("۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩", "01234567890123456789")
 
@@ -107,6 +107,8 @@ def sanitize(value: Any, *, hmac_secret: str | None = None, max_chars: int = MAX
         if normalized in _SECRET_KEYS or normalized.endswith(("password", "apikey", "secret", "csrftoken", "authorization", "cookie", "token")):
             return REDACTED
         if normalized in _PII_KEYS or normalized.endswith(("nationalcode", "phonenumber", "mobilenumber", "email")):
+            if item == REDACTED or (isinstance(item, str) and re.fullmatch(r"pii_[0-9a-f]{24}", item)):
+                return item
             if normalized.endswith("nationalcode") and isinstance(item, (str, int)):
                 return pseudonymize(str(item), hmac_secret)
             return REDACTED
@@ -179,5 +181,7 @@ def sanitize_body(body: Any, *, max_bytes: int = 32768, hmac_secret: str | None 
     safe = sanitize(body, hmac_secret=hmac_secret, max_chars=max_bytes)
     serialized_size = len(json.dumps(safe, ensure_ascii=False).encode("utf-8"))
     if serialized_size > max_bytes:
-        return {"body": "[TRUNCATED]", "body_truncated": True, "original_size_bytes": None}
-    return {"body": safe, "body_truncated": False, "original_size_bytes": None}
+        return {"body": "[TRUNCATED]", "body_truncated": True,
+                "original_size_bytes": original_size_bytes}
+    return {"body": safe, "body_truncated": False,
+            "original_size_bytes": original_size_bytes}

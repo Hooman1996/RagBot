@@ -58,7 +58,13 @@ def load_logging_settings() -> LoggingSettings:
     if not 1 <= body_max_bytes <= 262144:
         raise ValueError("LOG_BODY_MAX_BYTES must be between 1 and 262144")
     service = os.getenv("LOG_SERVICE_NAME", "ragbot")
-    environment = os.getenv("ENVIRONMENT", "unknown")
+    environment = os.getenv("LOG_ENVIRONMENT")
+    if environment is None:
+        environment = os.getenv("WEB_ENVIRONMENT")
+    if environment is None:
+        environment = os.getenv("ENVIRONMENT")
+    if environment is None:
+        environment = "unknown"
     if not service.isascii() or not service.replace("-", "").replace("_", "").isalnum() or len(service) > 64:
         raise ValueError("LOG_SERVICE_NAME must be a short ASCII identifier")
     if not environment.isascii() or not environment.replace("-", "").replace("_", "").isalnum() or len(environment) > 64:
@@ -201,12 +207,17 @@ class LoggingRuntime:
         self.listener = _DrainableListener(self.queue, self.stream_handler, respect_handler_level=True)
         self.root = logging.getLogger()
         self.previous_level = self.root.level
+        self.uvicorn_access = logging.getLogger("uvicorn.access")
+        self.previous_access_disabled = self.uvicorn_access.disabled
         self.closed = False
 
     def start(self) -> "LoggingRuntime":
         self.listener.start()
         self.root.addHandler(self.handler)
         self.root.setLevel(self.settings.level)
+        # Uvicorn's default access formatter writes plaintext URL/query data
+        # to stdout. The structured HTTP pair replaces that access record.
+        self.uvicorn_access.disabled = True
         return self
 
     def close(self) -> None:
@@ -215,6 +226,7 @@ class LoggingRuntime:
         self.closed = True
         self.root.removeHandler(self.handler)
         self.root.setLevel(self.previous_level)
+        self.uvicorn_access.disabled = self.previous_access_disabled
         self.listener.stop()
         self.stream_handler.close()
 

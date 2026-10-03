@@ -18,14 +18,6 @@ _current_trace: contextvars.ContextVar[RequestTrace | None] = contextvars.Contex
 )
 
 
-def safe_request_id(candidate: str | None) -> str:
-    """Legacy ingress behavior; retained until the Stage 2 middleware change."""
-
-    if candidate and _REQUEST_ID_PATTERN.fullmatch(candidate):
-        return candidate
-    return uuid.uuid4().hex
-
-
 def new_request_id() -> str:
     """Create the authoritative server-owned ID for Stage 2 ingress."""
 

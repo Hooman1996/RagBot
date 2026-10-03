@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pandas as pd
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -56,20 +56,12 @@ from internal_evaluation_api import router as internal_evaluation_router
 
 from utils.persian_hybrid_search import PersianTextProcessor
 from utils.concurrency import AdmissionLimiter, BoundedBlockingRunner, run_with_limit
-from utils.request_instrumentation import (
-    RequestTrace,
-    current_trace,
-    mark_event,
-    reset_current_trace,
-    safe_request_id,
-    set_current_trace,
-    trace_span,
-    trace_summary,
-)
+from utils.request_instrumentation import current_trace, mark_event, trace_span
+from utils.http_logging_middleware import HttpLoggingMiddleware
 from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
-from utils.structured_logging import log_event, start_logging
+from utils.structured_logging import start_logging
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
@@ -483,43 +475,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-request_trace_logger = logging.getLogger("request_trace")
-
-
 @app.middleware("http")
 async def browser_auth_middleware(request: Request, call_next):
     return await web_auth_middleware(request, call_next, db_manager)
 
 
-@app.middleware("http")
-async def request_trace_middleware(request: Request, call_next):
-    trace = RequestTrace(
-        request_id=safe_request_id(request.headers.get("X-Request-Id")),
-        process_id=os.getpid(),
-    )
-    trace.mark("request_received")
-    token = set_current_trace(trace)
-    response = None
-    try:
-        response = await call_next(request)
-        trace.mark("response_returned")
-        for name, value in trace.response_headers().items():
-            response.headers[name] = value
-        return response
-    finally:
-        log_event(
-            request_trace_logger,
-            "request_complete",
-            {
-                "method": request.method,
-                "path": request.url.path,
-                "status_code": getattr(response, "status_code", 500),
-                "started_at": trace.received_timestamp,
-                "completed_at": datetime.now(timezone.utc).isoformat(),
-                **trace_summary(trace),
-            },
-        )
-        reset_current_trace(token)
+# One outer ASGI trace for authentication, endpoints, and response streaming.
+app.add_middleware(HttpLoggingMiddleware)
+
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["versioned_asset"] = versioned_asset
@@ -1635,4 +1598,4 @@ if __name__ == "__main__":
     import uvicorn
 
 
-    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*")
+    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*", access_log=False)
