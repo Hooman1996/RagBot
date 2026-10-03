@@ -43,6 +43,8 @@ def build_parser():
                      "reviewed change to web_permissions.py. Passwords are prompted "
                      "privately and are never accepted as arguments."),
     )
+    parser.add_argument('--env-file', type=Path, default=ENV_FILE,
+                        help='PostgreSQL configuration file (default: checkout root .env)')
     sub = parser.add_subparsers(dest='command', required=True, parser_class=SafeParser)
     sub.add_parser('roles', help='List roles, effective permissions, and landing paths; no DB connection')
     users = sub.add_parser('users', help='List browser accounts with roles and effective permissions')
@@ -83,8 +85,8 @@ def validate_email(value):
 
 def validate_password(value):
     # bcrypt checks only the first 72 UTF-8 bytes on supported versions.
-    if len(value) < 12 or len(value.encode('utf-8')) > 72 or '\x00' in value:
-        raise CliError('Password must be at least 12 characters and at most 72 UTF-8 bytes, without NUL.')
+    if not value or len(value.encode('utf-8')) > 72 or '\x00' in value:
+        raise CliError('Password must be nonempty and at most 72 UTF-8 bytes, without NUL.')
     return value
 
 
@@ -105,12 +107,13 @@ def load_config(path=None):
     path = path or ENV_FILE
     if not path.is_file():
         raise CliError('Private .env file is unavailable.')
-    values = dotenv_values(path)
+    try:
+        values = dotenv_values(path)
+    except Exception:
+        raise CliError('Private .env file could not be read.') from None
     required = ('POSTGRES_HOST', 'POSTGRES_PORT', 'POSTGRES_DB', 'POSTGRES_USER', 'POSTGRES_PASSWORD')
     if any(not values.get(key) for key in required):
         raise CliError('Private .env is missing required POSTGRES_* configuration.')
-    if values.get('WEB_ENVIRONMENT', '').lower() != 'development':
-        raise CliError('Only a .env explicitly marked WEB_ENVIRONMENT=development is supported.')
     try:
         port = int(values['POSTGRES_PORT'])
         if not 1 <= port <= 65535:
@@ -130,7 +133,8 @@ def connect(config):
 
 def database_identity(conn, config):
     with conn.cursor() as cursor:
-        cursor.execute('SELECT current_database(), inet_server_addr()::text, inet_server_port()')
+        cursor.execute("SELECT current_database(), inet_server_addr()::text, "
+                       "COALESCE(inet_server_port(), current_setting('port')::integer)")
         database, address, port = cursor.fetchone()
     identity = (database, address, port, config['POSTGRES_HOST'])
     print(f'Database: {database}; server: {address or "unavailable"}:{port or "unavailable"}; configured host: {config["POSTGRES_HOST"]}')
@@ -139,16 +143,17 @@ def database_identity(conn, config):
 
 def verify_identity(identity, config):
     actual_db, actual_address, actual_port, actual_host = identity
-    if (not actual_address or actual_db != config['POSTGRES_DB'] or
+    if (actual_db != config['POSTGRES_DB'] or
             actual_port != int(config['POSTGRES_PORT']) or
             actual_host != config['POSTGRES_HOST']):
-        raise CliError('Connected PostgreSQL target does not match the development .env.')
+        raise CliError('Connected PostgreSQL target does not match the selected .env.')
 
 
-def confirmation(command, username):
+def confirmation(command, username, identity):
     if not sys.stdin.isatty():
         raise CliError('Apply requires an interactive terminal for typed confirmation.')
-    phrase = f'{command} {username}'
+    database, address, port, host = identity
+    phrase = f'{command.upper()} {username} ON {database}@{host} (server {address or "unavailable"}:{port})'
     print(f'Type exactly: {phrase}')
     if input('Confirmation: ') != phrase:
         raise CliError('Confirmation did not match; no change committed.')
@@ -206,8 +211,8 @@ def run_database_command(args):
     if args.command == 'create':
         validate_email(args.email)
         validate_text(args.full_name, 'Full name', 255, spaces=True)
-    config = load_config()
-    print(f'Configuration: {ENV_FILE}')
+    config = load_config(args.env_file)
+    print(f'Configuration: {args.env_file}')
     conn = None
     try:
         conn = connect(config)
@@ -238,10 +243,13 @@ def run_database_command(args):
         if not args.apply:
             print('Dry run: no change committed. Use --apply to confirm this .env target and proceed.')
             return
-        confirmation(args.command, username)
+        confirmation(args.command, username, identity)
         password_hash = hash_password(prompt_password()) if args.command == 'create' else None
         # Start a fresh, short transaction and recheck the target and account.
-        verify_identity(database_identity(conn, config), config)
+        current_identity = database_identity(conn, config)
+        verify_identity(current_identity, config)
+        if current_identity != identity:
+            raise CliError('Connected PostgreSQL target changed since preview; retry from the beginning.')
         if args.command == 'create':
             check_duplicate(conn, username, args.email)
             now = datetime.now(timezone.utc).replace(tzinfo=None)
