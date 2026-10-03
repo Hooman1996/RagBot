@@ -19,17 +19,32 @@ _current_trace: contextvars.ContextVar[RequestTrace | None] = contextvars.Contex
 
 
 def safe_request_id(candidate: str | None) -> str:
-    """Accept a bounded opaque ID or generate one; never derive it from content."""
+    """Legacy ingress behavior; retained until the Stage 2 middleware change."""
 
     if candidate and _REQUEST_ID_PATTERN.fullmatch(candidate):
         return candidate
     return uuid.uuid4().hex
 
 
+def new_request_id() -> str:
+    """Create the authoritative server-owned ID for Stage 2 ingress."""
+
+    return uuid.uuid4().hex
+
+
+def safe_upstream_request_id(candidate: str | None) -> str | None:
+    """Retain only a bounded, header-safe upstream correlation value."""
+
+    if candidate and _REQUEST_ID_PATTERN.fullmatch(candidate):
+        return candidate
+    return None
+
+
 @dataclass
 class RequestTrace:
     request_id: str
     process_id: int
+    upstream_request_id: str | None = None
     received_ns: int = field(default_factory=time.perf_counter_ns)
     received_timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

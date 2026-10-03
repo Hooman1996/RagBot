@@ -17,7 +17,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import pandas as pd
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from typing import List, Optional
 
@@ -69,6 +69,7 @@ from utils.request_instrumentation import (
 from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.structured_logging import log_event, start_logging
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
@@ -218,6 +219,8 @@ async def lifespan(app: FastAPI):
     global tei_http_client, tei_sync_http_client, llm_client
 
     validate_config()
+    logging_runtime = start_logging()
+    app.state.logging_runtime = logging_runtime
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
     request_limiter = AdmissionLimiter(
         REQUEST_CONCURRENCY_LIMIT, name="answering"
@@ -462,6 +465,9 @@ async def lifespan(app: FastAPI):
         history_rewriting_service = None
         ocr_service = None
         text_processor = None
+        logging_runtime.close()
+        if hasattr(app.state, "logging_runtime"):
+            delattr(app.state, "logging_runtime")
         if cleanup_errors and active_exception is None:
             raise RuntimeError("One or more resources failed to close") from (
                 cleanup_errors[0]
@@ -501,18 +507,17 @@ async def request_trace_middleware(request: Request, call_next):
             response.headers[name] = value
         return response
     finally:
-        request_trace_logger.info(
-            json.dumps(
-                {
-                    "event": "request_complete",
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status_code": getattr(response, "status_code", 500),
-                    **trace_summary(trace),
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            )
+        log_event(
+            request_trace_logger,
+            "request_complete",
+            {
+                "method": request.method,
+                "path": request.url.path,
+                "status_code": getattr(response, "status_code", 500),
+                "started_at": trace.received_timestamp,
+                "completed_at": datetime.now(timezone.utc).isoformat(),
+                **trace_summary(trace),
+            },
         )
         reset_current_trace(token)
 

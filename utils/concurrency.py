@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import functools
-import json
 import logging
 import os
 import time
@@ -14,6 +13,7 @@ from dataclasses import dataclass
 from typing import Any, TypeVar
 
 from .request_instrumentation import current_trace, trace_span
+from .structured_logging import log_event
 from .service_errors import ServiceOverloadedError
 
 T = TypeVar("T")
@@ -71,24 +71,21 @@ class AdmissionLimiter:
         release_reason: str | None = None,
     ) -> None:
         snapshot = self.snapshot()
-        admission_logger.info(
-            json.dumps(
-                {
-                    "event": event,
-                    "request_id": request_id,
-                    "process_id": os.getpid(),
-                    "limiter_id": self.limiter_id,
-                    "capacity": self.capacity,
-                    "active": snapshot.active,
-                    "waiting": snapshot.waiting,
-                    "outcome": outcome,
-                    "wait_ms": wait_ms,
-                    "hold_ms": hold_ms,
-                    "release_reason": release_reason,
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            )
+        log_event(
+            admission_logger,
+            event,
+            {
+                "request_id": request_id,
+                "process_id": os.getpid(),
+                "limiter_id": self.limiter_id,
+                "capacity": self.capacity,
+                "active": snapshot.active,
+                "waiting": snapshot.waiting,
+                "outcome": outcome,
+                "wait_ms": wait_ms,
+                "hold_ms": hold_ms,
+                "release_reason": release_reason,
+            },
         )
 
     @asynccontextmanager

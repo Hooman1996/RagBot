@@ -4,7 +4,7 @@ import unittest
 import uuid
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import httpx
 from fastapi import FastAPI
@@ -452,6 +452,33 @@ class RuntimeSnapshotTests(unittest.IsolatedAsyncioTestCase):
         self.assertIsNone(snapshot["git_commit_sha"])
         self.assertIsNone(body["git_commit_sha"])
         self.assertNotIn(secret, response.text)
+
+
+class DatasourceEndpointTests(unittest.IsolatedAsyncioTestCase):
+    async def test_internal_datasources_use_existing_listing_contract(self):
+        app = _app(SuccessfulAnsweringService())
+        app.state.db_manager = SimpleNamespace(get_available_documents=lambda: [])
+        app.state.blocking_runner = SimpleNamespace(run=AsyncMock(return_value=[
+            {"title": "General_FAQ"}, {"title": "General_FAQ"},
+            {"title": "Cards"},
+        ]))
+        transport = httpx.ASGITransport(app=app)
+        with patch.object(internal_api, "get_document_category", return_value="FAQ"):
+            async with httpx.AsyncClient(transport=transport, base_url="http://test") as client:
+                response = await client.get("/api/internal/evaluation/v1/datasources")
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {
+            "documents": [
+                {"name": "General_FAQ", "category": "FAQ"},
+                {"name": "Cards", "category": "FAQ"},
+            ],
+            "count": 2,
+            "categories": ["FAQ"],
+        })
+        app.state.blocking_runner.run.assert_awaited_once_with(
+            app.state.db_manager.get_available_documents
+        )
 
 
 class StaticIsolationTests(unittest.TestCase):
