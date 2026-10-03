@@ -15,7 +15,7 @@ from logging.handlers import QueueHandler, QueueListener
 from typing import Any, TextIO
 
 from .log_sanitizer import REDACTED, sanitize, scrub_text
-from .request_instrumentation import current_trace
+from .request_instrumentation import current_operation, current_trace
 
 SCHEMA_VERSION = "1.0"
 DEFAULT_QUEUE_SIZE = 4096
@@ -87,6 +87,9 @@ class RequestContextFilter(logging.Filter):
         trace = current_trace()
         record.ragbot_request_id = trace.request_id if trace else None
         record.ragbot_upstream_request_id = trace.upstream_request_id if trace else None
+        operation = current_operation() if trace is None else None
+        record.ragbot_operation_id = operation.operation_id if operation else None
+        record.ragbot_parent_request_id = operation.parent_request_id if operation else None
         return True
 
 
@@ -107,6 +110,8 @@ class JsonEventFormatter(logging.Formatter):
                 scrub_text(upstream_id, hmac_secret=self.settings.pii_hmac_secret, max_chars=128)
                 if isinstance(upstream_id, str) else None
             )
+            operation_id = getattr(record, "ragbot_operation_id", None)
+            parent_request_id = getattr(record, "ragbot_parent_request_id", None)
             output: dict[str, Any] = {
                 "@timestamp": datetime.fromtimestamp(record.created, timezone.utc).isoformat(),
                 "schema_version": SCHEMA_VERSION,
@@ -116,6 +121,10 @@ class JsonEventFormatter(logging.Formatter):
                 "level": record.levelname,
                 "request_id": getattr(record, "ragbot_request_id", None),
                 "upstream_request_id": safe_upstream_id,
+                "operation_id": (scrub_text(operation_id, hmac_secret=self.settings.pii_hmac_secret, max_chars=128)
+                                 if isinstance(operation_id, str) else None),
+                "parent_request_id": (scrub_text(parent_request_id, hmac_secret=self.settings.pii_hmac_secret, max_chars=128)
+                                      if isinstance(parent_request_id, str) else None),
                 "process": {"pid": record.process},
             }
             if raw is not None:
@@ -142,6 +151,8 @@ class JsonEventFormatter(logging.Formatter):
                 "level": "ERROR",
                 "request_id": None,
                 "upstream_request_id": None,
+                "operation_id": None,
+                "parent_request_id": None,
                 "process": {"pid": os.getpid()},
             }, separators=(",", ":"))
 
@@ -216,6 +227,17 @@ class LoggingRuntime:
         self.previous_access_disabled = self.uvicorn_access.disabled
         self.closed = False
 
+    def snapshot(self) -> dict[str, int | bool]:
+        """Worker-local, content-free queue and writer health."""
+        worker = self.listener._thread
+        return {
+            "queue_capacity": self.queue.maxsize,
+            "queue_depth": self.queue.qsize(),
+            "overflow_count": self.handler.overflow_count,
+            "stdout_write_errors": self.stream_handler.write_errors,
+            "listener_alive": bool(worker is not None and worker.is_alive()),
+        }
+
     def start(self) -> "LoggingRuntime":
         self.listener.start()
         self.root.addHandler(self.handler)
@@ -247,3 +269,8 @@ def log_event(logger: logging.Logger, event: str, data: dict[str, Any] | None = 
         logger.log(level, "", extra={"ragbot_event_data": {"event": event, "data": data or {}}})
     except Exception:
         pass
+
+
+def application_json_logging_active() -> bool:
+    """Whether RagBot's JSON stdout worker is installed in this process."""
+    return any(isinstance(handler, _SafeQueueHandler) for handler in logging.getLogger().handlers)

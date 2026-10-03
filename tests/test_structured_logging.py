@@ -227,6 +227,7 @@ class LoggerTests(unittest.TestCase):
         finally:
             broken.close()
         self.assertGreaterEqual(broken.stream_handler.write_errors, 1)
+        self.assertGreaterEqual(broken.snapshot()["stdout_write_errors"], 1)
 
     def test_overflow_falls_back_without_dropping_event(self):
         from utils.structured_logging import LoggingRuntime
@@ -240,6 +241,9 @@ class LoggerTests(unittest.TestCase):
             self.assertEqual(stream.getvalue(), "")
             runtime.handler.handle(record)
             self.assertEqual(runtime.handler.overflow_count, 1)
+            self.assertEqual(runtime.snapshot()["overflow_count"], 1)
+            self.assertEqual(runtime.snapshot()["queue_depth"], 1)
+            self.assertFalse(runtime.snapshot()["listener_alive"])
             self.assertEqual(json.loads(stream.getvalue())["event"], "overflow")
         finally:
             runtime.stream_handler.close()

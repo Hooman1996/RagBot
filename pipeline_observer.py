@@ -10,6 +10,7 @@ import contextvars
 import dataclasses
 import hashlib
 import json
+import logging
 import math
 import threading
 import time
@@ -20,6 +21,7 @@ from enum import StrEnum
 from typing import Any, Iterator, Protocol, runtime_checkable
 
 from utils.performance_config import PipelineDebugSettings
+from utils.structured_logging import application_json_logging_active, log_event
 
 
 class PipelineStage(StrEnum):
@@ -213,6 +215,15 @@ class TerminalPipelineObserver:
             return
         self._finished = True
         try:
+            if application_json_logging_active():
+                # Evaluation observers still retain their records; terminal-only
+                # content must not bypass the JSON stdout privacy contract.
+                data = {"stage_count": len(self._records)}
+                if error is not None:
+                    data["error"] = {"type": type(error).__name__}
+                log_event(logging.getLogger("pipeline_debug"),
+                          "pipeline_debug_report_suppressed", data)
+                return
             report = self.build_report(result=result, error=error)
             _print_pipeline_report(report)
         except BaseException:

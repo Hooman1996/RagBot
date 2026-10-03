@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import asyncio
 import json
-import logging
 import time
 from dataclasses import dataclass
 from typing import Callable, Sequence
@@ -40,9 +39,6 @@ class MassAnswerProgress:
     timed_out_rows: int
     queued_rows: int
     active_rows: int
-
-
-logger = logging.getLogger(__name__)
 
 
 class MassAnswerProcessor:
@@ -227,10 +223,6 @@ class MassAnswerProcessor:
         except ValueError as exc:
             return self._failure(index, started, "invalid_input", str(exc))
         except Exception:
-            logger.exception(
-                "mass-answer row failed",
-                extra={"batch_id": batch_id, "row_index": index},
-            )
             return self._failure(
                 index, started, "internal_error", "Row processing failed"
             )

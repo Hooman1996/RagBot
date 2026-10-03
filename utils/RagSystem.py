@@ -5,6 +5,7 @@ import numpy as np
 from typing import List, Dict, Tuple, Optional
 from dataclasses import dataclass
 import json
+import logging
 from pathlib import Path
 import re
 import torch
@@ -18,6 +19,7 @@ load_dotenv()
 # 1. Replace Hugging Face & Torch imports with the OpenAI client
 from openai import APIConnectionError, APIStatusError, APITimeoutError, AsyncOpenAI
 import httpx
+from utils.structured_logging import log_event
 from utils.concurrency import BoundedBlockingRunner
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import (
@@ -133,7 +135,7 @@ class RAGSystem:
         # self.tokenizer = tokenizer
         # self.model = pipe
 
-        print("Initializing RAG System...")
+        log_event(logging.getLogger(__name__), "rag_system_initializing")
 
         self.search_engine = PersianHybridSearch(
             # use_embeddings=True,
@@ -156,7 +158,7 @@ class RAGSystem:
 
         # Create a prompt template
 
-        print("RAG System initialized!")
+        log_event(logging.getLogger(__name__), "rag_system_initialized")
 
     def get_model_and_processor(self):
         # Kept for backward compatibility if other scripts call it,

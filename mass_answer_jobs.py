@@ -5,6 +5,8 @@ from __future__ import annotations
 import asyncio
 from collections.abc import Awaitable, Callable
 
+from utils.request_instrumentation import OperationContext, background_operation_context
+
 
 class MassAnswerJobManager:
     def __init__(self):
@@ -23,12 +25,24 @@ class MassAnswerJobManager:
     def get_progress(self, job_id: str):
         return self._progress.get(job_id)
 
-    def start(self, job_id: str, operation: Callable[[], Awaitable[None]]) -> None:
+    def start(
+        self, job_id: str, operation: Callable[[], Awaitable[None]],
+        *, parent_request_id: str | None = None,
+    ) -> None:
         if self._closed:
             raise RuntimeError("mass-answer job manager is closed")
         if job_id in self._tasks:
             raise ValueError("job is already active")
-        task = asyncio.create_task(operation(), name=f"mass-answer:{job_id}")
+        OperationContext(job_id, parent_request_id, "mass_answer")
+
+        async def detached() -> None:
+            with background_operation_context(
+                operation_id=job_id, parent_request_id=parent_request_id,
+                operation_type="mass_answer",
+            ):
+                await operation()
+
+        task = asyncio.create_task(detached(), name=f"mass-answer:{job_id}")
         self._tasks[job_id] = task
 
         def finished(done: asyncio.Task[None]) -> None:

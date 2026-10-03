@@ -6,9 +6,9 @@ import contextvars
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 from datetime import datetime, timezone
 
 
@@ -16,6 +16,53 @@ _REQUEST_ID_PATTERN = re.compile(r"^[A-Za-z0-9._:-]{1,128}$")
 _current_trace: contextvars.ContextVar[RequestTrace | None] = contextvars.ContextVar(
     "request_trace", default=None
 )
+
+
+_OPERATION_TYPE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+_current_operation: contextvars.ContextVar[OperationContext | None] = contextvars.ContextVar(
+    "background_operation", default=None
+)
+
+
+@dataclass(frozen=True)
+class OperationContext:
+    operation_id: str
+    parent_request_id: str | None
+    operation_type: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.operation_id, str) or (
+            safe_upstream_request_id(self.operation_id) != self.operation_id
+        ):
+            raise ValueError("operation_id must be a bounded safe identifier")
+        if self.parent_request_id is not None and (
+            not isinstance(self.parent_request_id, str) or
+            safe_upstream_request_id(self.parent_request_id) != self.parent_request_id
+        ):
+            raise ValueError("parent_request_id must be a bounded safe identifier")
+        if not isinstance(self.operation_type, str) or not _OPERATION_TYPE_PATTERN.fullmatch(
+            self.operation_type
+        ):
+            raise ValueError("operation_type must be a bounded safe identifier")
+
+
+def current_operation() -> OperationContext | None:
+    return _current_operation.get()
+
+
+@contextmanager
+def background_operation_context(
+    *, operation_id: str, parent_request_id: str | None, operation_type: str
+) -> Iterator[OperationContext]:
+    """Detach copied HTTP ContextVar state inside a background operation."""
+    operation = OperationContext(operation_id, parent_request_id, operation_type)
+    trace_token = _current_trace.set(None)
+    operation_token = _current_operation.set(operation)
+    try:
+        yield operation
+    finally:
+        _current_operation.reset(operation_token)
+        _current_trace.reset(trace_token)
 
 
 def new_request_id() -> str:

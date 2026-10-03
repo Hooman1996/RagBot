@@ -17,6 +17,7 @@ import psycopg2.extras
 from parsivar import Normalizer
 from frontend_paths import TEMPLATE_DIR
 from web_permissions import permissions_for
+from utils.structured_logging import log_event
 from new_architecture.knowledge_update import (
     KnowledgeChunkNotFound,
     KnowledgeUpdateCoordinator,
@@ -403,7 +404,9 @@ def api_create_chunk(payload: ChunkCreatePayload):
         try:
             conn.rollback()
         except Exception as rollback_exc:
-            logger.error("Chunk creation rollback failed: %s", type(rollback_exc).__name__)
+            log_event(logger, "knowledge_chunk_rollback_failed", {
+                "error": {"type": type(rollback_exc).__name__},
+            }, level=logging.ERROR)
         if qdrant_write_attempted:
             try:
                 main.qdrant_client.delete(
@@ -412,18 +415,15 @@ def api_create_chunk(payload: ChunkCreatePayload):
                     wait=True,
                 )
             except Exception as compensation_exc:
-                logger.error(
-                    "Chunk creation Qdrant compensation failed: %s",
-                    type(compensation_exc).__name__,
-                )
+                log_event(logger, "knowledge_chunk_compensation_failed", {
+                    "error": {"type": type(compensation_exc).__name__},
+                }, level=logging.ERROR)
         if isinstance(exc, HTTPException):
             raise
-        logger.error(
-            "Knowledge chunk creation failed at %s: %s (SQLSTATE %s)",
-            stage,
-            type(exc).__name__,
-            getattr(exc, "pgcode", None),
-        )
+        log_event(logger, "knowledge_chunk_creation_failed", {
+            "stage": stage, "error": {"type": type(exc).__name__},
+            "sqlstate": getattr(exc, "pgcode", None),
+        }, level=logging.ERROR)
         raise HTTPException(status_code=500, detail="Creation pipeline failed.") from exc
     finally:
         cursor.close()
