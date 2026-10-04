@@ -207,6 +207,18 @@ class LoggerTests(unittest.TestCase):
         self.runtime.close()
         self.assertEqual(access_logger.disabled, self.runtime.previous_access_disabled)
 
+    def test_routine_httpx_info_is_suppressed_and_level_restored(self):
+        httpx_logger = logging.getLogger("httpx")
+        self.assertEqual(httpx_logger.level, logging.WARNING)
+        httpx_logger.info("synthetic URL that must not be logged")
+        httpx_logger.warning("safe operational warning")
+        events = self._events()
+        self.assertEqual(len(events), 1)
+        self.assertEqual(events[0]["event"], "application_log")
+        self.assertEqual(events[0]["logger"], "httpx")
+        self.assertNotIn("synthetic URL", self.stream.getvalue())
+        self.assertEqual(httpx_logger.level, self.runtime.previous_httpx_level)
+
     def test_no_network_calls_and_listener_lifecycle(self):
         with mock.patch.object(socket.socket, "connect", side_effect=AssertionError("network")):
             log_event(self.logger, "offline", {"result": "ok"})

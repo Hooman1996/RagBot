@@ -79,10 +79,13 @@ exception type. The independent in-memory Eval observer and Eval HTTP payloads
 retain their existing behavior. Terminal report printing remains available for
 explicit offline/dev use without the application JSON runtime.
 
-The active startup prints in the RAG system and Persian processor are now safe
-structured lifecycle events. Important knowledge-base failure logs are safe
+The active startup output in the RAG system, Persian processor, and dependency
+connection service is now safe structured lifecycle events. Important knowledge-base failure logs are safe
 structured events; mass-answer row exceptions contribute to aggregate job
-counts rather than one log per row. CLI/offline tools such as
+counts rather than one log per row. Routine `httpx` INFO records are suppressed while the logging runtime is active
+because their URLs are withheld by the safe formatter and they otherwise add
+one record per outbound dependency call. Its prior log level is restored at
+shutdown; `httpx` warnings/errors remain available. CLI/offline tools such as
 `utils/extract_text_chunks.py` keep their terminal prints. Third-party and
 Uvicorn stderr output remains separately routed as described below.
 
@@ -98,7 +101,44 @@ Normal request handling performs bounded observation/sanitization and a nonblock
 
 Run `python benchmarks/logging_overhead.py` for the Stage 1 sanitizer/enqueue micro-benchmark and `python benchmarks/http_logging_overhead.py` for Stage 2's small in-process ASGI endpoint comparison (disabled versus enabled, median/p95, plus 50 concurrent requests). On the Stage 2.1 local recheck (1,000 in-process HTTP requests), the disabled endpoint measured median/p95 5.5/6.1 µs and the enabled endpoint 291.7/376.3 µs; added median/p95 was 286.2/370.2 µs. Fifty concurrent requests had 50 unique IDs and `overflow_count=0`. The Stage 1 sanitizer/enqueue recheck (5,000 samples) measured median/p95 247.7/727.0 µs versus 4.9/5.1 µs for the old JSON preparation baseline. Repeated local sanitizer runs varied substantially (median 230.1–685.8 µs), so these numbers should be treated as rough estimates. These measurements exclude model inference and external services; they are local micro-benchmarks, not production latency conclusions.
 
-Stage 3 local recheck: HTTP disabled median/p95 5.4/12.8 µs, enabled 291.8/363.6 µs, added 286.4/350.9 µs; 50 concurrent requests had 50 unique IDs and `overflow_count=0`. The sanitizer/enqueue recheck measured 346.1/826.4 µs median/p95 versus 4.9/5.2 µs baseline. These runs are noisy local measurements; Stage 3 does not establish a production latency result. The final production-like RagBot concurrency benchmark belongs to the final logging stage. No zero-overhead claim is made.
+Stage 3 local recheck: HTTP disabled median/p95 5.4/12.8 µs, enabled 291.8/363.6 µs, added 286.4/350.9 µs; 50 concurrent requests had 50 unique IDs and `overflow_count=0`. The sanitizer/enqueue recheck measured 346.1/826.4 µs median/p95 versus 4.9/5.2 µs baseline. These runs are noisy local measurements; Stage 3 does not establish a production latency result. A Stage 4 DEV full-pipeline comparison is recorded below. No zero-overhead claim is made.
+
+## Stage 4 validation
+
+On 2026-10-03, the temporary DEV application was exercised through the persistence-free internal Eval turn endpoint against existing private PostgreSQL, Qdrant, MinIO, TEI, and vLLM dependencies. The clean `main` baseline was `661c12e`; the feature started at `37a8a9f`. Each 200-request run used 200 concurrent clients, the same synthetic questions and documents, three warmups, and unchanged DEV limits (`REQUEST_CONCURRENCY_LIMIT=100`, admission timeout 12 seconds). These are DEV measurements, not production guarantees.
+
+| Run | Completed Eval turns | Dependency errors | Mean | Median | p95 | p99 | Throughput |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| Main baseline 1 | 116 | 84 | 16.682 s | 15.956 s | 23.270 s | 24.100 s | 8.20/s |
+| Feature before routine `httpx` INFO suppression | 121 | 79 | 17.335 s | 16.328 s | 23.848 s | 24.648 s | 8.08/s |
+| Feature after suppression | 123 | 77 | 17.580 s | 16.602 s | 24.386 s | 25.163 s | 7.87/s |
+| Main baseline 2 | 113 | 87 | 16.519 s | 14.912 s | 22.193 s | 23.670 s | 8.24/s |
+
+All 200 requests in each run returned HTTP 200; the failures above are Eval `DEPENDENCY_UNAVAILABLE` results under DEV saturation. This Eval route bypasses the admission wrapper used by browser/mobile talk, so the configured admission limits were not exercised here. The corrected feature's mixed mean and p95 were 5.4% and 4.8% higher than baseline 1, and 6.4% and 9.9% higher than baseline 2. Different completion/error mixtures confounded that aggregate comparison, and unchanged baseline p95 varied about 4.6%. Stage 4 therefore stopped for review instead of attributing the difference to logging. All run means were below 35 seconds. The controlled Stage 4.1 evidence below resolves the logging-attribution gate.
+
+The local isolated ASGI benchmark measured disabled median/p95 5.4/5.7 µs, enabled 286.2/340.9 µs, and added median/p95 280.8/335.2 µs, below the 1 ms p95 gate. Its 50 concurrent requests had unique IDs and zero overflow. The separate sanitizer/enqueue benchmark measured median/p95 681.3/1141.2 µs versus 4.9/5.1 µs JSON preparation; this synthetic hot loop is noisy and does not include model time.
+
+For the corrected 200-request feature run, the runtime snapshot reported queue capacity 4096, depth 0 after completion, overflow 0, stdout write errors 0, and a live listener. Its stdout contained 418 valid JSON objects and zero non-JSON lines: 204 `request_received`, 204 `response_completed` (200 measured, three warmups, one health check), and 10 safe startup events. All 204 request IDs were unique, pairs matched, response headers matched measured IDs, and the synthetic upstream ID remained separate. Routine `httpx` INFO messages were suppressed during the logging runtime after an earlier run produced 1,081 content-free `application_log` records. The startup dependency connection path was also changed to emit safe structured events instead of plaintext stdout.
+
+Three synthetic Eval parity cases returned identical answer hashes, status, and pipeline decisions on main and the feature. Reranker output hashes differed without changing the selected answers in that sample. Stage 4.1 checked this variation against repeated baseline runs; the evidence below includes score-independent differences rather than assuming floating-point rounding alone. The [production handoff](LOGGING_PRODUCTION_HANDOFF.md) describes deployment and rollback.
+
+## Stage 4.1 controlled attribution
+
+On 2026-10-04, baseline `661c12e` and feature `37a8a9f` plus the retained Stage 4 corrections were measured with identical deterministic synthetic payloads and unchanged DEV services. Each experiment ran B1, F1, F2, B2, B3, F3 sequentially, with 200 measured requests per run, three fixed sequential warmups, and a two-second settle. Dependency health passed twice. Short concurrency preflights found saturation at 32/16/8; concurrency **2** completed 16/16 and was fixed for clean attribution. The operational experiment retained concurrency **200**. [The detailed report](performance/STRUCTURED_LOGGING_STAGE4_1.md) records the source/corpus fingerprints, all run metrics, common-success comparisons, timing spans, resources, and limitations.
+
+All six clean runs completed **200/200**, with no dependency or other failures. Median run-level completed mean was **3.8998 s baseline / 3.9012 s feature (+0.04%)**; median p95 was **5.3585 / 5.3673 s (+0.17%)**. Common-success mean deltas were **+0.98%, +0.13%, −0.10%** and p95 deltas **+0.82%, −0.02%, +0.17%**. Existing vLLM p95 remained essentially equal (5106.72/5106.01 ms); the client-minus-endpoint p95 did not grow (8.22/8.14 ms). Missing admission, pipeline, rewrite, and response-build headers were not invented.
+
+The feature-only body-off control completed 200/200 at the same concurrency: mean/median/p95 **3.8991 / 3.5223 / 5.3668 s**, versus normal feature run-metric medians **3.9012 / 3.5278 / 5.3673 s** (−0.05% / −0.15% / −0.01%). Body capture/sanitization did not reveal a material bottleneck. Persistent body flags stayed true; no additional WARNING-level control was needed.
+
+At concurrency 200, baseline completion counts were **140/147/159** and feature **145/149/137**; all other requests were dependency errors, not client timeouts. Completed and mixed means stayed below 35 seconds in every run. Median run-level completed mean/p95 were 3.89%/4.57% higher for the feature, which remains relevant operational evidence. However, common-success mean deltas reversed direction (**+2.96%, +3.47%, −4.22%**) and p95 deltas were **+5.90%, +5.81%, −6.43%**. Large variation appeared in endpoint blocking waits and embedding/Qdrant/reranker spans, with vLLM timings sometimes faster; the clean data, body control, and isolated test do not support attributing a reproducible multi-percent regression to logging. This DEV stack still has substantial dependency failures at 200 concurrency; these tests do not certify production capacity or prove the precise cause of each timing fluctuation.
+
+Each normal feature run had queue capacity 4096, final depth 0, overflow 0, stdout write errors 0, and a live listener; sampled depth was also 0. Unauthorized `/api/metrics/admission` stayed 401, with user-authorized runtime snapshots supplying health. Each run emitted exactly **200 measured request/completion pairs**, 200 unique server IDs, and 420 JSON objects overall including warmup, health, metrics, and startup. No non-JSON stdout, `logging_error`, httpx INFO flood, or routine per-stage event flood appeared. The synthetic failed login remained 401 and its credentials were absent from stdout.
+
+Three deterministic parity samples and all **600 clean common-success comparisons** had equal answers, intents, selected contexts, generation hashes, and routing. Reranker scores/ordering varied on both feature and repeated baseline code. Under saturation, a few answer/generation hashes also varied (2/0/3 feature pairs; 0/1 baseline-repeat pairs), while selected contexts and routing stayed equal. This establishes runtime variation in this workload; no logging-caused semantic regression was found, and no RAG semantics were changed.
+
+The isolated HTTP recheck measured **299.4 µs median / 431.7 µs p95 added overhead**, below the 1 ms p95 gate; 50 concurrent IDs were unique and overflow was zero. Sanitizer/enqueue median/p95 was 328.8/888.7 µs. Logging has measurable overhead. Controlled DEV attribution supports manual merge review of this logging feature; final production-like latency/capacity validation remains a deployment-stage task.
+
+The repeatable metadata-only localhost client is `benchmarks/structured_logging_attribution.py`. Supply a reviewed synthetic Eval corpus and temporary app URL: `python benchmarks/structured_logging_attribution.py --base-url http://127.0.0.1:PORT --corpus /private/synthetic-corpus.json --concurrency 2 --run-label B1 --output /private/B1.json`. It never starts services or changes their configuration, uses no retries, and stores only outcome/timing/ID/hash metadata. Review the detailed report's warmup and balancing procedure before comparing runs.
 
 ## Configuration
 

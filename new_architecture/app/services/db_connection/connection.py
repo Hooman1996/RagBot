@@ -6,6 +6,7 @@
 import psycopg2
 import psycopg2.extras
 import os
+import logging
 from minio import Minio
 from minio.error import S3Error
 from qdrant_client import QdrantClient
@@ -16,6 +17,9 @@ load_dotenv()
 # Services
 import bcrypt
 from ...config import Config
+from utils.structured_logging import log_event
+
+_logger = logging.getLogger(__name__)
 # ═══════════════════════════════════════════════════════════
 # 1. DATABASE CONNECTION SERVICE
 # ═══════════════════════════════════════════════════════════
@@ -30,14 +34,8 @@ class DatabaseConnections:
 
     def connect_all(self) -> bool:
         """Connect to all databases"""
-        print()
-        print("=" * 80)
-        print("CONNECTING TO DATABASES")
-        print("=" * 80)
-        print()
 
         # PostgreSQL
-        print("→ Connecting to PostgreSQL...")
         try:
 
             self.postgres_conn = psycopg2.connect(
@@ -49,13 +47,14 @@ class DatabaseConnections:
                 connect_timeout=5,
                 options="-c statement_timeout=10000 -c lock_timeout=3000",
             )
-            print(f"  ✓ PostgreSQL connected")
-        except Exception as e:
-            print(f"  ❌ PostgreSQL connection failed: {e}")
+            log_event(_logger, "dependency_connected", {"dependency": "postgres"})
+        except Exception as exc:
+            log_event(_logger, "dependency_connect_failed", {
+                "dependency": "postgres", "error": {"type": type(exc).__name__},
+            }, level=logging.ERROR)
             return False
 
         # MinIO
-        print("→ Connecting to MinIO...")
         try:
 
             self.minio_client = Minio(
@@ -68,15 +67,18 @@ class DatabaseConnections:
             # Ensure bucket exists
             if not self.minio_client.bucket_exists(Config.MINIO_BUCKET):
                 self.minio_client.make_bucket(Config.MINIO_BUCKET)
-                print(f"  → Created bucket: {Config.MINIO_BUCKET}")
+                log_event(_logger, "dependency_resource_created", {
+                    "dependency": "minio", "resource_type": "bucket",
+                })
 
-            print(f"  ✓ MinIO connected")
-        except Exception as e:
-            print(f"  ❌ MinIO connection failed: {e}")
+            log_event(_logger, "dependency_connected", {"dependency": "minio"})
+        except Exception as exc:
+            log_event(_logger, "dependency_connect_failed", {
+                "dependency": "minio", "error": {"type": type(exc).__name__},
+            }, level=logging.ERROR)
             return False
 
         # Qdrant
-        print("→ Connecting to Qdrant...")
         try:
             self.qdrant_client = QdrantClient(
                 host=Config.QDRANT_HOST,
@@ -101,17 +103,18 @@ class DatabaseConnections:
                         distance=Distance.COSINE
                     )
                 )
-                print(f"  → Created collection: {Config.QDRANT_COLLECTION}")
+                log_event(_logger, "dependency_resource_created", {
+                    "dependency": "qdrant", "resource_type": "collection",
+                })
 
-            print(f"  ✓ Qdrant connected")
-        except Exception as e:
-            print(f"  ❌ Qdrant connection failed: {e}")
-            print(os.getenv("QDRANT_HTTPS"))
+            log_event(_logger, "dependency_connected", {"dependency": "qdrant"})
+        except Exception as exc:
+            log_event(_logger, "dependency_connect_failed", {
+                "dependency": "qdrant", "error": {"type": type(exc).__name__},
+            }, level=logging.ERROR)
             return False
 
-        print()
-        print("✅ All databases connected successfully")
-        print()
+        log_event(_logger, "dependencies_connected")
 
         return True
 

@@ -225,6 +225,8 @@ class LoggingRuntime:
         self.previous_level = self.root.level
         self.uvicorn_access = logging.getLogger("uvicorn.access")
         self.previous_access_disabled = self.uvicorn_access.disabled
+        self.httpx_logger = logging.getLogger("httpx")
+        self.previous_httpx_level = self.httpx_logger.level
         self.closed = False
 
     def snapshot(self) -> dict[str, int | bool]:
@@ -245,6 +247,9 @@ class LoggingRuntime:
         # Uvicorn's default access formatter writes plaintext URL/query data
         # to stdout. The structured HTTP pair replaces that access record.
         self.uvicorn_access.disabled = True
+        # One INFO record per outbound HTTP request adds queue pressure;
+        # our safe formatter cannot retain its URL or response details.
+        self.httpx_logger.setLevel(logging.WARNING)
         return self
 
     def close(self) -> None:
@@ -254,6 +259,7 @@ class LoggingRuntime:
         self.root.removeHandler(self.handler)
         self.root.setLevel(self.previous_level)
         self.uvicorn_access.disabled = self.previous_access_disabled
+        self.httpx_logger.setLevel(self.previous_httpx_level)
         self.listener.stop()
         self.stream_handler.close()
 
