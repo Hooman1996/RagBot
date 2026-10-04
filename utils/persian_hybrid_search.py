@@ -1,5 +1,6 @@
 import numpy as np
 import asyncio
+import logging
 import math
 import threading
 import time
@@ -25,6 +26,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import httpx
+from utils.structured_logging import log_event
 from utils.concurrency import BoundedBlockingRunner
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import (
@@ -67,7 +69,7 @@ class PersianTextProcessor:
     """
 
     def __init__(self, use_stemming: bool = True):
-        print("Initializing Persian text processor with Parsivar...")
+        log_event(logging.getLogger(__name__), "persian_processor_initializing")
 
         # Initialize Parsivar components
         self.normalizer = Normalizer()
@@ -79,7 +81,9 @@ class PersianTextProcessor:
         # Persian stopwords list
         self.stopwords = self._load_stopwords()
 
-        print(f"Loaded {len(self.stopwords)} Persian stopwords")
+        log_event(logging.getLogger(__name__), "persian_stopwords_loaded", {
+            "stopword_count": len(self.stopwords),
+        })
 
     def _load_stopwords(self) -> set:
         """Load Persian stopwords"""

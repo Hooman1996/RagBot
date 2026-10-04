@@ -6,9 +6,9 @@ import contextvars
 import re
 import time
 import uuid
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from dataclasses import dataclass, field
-from typing import Any, AsyncIterator
+from typing import Any, AsyncIterator, Iterator
 from datetime import datetime, timezone
 
 
@@ -18,18 +18,72 @@ _current_trace: contextvars.ContextVar[RequestTrace | None] = contextvars.Contex
 )
 
 
-def safe_request_id(candidate: str | None) -> str:
-    """Accept a bounded opaque ID or generate one; never derive it from content."""
+_OPERATION_TYPE_PATTERN = re.compile(r"^[A-Za-z][A-Za-z0-9_]{0,63}$")
+_current_operation: contextvars.ContextVar[OperationContext | None] = contextvars.ContextVar(
+    "background_operation", default=None
+)
+
+
+@dataclass(frozen=True)
+class OperationContext:
+    operation_id: str
+    parent_request_id: str | None
+    operation_type: str
+
+    def __post_init__(self) -> None:
+        if not isinstance(self.operation_id, str) or (
+            safe_upstream_request_id(self.operation_id) != self.operation_id
+        ):
+            raise ValueError("operation_id must be a bounded safe identifier")
+        if self.parent_request_id is not None and (
+            not isinstance(self.parent_request_id, str) or
+            safe_upstream_request_id(self.parent_request_id) != self.parent_request_id
+        ):
+            raise ValueError("parent_request_id must be a bounded safe identifier")
+        if not isinstance(self.operation_type, str) or not _OPERATION_TYPE_PATTERN.fullmatch(
+            self.operation_type
+        ):
+            raise ValueError("operation_type must be a bounded safe identifier")
+
+
+def current_operation() -> OperationContext | None:
+    return _current_operation.get()
+
+
+@contextmanager
+def background_operation_context(
+    *, operation_id: str, parent_request_id: str | None, operation_type: str
+) -> Iterator[OperationContext]:
+    """Detach copied HTTP ContextVar state inside a background operation."""
+    operation = OperationContext(operation_id, parent_request_id, operation_type)
+    trace_token = _current_trace.set(None)
+    operation_token = _current_operation.set(operation)
+    try:
+        yield operation
+    finally:
+        _current_operation.reset(operation_token)
+        _current_trace.reset(trace_token)
+
+
+def new_request_id() -> str:
+    """Create the authoritative server-owned ID for Stage 2 ingress."""
+
+    return uuid.uuid4().hex
+
+
+def safe_upstream_request_id(candidate: str | None) -> str | None:
+    """Retain only a bounded, header-safe upstream correlation value."""
 
     if candidate and _REQUEST_ID_PATTERN.fullmatch(candidate):
         return candidate
-    return uuid.uuid4().hex
+    return None
 
 
 @dataclass
 class RequestTrace:
     request_id: str
     process_id: int
+    upstream_request_id: str | None = None
     received_ns: int = field(default_factory=time.perf_counter_ns)
     received_timestamp: str = field(
         default_factory=lambda: datetime.now(timezone.utc).isoformat()

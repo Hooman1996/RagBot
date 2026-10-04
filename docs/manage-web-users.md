@@ -1,61 +1,72 @@
-# Development browser-user operator guide
+# Browser-user operator guide
 
-Run `scripts/manage_web_users.py` from the checkout using the project's Python environment. It writes only to the existing PostgreSQL `users` table. It has no schema, delete, password-reset, bulk, role-editor, or custom-grant command. Effective permissions come from the selected role in `web_permissions.py`; the browser middleware reads the current database role for every request. `dashboard_viewer` can chat and has read-only Knowledge Base access. A different permission combination requires a reviewed policy change. Client-supplied role or permission headers do not grant access.
+`scripts/manage_web_users.py` manages browser accounts in the existing PostgreSQL `users` table. It is environment-agnostic: the selected env file determines the database. The same commands, prompts, and checks apply everywhere. By default it reads the checkout root `.env`; pass `--env-file PATH` before the command to select another file. The file must define `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD`. No database credentials are printed.
 
-Keep a private **development** `.env` in the checkout, or pass `--env-file /secure/path/to/development.env` before the subcommand. The CLI reads `POSTGRES_HOST`, `POSTGRES_PORT`, `POSTGRES_DB`, `POSTGRES_USER`, and `POSTGRES_PASSWORD` from that file and requires `WEB_ENVIRONMENT=development`. It never prints credentials. The examples below use illustrative target values; replace them with values confirmed independently by the development database operator. A database name by itself is insufficient: verify the server address and port as well. Do not use production or staging targets.
+`WEB_ENVIRONMENT` is used elsewhere by RagBot browser/session configuration, but `manage_web_users.py` does not use it to decide whether user management is allowed.
 
-## 1. List roles
+The CLI has no schema, delete, password-reset, bulk-seeding, role-editor, or custom-grant command. Effective permissions come only from the selected role in `web_permissions.py`. The browser middleware reads the current database role for every request. `dashboard_viewer` can chat and browse Knowledge Base read-only; a different permission combination requires a reviewed policy change.
+
+## Inspect roles and accounts
 
 ```sh
 python scripts/manage_web_users.py roles
+python scripts/manage_web_users.py users
+python scripts/manage_web_users.py show --username example_user
 ```
 
-This does not read `.env` or connect to PostgreSQL. Each line shows effective grant identifiers and the landing page.
+`roles` needs no env file or database connection. `users` lists up to 100 accounts by default; `users --limit 200` raises the limit (maximum 500). `users` and `show` display IDs, usernames, active status, roles, and effective permissions. They do not display email addresses, password hashes, or other profile data.
 
-## 2. Inspect testuser
+To use another configuration file, place `--env-file` before the command. The filename has no special meaning:
 
 ```sh
-python scripts/manage_web_users.py show --username testuser
+python scripts/manage_web_users.py --env-file /secure/config/ragbot.env users
+python scripts/manage_web_users.py --env-file /secure/config/ragbot.env show --username example_user
 ```
 
-`show` reports only ID, username, active status, role, and effective grants. It requires the private development `.env` and makes a read-only query.
+The same option also works with `create` and `set-role`.
 
-## 3. Create one dashboard_viewer development account
+## Create a user
 
-Preview first; this checks for a duplicate username or email without prompting for a password or writing:
+Preview first:
 
 ```sh
-python scripts/manage_web_users.py create --username dashboard_demo --email dashboard_demo@example.test --full-name 'Dashboard Demo' --role dashboard_viewer
+python scripts/manage_web_users.py create --username example_user --email example_user@example.test --full-name "Example User" --role dashboard_viewer
 ```
 
-After independently confirming the development target, apply using its **actual** identity (the values below are examples):
+After checking the printed target, apply the same command:
 
 ```sh
-python scripts/manage_web_users.py create --username dashboard_demo --email dashboard_demo@example.test --full-name 'Dashboard Demo' --role dashboard_viewer --apply --expect-db faq_dev --expect-host 127.0.0.1 --expect-server-address 127.0.0.1 --expect-server-port 5432
+python scripts/manage_web_users.py create --username example_user --email example_user@example.test --full-name "Example User" --role dashboard_viewer --apply
 ```
 
-The CLI displays the connected database name, reported server address and port, and configured host. It requires an exact typed confirmation, then prompts twice using a private password input. Use a fresh password of at least 12 characters and at most 72 UTF-8 bytes. It hashes with bcrypt, matching the current login service. Never place a password in a command or shell history.
+The CLI requires an interactive terminal and asks you to type a confirmation naming the operation, username, database, configured host, and server address and port. It then prompts twice for a password using private input. Passwords must be nonempty and at most 72 UTF-8 bytes, without NUL. Never place a password in a command or shell history. The CLI stores only a bcrypt hash compatible with RagBot login. New users receive a UUID, active and unverified status, empty settings, and timestamps. Duplicate usernames or emails are rejected; existing accounts are never overwritten.
 
-## 4. Change testuser's role
-
-Preview the old and proposed new role:
+For an explicitly selected file, use the same command format:
 
 ```sh
-python scripts/manage_web_users.py set-role --username testuser --role dashboard_viewer
+python scripts/manage_web_users.py --env-file /secure/config/ragbot.env create --username example_user --email example_user@example.test --full-name "Example User" --role dashboard_viewer --apply
 ```
 
-Only after positively identifying the development server, apply (replace the sample identity with the verified one):
+## Change a role
+
+Preview, then apply:
 
 ```sh
-python scripts/manage_web_users.py set-role --username testuser --role dashboard_viewer --apply --expect-db faq_dev --expect-host 127.0.0.1 --expect-server-address 127.0.0.1 --expect-server-port 5432
+python scripts/manage_web_users.py set-role --username example_user --role analytics_viewer
+python scripts/manage_web_users.py set-role --username example_user --role analytics_viewer --apply
+python scripts/manage_web_users.py --env-file /secure/config/ragbot.env set-role --username example_user --role analytics_viewer --apply
 ```
 
-The CLI rolls back if the identity, account, or typed confirmation changes or fails. It commits one account change per apply command.
+Only the role and updated timestamp change. The CLI rechecks the account and connected database before committing.
 
-## 5. Verify
+## Operator workflow
 
-```sh
-python scripts/manage_web_users.py show --username testuser
-```
+1. Check that the selected env file points to the intended PostgreSQL database.
+2. Run `create` or `set-role` without `--apply` to preview; this makes no database change.
+3. Check the printed database name, configured host, and server address and port.
+4. Repeat the command with `--apply` in an interactive terminal.
+5. Type the requested target-specific confirmation exactly.
+6. For `create`, enter the password twice when prompted.
+7. Verify the result with `show --username example_user` or `users`.
 
-After signing in through the development browser app on port 7000, inspect `GET http://localhost:7000/api/auth/me` in DevTools. Confirm `role` is `dashboard_viewer`, `landing_path` is `/app`, and the effective grants are `analytics`, `chat`, `documents`, `downloads`, `feedback`, `kb_page`, `kb_read`, `ocr`, and `sessions`. Confirm `kb_write`, `batch`, and `system` are absent. The chat page should link to Analytics and Knowledge Base, and Knowledge Base should show the Persian read-only indicator and no write controls.
+The CLI completes its preview read before waiting for confirmation and rechecks the target and account in a short write transaction. Failed checks roll back without committing.

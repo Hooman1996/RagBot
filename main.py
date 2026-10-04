@@ -57,18 +57,13 @@ from internal_evaluation_api import router as internal_evaluation_router
 from utils.persian_hybrid_search import PersianTextProcessor
 from utils.concurrency import AdmissionLimiter, BoundedBlockingRunner, run_with_limit
 from utils.request_instrumentation import (
-    RequestTrace,
-    current_trace,
-    mark_event,
-    reset_current_trace,
-    safe_request_id,
-    set_current_trace,
-    trace_span,
-    trace_summary,
+    background_operation_context, current_trace, mark_event, trace_span,
 )
+from utils.http_logging_middleware import HttpLoggingMiddleware
 from utils.service_errors import ServiceError, ServiceUnavailableError
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.structured_logging import log_event, start_logging
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
@@ -218,6 +213,8 @@ async def lifespan(app: FastAPI):
     global tei_http_client, tei_sync_http_client, llm_client
 
     validate_config()
+    logging_runtime = start_logging()
+    app.state.logging_runtime = logging_runtime
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
     request_limiter = AdmissionLimiter(
         REQUEST_CONCURRENCY_LIMIT, name="answering"
@@ -462,6 +459,9 @@ async def lifespan(app: FastAPI):
         history_rewriting_service = None
         ocr_service = None
         text_processor = None
+        logging_runtime.close()
+        if hasattr(app.state, "logging_runtime"):
+            delattr(app.state, "logging_runtime")
         if cleanup_errors and active_exception is None:
             raise RuntimeError("One or more resources failed to close") from (
                 cleanup_errors[0]
@@ -477,44 +477,14 @@ app = FastAPI(
     lifespan=lifespan
 )
 
-request_trace_logger = logging.getLogger("request_trace")
-
-
 @app.middleware("http")
 async def browser_auth_middleware(request: Request, call_next):
     return await web_auth_middleware(request, call_next, db_manager)
 
 
-@app.middleware("http")
-async def request_trace_middleware(request: Request, call_next):
-    trace = RequestTrace(
-        request_id=safe_request_id(request.headers.get("X-Request-Id")),
-        process_id=os.getpid(),
-    )
-    trace.mark("request_received")
-    token = set_current_trace(trace)
-    response = None
-    try:
-        response = await call_next(request)
-        trace.mark("response_returned")
-        for name, value in trace.response_headers().items():
-            response.headers[name] = value
-        return response
-    finally:
-        request_trace_logger.info(
-            json.dumps(
-                {
-                    "event": "request_complete",
-                    "method": request.method,
-                    "path": request.url.path,
-                    "status_code": getattr(response, "status_code", 500),
-                    **trace_summary(trace),
-                },
-                separators=(",", ":"),
-                sort_keys=True,
-            )
-        )
-        reset_current_trace(token)
+# One outer ASGI trace for authentication, endpoints, and response streaming.
+app.add_middleware(HttpLoggingMiddleware)
+
 
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals["versioned_asset"] = versioned_asset
@@ -531,6 +501,7 @@ app.include_router(internal_evaluation_router)
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---
 @app.exception_handler(BankException)
 async def bank_exception_handler(request: Request, exc: BankException):
+    trace = current_trace()
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -538,7 +509,7 @@ async def bank_exception_handler(request: Request, exc: BankException):
             "errorDesc": exc.error_desc,
             "errorDetails": {
                 "timestamp": datetime.utcnow().isoformat(),
-                "requestId": request.headers.get("X-Request-Id", "unknown_request"),
+                "requestId": trace.request_id if trace is not None else "unknown_request",
                 "message": str(exc.error_desc),
                 "exception": "BankException",
                 "details": None
@@ -549,6 +520,7 @@ async def bank_exception_handler(request: Request, exc: BankException):
 
 @app.exception_handler(ServiceError)
 async def service_exception_handler(request: Request, exc: ServiceError):
+    trace = current_trace()
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -556,9 +528,7 @@ async def service_exception_handler(request: Request, exc: ServiceError):
             "errorDesc": exc.public_message,
             "errorDetails": {
                 "timestamp": datetime.utcnow().isoformat(),
-                "requestId": request.headers.get(
-                    "X-Request-Id", "unknown_request"
-                ),
+                "requestId": trace.request_id if trace is not None else "unknown_request",
                 "message": exc.public_message,
                 "exception": type(exc).__name__,
                 "details": None,
@@ -1222,10 +1192,10 @@ async def _process_mass_answer(
         filename: str,
 ):
     batch_id = str(uuid.uuid4())
-    mass_answer_logger.info(
-        "mass-answer direct batch started",
-        extra={"batch_id": batch_id, "input_filename": filename, "total_rows": len(df.index)},
-    )
+    log_event(mass_answer_logger, "mass_answer_direct_started", {
+        "batch_id": batch_id, "total_rows": len(df.index),
+        "selected_document_count": len(docs_list),
+    })
     path, rows = await _process_mass_dataframe(
         df=df,
         question_col=question_col,
@@ -1233,21 +1203,30 @@ async def _process_mass_answer(
         ext=ext,
         batch_id=batch_id,
     )
-    mass_answer_logger.info(
-        "mass-answer direct batch completed",
-        extra={
-            "batch_id": batch_id,
-            "total_rows": len(rows),
-            "successful_rows": sum(row.status == "success" for row in rows),
-            "failed_rows": sum(row.status != "success" for row in rows),
-        },
+    log_event(mass_answer_logger, "mass_answer_direct_completed", {
+        "batch_id": batch_id,
+        "total_rows": len(rows),
+        "successful_rows": sum(row.status == "success" for row in rows),
+        "failed_rows": sum(row.status != "success" for row in rows),
+    })
+    trace = current_trace()
+    background_tasks.add_task(
+        _remove_mass_answer_artifact, path, trace.request_id if trace else None,
     )
-    background_tasks.add_task(os.remove, path)
     return FileResponse(
         path,
         filename=f"Answered_{filename}",
         media_type=_mass_answer_media_type(ext),
     )
+
+
+def _remove_mass_answer_artifact(path: str, parent_request_id: str | None) -> None:
+    """Detach Starlette's post-response cleanup from HTTP correlation."""
+    with background_operation_context(
+        operation_id=uuid.uuid4().hex, parent_request_id=parent_request_id,
+        operation_type="mass_answer_cleanup",
+    ):
+        os.remove(path)
 
 
 async def _process_mass_dataframe(
@@ -1323,6 +1302,7 @@ async def _create_mass_answer_job(*, df, question_col, docs_list, ext, filename,
         await blocking_runner.run(shutil.rmtree, artifact_directory, True)
         raise
 
+    trace = current_trace()
     mass_answer_job_manager.start(
         job_id,
         lambda: _run_mass_answer_job(
@@ -1333,11 +1313,12 @@ async def _create_mass_answer_job(*, df, question_col, docs_list, ext, filename,
             ext=ext,
             output_path=output_path,
         ),
+        parent_request_id=trace.request_id if trace else None,
     )
-    mass_answer_logger.info(
-        "mass-answer job queued",
-        extra={"batch_id": job_id, "input_filename": filename, "total_rows": len(df.index)},
-    )
+    log_event(mass_answer_logger, "mass_answer_job_queued", {
+        "job_id": job_id, "total_rows": len(df.index), "valid_rows": valid_rows,
+        "selected_document_count": len(docs_list),
+    })
     return JSONResponse(
         status_code=status.HTTP_202_ACCEPTED,
         content={
@@ -1363,6 +1344,7 @@ async def _run_mass_answer_job(
             {"status": "running", "started_at": started},
             wait_for_completion_on_cancel=True,
         )
+        log_event(mass_answer_logger, "mass_answer_job_started", {"job_id": job_id})
         path, rows = await _process_mass_dataframe(
             df=df,
             question_col=question_col,
@@ -1402,39 +1384,51 @@ async def _run_mass_answer_job(
             },
             wait_for_completion_on_cancel=True,
         )
-        mass_answer_logger.info(
-            "mass-answer job completed",
-            extra={
-                "batch_id": job_id,
-                "total_rows": len(rows),
-                "successful_rows": successful,
-                "failed_rows": len(rows) - successful,
-                "duration_ms": round(total_duration_ms, 3),
-            },
-        )
+        log_event(mass_answer_logger, "mass_answer_job_completed", {
+            "job_id": job_id,
+            "completed_rows": len(rows),
+            "successful_rows": successful,
+            "failed_rows": len(rows) - successful,
+            "timed_out_rows": timed_out,
+            "duration_ms": round(total_duration_ms, 3),
+            "average_row_ms": sum(durations) / len(durations) if durations else 0.0,
+            "p50_row_ms": _percentile(durations, 0.50),
+            "p95_row_ms": _percentile(durations, 0.95),
+            "p99_row_ms": _percentile(durations, 0.99),
+        })
     except asyncio.CancelledError:
-        await blocking_runner.run(
-            db_manager.update_mass_answer_job,
-            job_id,
-            {
-                "status": "failed",
-                "error_message": "Worker stopped before completion",
-                "completed_at": datetime.utcnow(),
-            },
-            wait_for_completion_on_cancel=True,
-        )
+        try:
+            await blocking_runner.run(
+                db_manager.update_mass_answer_job,
+                job_id,
+                {
+                    "status": "failed",
+                    "error_message": "Worker stopped before completion",
+                    "completed_at": datetime.utcnow(),
+                },
+                wait_for_completion_on_cancel=True,
+            )
+        finally:
+            log_event(mass_answer_logger, "mass_answer_job_cancelled", {
+                "job_id": job_id,
+            }, level=logging.WARNING)
         raise
-    except Exception:
-        await blocking_runner.run(
-            db_manager.update_mass_answer_job,
-            job_id,
-            {
-                "status": "failed",
-                "error_message": "Batch processing failed",
-                "completed_at": datetime.utcnow(),
-            },
-            wait_for_completion_on_cancel=True,
-        )
+    except Exception as exc:
+        try:
+            await blocking_runner.run(
+                db_manager.update_mass_answer_job,
+                job_id,
+                {
+                    "status": "failed",
+                    "error_message": "Batch processing failed",
+                    "completed_at": datetime.utcnow(),
+                },
+                wait_for_completion_on_cancel=True,
+            )
+        finally:
+            log_event(mass_answer_logger, "mass_answer_job_failed", {
+                "job_id": job_id, "error": {"type": type(exc).__name__},
+            }, level=logging.ERROR)
 
 
 def _mass_job_public(job: dict) -> dict:
@@ -1617,6 +1611,7 @@ async def admission_metrics(request: Request):
             "released_total": admission.released_total,
         },
         "blocking": request.app.state.blocking_runner.snapshot(),
+        "logging": request.app.state.logging_runtime.snapshot(),
     }
     active_rag = request.app.state.answering_service.agent_service.rag_system
     if hasattr(active_rag, "metrics_snapshot"):
@@ -1630,4 +1625,4 @@ if __name__ == "__main__":
     import uvicorn
 
 
-    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*")
+    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*", access_log=False)
