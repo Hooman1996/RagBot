@@ -65,7 +65,7 @@ Bodies are captured only when `LOG_REQUEST_BODY` or `LOG_RESPONSE_BODY` is enabl
 
 The central sanitizer copies nested structures, caps depth/items/text, and never emits Python repr strings, raw binary data, or exception text. Secret fields such as passwords, hashes, auth headers, cookies, CSRF values, tokens, API keys, and secrets become `[REDACTED]` case insensitively. HTTP bodies are sanitized *before* structured events are enqueued; the listener formatter sanitizes defensively again. Ordinary legacy log messages remain withheld because arbitrary interpolation can contain customer data.
 
-National-code fields use HMAC-SHA256 with a dedicated `LOG_PII_HMAC_SECRET` and a `pii_` plus 24-hex-character prefix. The same code and key produce the same pseudonym. With no logging key, they become `[REDACTED]`. Phone, mobile, email, username, full name, and display name fields are always redacted. Job access fields are treated as secrets. Normal fields such as `service_name` are retained. A redaction marker or existing pseudonym is preserved through defensive re-sanitization. The key must never be `WEB_SESSION_SECRET`; production generates and stores it through deployment secret management, never Git. `LOG_PII_REDACTION=false` is rejected at startup.
+National-code fields use HMAC-SHA256 with a dedicated `LOG_PII_HMAC_SECRET` and a `pii_` plus 24-hex-character prefix. The same code and key produce the same pseudonym. With no logging key, they become `[REDACTED]`. Phone, mobile, email, username, full name, and display name fields are always redacted. Job access fields are treated as secrets. Normal fields such as `service_name` are retained. A redaction marker or existing pseudonym is preserved through defensive re-sanitization. The key must never be `WEB_SESSION_SECRET`; only deployments requiring stable pseudonyms need to generate and store it through secret management, never Git. The default deployment can leave it unset: national codes are redacted and no extra logging secret is required. `LOG_PII_REDACTION=false` is rejected at startup.
 
 Free text is scrubbed with bounded precompiled patterns for likely Iranian national codes, Iranian mobile numbers, email, Luhn-valid card numbers, Sheba/IBAN-like values, bearer/JWT-like tokens, and inline credential assignments. Persian/Arabic digits are supported where applicable. Pattern matching cannot identify every possible secret; avoid adding raw sensitive material under unrelated field names.
 
@@ -152,9 +152,9 @@ The repeatable metadata-only localhost client is `benchmarks/structured_logging_
 | `LOG_REQUEST_BODY` | `true` | Enable eligible request body capture. |
 | `LOG_RESPONSE_BODY` | `true` | Enable eligible response body capture. |
 | `LOG_PII_REDACTION` | `true` | Mandatory safety setting. |
-| `LOG_PII_HMAC_SECRET` | unset | Dedicated national-code pseudonymization key; unset means redaction. |
+| `LOG_PII_HMAC_SECRET` | unset | Optional dedicated key for stable national-code labels; leave unset for `[REDACTED]`. |
 
-`.env.example.generated` sets `LOG_ENVIRONMENT=staging`. `Production_ENV` sets `LOG_ENVIRONMENT=production` and contains only non-secret logging defaults; the HMAC key belongs in deployment secret management.
+The RagBot root env files share the same eight active logging settings. Local `.env` sets `LOG_ENVIRONMENT=development`; `.env.example.generated` sets `staging`; `Production_ENV` sets `production`. The older `env.example` retains its existing production web-auth profile and therefore also sets the log label to `production`; its unrelated environment settings are unchanged. `LOG_PII_HMAC_SECRET` is a commented optional setting in these files. Leave it unset for ordinary deployment: national codes become `[REDACTED]`. Configure a dedicated secret through deployment secret management only when operators need stable pseudonymous labels across events. It is never a startup requirement. Backup and separate Eval env files are outside this RagBot logging configuration.
 
 ## Uvicorn and stdout
 
