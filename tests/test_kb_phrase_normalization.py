@@ -3,6 +3,9 @@ from __future__ import annotations
 import asyncio
 import importlib.util
 import unittest
+import tempfile
+import json
+from unittest.mock import patch
 from pathlib import Path
 
 import numpy as np
@@ -29,16 +32,28 @@ JINA_DIM = _INTENT_MODULE.JINA_DIM
 
 class KBPhraseLexiconTests(unittest.TestCase):
     def test_current_kb_artifact_has_expected_gate_counts(self):
-        artifact = build_lexicon(FAQ_DIR)
-        from training.intent_classifier.common import read_faqs
-        faqs, _ = read_faqs(FAQ_DIR)
+        from training.persian_normalization import build_kb_phrase_lexicon as builder
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            faqs = root / "faqs"
+            faqs.mkdir()
+            for index in range(3):
+                (faqs / f"synthetic-{index}.txt").write_text(
+                    f"question : پرسش نمونه {index}؟\nanswer : SYNTHETIC_ONLY\n"
+                    "question category : نمونه آزمایشی. sub_category : مورد آزمایش",
+                    encoding="utf-8",
+                )
+            with patch.object(builder, "ROOT", root):
+                artifact = build_lexicon(faqs)
         statistics = artifact["statistics"]
-        self.assertEqual(statistics["valid_faq_files"], len(faqs))
-        self.assertGreater(statistics["valid_faq_files"], 0)
-        self.assertEqual(statistics["accepted_phrases"], len(artifact["entries"]))
-        self.assertGreaterEqual(statistics["accepted_phrases"], KB_PHRASE_NORMALIZER.phrase_count)
+        self.assertEqual(statistics["valid_faq_files"], 3)
+        self.assertEqual(statistics["accepted_phrases"], 2)
+        self.assertEqual({entry["canonical"] for entry in artifact["entries"]},
+                         {"نمونه آزمایشی", "مورد آزمایش"})
+        self.assertGreaterEqual(statistics["rejected_candidates"], 1)
         self.assertEqual(statistics["discovered_candidates"],
                          statistics["accepted_phrases"] + statistics["rejected_candidates"])
+        self.assertNotIn("SYNTHETIC_ONLY", json.dumps(artifact))
 
     def test_requested_known_phrases_restore_to_space_form(self):
         groups = (

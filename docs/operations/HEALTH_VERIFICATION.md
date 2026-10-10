@@ -51,7 +51,7 @@ not quality or identity of absent historical production weights.
 | `tests/intent_classifier/test_finetuning_pipeline.py::CheckpointCompatibilityTests::test_original_checkpoint_checksum_is_unchanged` | test | FileNotFoundError: historical checkpoint absent. Same baseline/health cause. | Missing artifact | Preserved as explicit artifact audit; unavailable, no fabricated checksum or passing claim. |
 | `tests/intent_classifier/test_finetuning_pipeline.py::CheckpointCompatibilityTests::test_probability_above_threshold_routes_to_chitchat` | test | TypeError: missing required and expected_sha256. Same baseline/health cause. | Stale fixture | Supply explicit parameters and mark supplied deterministic test network initialized; PASS. |
 | `tests/intent_classifier/test_finetuning_pipeline.py::CheckpointCompatibilityTests::test_probability_between_half_and_threshold_routes_to_banking` | test | TypeError: missing required and expected_sha256. Same baseline/health cause. | Stale fixture | Same fixture repair; threshold assertions unchanged; PASS. |
-| `tests/test_kb_phrase_normalization.py::KBPhraseLexiconTests::test_current_kb_artifact_has_expected_gate_counts` | test | AssertionError: valid FAQ count 1526 versus stale 1426; regenerated phrase count 104 versus historical 100. Same baseline/health cause. | Stale assertion | Compare parser-derived counts and entry/count accounting; retain published lexicon checks; PASS. |
+| `tests/test_kb_phrase_normalization.py::KBPhraseLexiconTests::test_current_kb_artifact_has_expected_gate_counts` | test | AssertionError: valid FAQ count 1526 versus stale 1426; regenerated phrase count 104 versus historical 100. Same baseline/health cause. | Stale assertion | Build from synthetic FAQs with exact source/phrase counts, rejection accounting and answer exclusion; retain published lexicon checks; PASS. |
 | `tests/test_kb_phrase_normalization.py::IntentRoutingOrthographyTests::test_travel_spacing_variants_have_identical_classifier_input_and_route` | test | TypeError: missing similarity_threshold, required, expected_sha256. Same baseline/health cause. | Stale fixture | Explicit constructor parameters; normalization/routing assertions retained; PASS. |
 | `tests/test_p2_concurrency.py::StaticLifecycleAndBoundaryTests::test_database_connections_are_created_inside_worker_operations` | test | AssertionError: metadata worker call moved from AgentService to ProductionHistoryProvider; classifier worker call formatting changed. Same baseline/health cause. | Stale source assertion | Check current provider and classifier worker boundaries; real concurrency tests retained; PASS. |
 | `tests/test_retrieval_normalization_consistency.py::RetrievalNormalizationConsistencyTests::test_classifier_receives_same_text_and_keeps_same_route` | test | TypeError: missing similarity_threshold, required, expected_sha256. Same baseline/health cause. | Stale fixture | Explicit constructor parameters; fixed actionable network and text assertions retained; PASS. |
@@ -132,3 +132,16 @@ was added or triggered. Both original branch tips must remain ancestors of the
 final main merge before any branch deletion. Unrelated local ignore-rule changes,
 private/generated/untracked files, and the pre-existing environment-file deletion
 are excluded from commits and preserved in the primary checkout.
+
+Clean merged-checkout verification exposed that the lexicon builder test still
+used privately installed FAQ input. It now builds from three temporary synthetic
+FAQ records and asserts exact accepted phrases/counts, rejected-candidate
+accounting, and answer exclusion. The published 100-phrase lexicon checks remain
+unchanged. Private FAQ contents are neither required nor published.
+
+Final isolated merged-main worktree (no private environment, FAQ files, or weights):
+focused health command **93 passed + 7 subtests**, 15.52 s; complete offline
+command **570 passed + 109 subtests**, 26 explicitly deselected integration/artifact
+cases, 34.96 s; no failures/errors/skips/hangs. Synthetic FAQ suite: **9 passed +
+7 subtests**, 3.56 s. Compilation and `git diff --check` passed. The original main
+and feature tips were both verified as ancestors of the normal merge.
