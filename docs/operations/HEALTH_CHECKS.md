@@ -181,7 +181,10 @@ base prefix and reuse its configured HTTP headers/auth.
 For vLLM, only a terminal `/v1` is removed to derive health. For example,
 `https://example.invalid/proxy/v1/` produces `/proxy/health` and
 `/proxy/v1/models`, preserving HTTPS, authority and proxy prefix. The active
-OpenAI client's default headers (including applicable credentials) are used.
+OpenAI client's default headers (including applicable credentials) are used,
+with only SDK `Omit` sentinels removed from the health-request copy. Configured
+organization/project and custom string headers remain intact. SDK configuration
+and business transport are unchanged; invalid non-sentinel values still fail.
 A base without `/v1` gets health at its prefix and model listing at
 `<prefix>/v1/models`. Redirects are disabled. These example hosts are illustrative
 and never appear in actual health responses.

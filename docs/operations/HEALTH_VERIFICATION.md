@@ -145,3 +145,52 @@ command **570 passed + 109 subtests**, 26 explicitly deselected integration/arti
 cases, 34.96 s; no failures/errors/skips/hangs. Synthetic FAQ suite: **9 passed +
 7 subtests**, 3.56 s. Compilation and `git diff --check` passed. The original main
 and feature tips were both verified as ancestors of the normal merge.
+
+
+## vLLM OpenAI header compatibility repair
+
+Installed OpenAI SDK 2.6.1 defines `AsyncOpenAI.default_headers` as a mapping of
+strings or `Omit` values. Unset organization/project headers contain fresh `Omit()`
+sentinels. Passing that mapping directly into the isolated HTTPX client raises
+`TypeError` during request construction, before network I/O; the component checker
+reports `CHECK_ERROR` even when the dependency would be healthy.
+
+The repair imports the SDK's public `Omit` type and builds a fresh dictionary
+excluding only its instances. It preserves authorization, custom headers,
+configured organization/project strings, and invalid non-sentinel values. It does
+not change the SDK or business HTTP client, probe URLs/model validation, deadlines,
+caching, failure mapping, chatbot behavior, or monitoring's reporting-only boundary.
+
+Eleven real-SDK offline regression cases construct `AsyncOpenAI` with synthetic
+credentials, scoped removal of `OPENAI_ORG_ID`/`OPENAI_PROJECT_ID`, and separate
+business/health MockTransports. They exercise actual HTTPX header construction:
+unset/configured metadata, custom omission values, preserved auth/custom strings,
+proxy-prefixed trailing `/v1/` URLs, missing models, health/model-list rejection,
+timeouts/malformed results, and arbitrary invalid headers. Only the expected GET
+requests are allowed; business requests fail the fixture. Health cleanup leaves
+the SDK and business transport open and their settings unchanged, before fixture
+teardown closes fixture-owned clients separately.
+
+Before the fix, the principal command
+`python -m pytest -p tests.offline_guard tests/test_health_checks.py -k 'vllm_real_sdk_headers' -q --tb=short`
+failed both cases with `CHECK_ERROR` (2 failed, 102 deselected), demonstrating the
+regression would catch the production defect.
+
+An already-running process continues using its loaded code until the production
+team deploys/reloads it through its normal procedure. Publishing this repair does
+not change a running endpoint. No live vLLM/production probe, inference, restart,
+stop, deployment, or infrastructure change was performed.
+
+Verification in the existing `faq` environment (Python 3.12.12), with
+`HF_HUB_OFFLINE=1 TRANSFORMERS_OFFLINE=1`:
+
+| Exact command | Actual result |
+| --- | --- |
+| `python -m pytest -p tests.offline_guard tests/test_health_checks.py -q` | 104 passed, 7 subtests, 2 installed SWIG warnings; 15.46 s |
+| `python -m pytest -p tests.offline_guard tests -m 'not integration and not artifact' -q --tb=short -o faulthandler_timeout=60` | 581 passed, 109 subtests, 26 existing explicit integration/artifact deselections, 44 existing warnings; 34.89 s; no failures/errors/skips/hangs |
+| `python -m compileall -q utils/health_checks.py tests/test_health_checks.py` | Passed |
+| `git diff --check` | Passed |
+
+The tracked offline guard remained enabled and unchanged. The deselected SQL
+integration and private-artifact audits retain the limitations described above;
+no live dependency availability or production validation is claimed.

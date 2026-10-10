@@ -16,6 +16,7 @@ import psycopg2
 import urllib3
 from minio import Minio
 from minio.error import InvalidResponseError, S3Error, ServerError
+from openai import Omit
 
 from .structured_logging import log_event
 
@@ -414,7 +415,11 @@ class HealthCoordinator:
         if rag is None:
             raise CheckFailure("CHECK_NOT_INITIALIZED")
         client = rag.client
-        headers = client.default_headers
+        headers = {
+            name: value
+            for name, value in client.default_headers.items()
+            if not isinstance(value, Omit)
+        }
         await self.service_health(endpoint(client.base_url, "health", openai_root=True), headers=headers)
         base = str(client.base_url).rstrip("/")
         models_url = endpoint(base, "models" if urlsplit(base).path.endswith("/v1") else "v1/models")

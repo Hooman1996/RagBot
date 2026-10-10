@@ -6,6 +6,7 @@ import logging
 import threading
 import time
 import unittest
+from contextlib import asynccontextmanager
 from types import SimpleNamespace as NS
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -15,6 +16,7 @@ import pytest
 from fastapi import FastAPI
 from minio import Minio
 from minio.error import S3Error
+from openai import AsyncOpenAI, Omit
 
 from utils import health_checks as health
 from utils.client_lifecycle import SerializedClient
@@ -662,4 +664,144 @@ def test_installed_qdrant_sdk_target_and_auth_compatibility():
         finally:
             await coordinator.aclose()
             client.close()
+    asyncio.run(run())
+
+
+@pytest.fixture
+def real_openai_health_runtime(monkeypatch):
+    # SDK constructor defaults consult these variables even with a synthetic key.
+    monkeypatch.delenv("OPENAI_ORG_ID", raising=False)
+    monkeypatch.delenv("OPENAI_PROJECT_ID", raising=False)
+
+    @asynccontextmanager
+    async def create(handler=healthy_http, *, configured=False, invalid_header=False):
+        def business_request_forbidden(_request):
+            raise AssertionError("Health must use its isolated transport")
+
+        business_http = httpx.AsyncClient(
+            transport=httpx.MockTransport(business_request_forbidden),
+            headers={"X-Business-Client": "synthetic-business"},
+        )
+        custom_headers = {"X-Synthetic-Custom": "synthetic-custom", "X-Synthetic-Omitted": Omit()}
+        if invalid_header:
+            custom_headers["X-Synthetic-Invalid"] = 42
+        sdk = AsyncOpenAI(
+            api_key="synthetic-vllm-key",
+            base_url="https://vllm.test/proxy/v1/",
+            organization="synthetic-org" if configured else None,
+            project="synthetic-project" if configured else None,
+            default_headers=custom_headers,
+            http_client=business_http,
+        )
+        app = runtime()
+        app.state.agent_service.rag_system.client = sdk
+        requests = []
+
+        def health_request(request):
+            requests.append(request)
+            assert request.method == "GET"
+            return handler(request)
+
+        coordinator = health.HealthCoordinator(
+            app, http_client=httpx.AsyncClient(transport=httpx.MockTransport(health_request)),
+        )
+        business_headers = dict(business_http.headers)
+        sdk_headers = sdk.default_headers
+        try:
+            yield coordinator, sdk, requests
+        finally:
+            try:
+                await coordinator.aclose()
+                assert coordinator.http.is_closed
+                assert not sdk.is_closed()
+                assert not business_http.is_closed
+                assert dict(business_http.headers) == business_headers
+                assert sdk.organization == ("synthetic-org" if configured else None)
+                assert sdk.project == ("synthetic-project" if configured else None)
+                # Omit instances are freshly constructed by the SDK property.
+                for name, original in sdk_headers.items():
+                    current = sdk.default_headers[name]
+                    if isinstance(original, Omit):
+                        assert isinstance(current, Omit)
+                    else:
+                        assert current == original
+            finally:
+                # Only fixture teardown owns closure of this business client.
+                await sdk.close()
+                assert business_http.is_closed
+
+    return create
+
+
+@pytest.mark.parametrize("configured", [False, True])
+def test_vllm_real_sdk_headers(real_openai_health_runtime, configured):
+    async def run():
+        async with real_openai_health_runtime(configured=configured) as (coordinator, sdk, requests):
+            for name in ("OpenAI-Organization", "OpenAI-Project"):
+                assert isinstance(sdk.default_headers[name], str if configured else Omit)
+            check = await coordinator._check("vllm")
+            assert (check.status, check.code) == ("up", "CHECK_OK")
+            assert [(request.method, str(request.url)) for request in requests] == [
+                ("GET", "https://vllm.test/proxy/health"),
+                ("GET", "https://vllm.test/proxy/v1/models"),
+            ]
+            for request in requests:
+                assert request.headers["Authorization"] == "Bearer synthetic-vllm-key"
+                assert request.headers["X-Synthetic-Custom"] == "synthetic-custom"
+                assert "X-Synthetic-Omitted" not in request.headers
+                if configured:
+                    assert request.headers["OpenAI-Organization"] == "synthetic-org"
+                    assert request.headers["OpenAI-Project"] == "synthetic-project"
+                else:
+                    assert "OpenAI-Organization" not in request.headers
+                    assert "OpenAI-Project" not in request.headers
+    asyncio.run(run())
+
+
+@pytest.mark.parametrize("scenario,code", [
+    ("missing_model", "CHECK_RESOURCE_MISSING"),
+    ("health_auth", "CHECK_AUTH_FAILED"),
+    ("health_unhealthy", "CHECK_UNHEALTHY"),
+    ("health_timeout", "CHECK_TIMEOUT"),
+    ("models_auth", "CHECK_AUTH_FAILED"),
+    ("models_unhealthy", "CHECK_UNHEALTHY"),
+    ("models_invalid", "CHECK_INVALID_RESPONSE"),
+    ("models_timeout", "CHECK_TIMEOUT"),
+])
+def test_vllm_real_sdk_dependency_failure_codes(real_openai_health_runtime, scenario, code):
+    async def run():
+        def handler(request):
+            health_request = request.url.path.endswith("/health")
+            if health_request and scenario.startswith("health_"):
+                return httpx.Response({"health_auth": 401, "health_unhealthy": 503,
+                                       "health_timeout": 504}[scenario])
+            if not health_request:
+                if scenario == "missing_model":
+                    return httpx.Response(200, json={"data": []})
+                if scenario == "models_invalid":
+                    return httpx.Response(200, json={"data": [{}]})
+                if scenario == "models_timeout":
+                    raise httpx.ReadTimeout("synthetic timeout")
+                if scenario in {"models_auth", "models_unhealthy"}:
+                    return httpx.Response(403 if scenario == "models_auth" else 500)
+            return healthy_http(request)
+
+        async with real_openai_health_runtime(handler) as (coordinator, _sdk, requests):
+            check = await coordinator._check("vllm")
+            assert (check.status, check.code) == ("down", code)
+            paths = ["/proxy/health"]
+            if not scenario.startswith("health_"):
+                paths.append("/proxy/v1/models")
+            assert [(request.method, request.url.path) for request in requests] == [
+                ("GET", path) for path in paths
+            ]
+    asyncio.run(run())
+
+
+def test_vllm_preserves_invalid_non_sentinel_header_failure(real_openai_health_runtime):
+    async def run():
+        async with real_openai_health_runtime(invalid_header=True) as (coordinator, _sdk, requests):
+            check = await coordinator._check("vllm")
+            assert (check.status, check.code) == ("down", "CHECK_ERROR")
+            assert requests == []  # Invalid values are neither removed nor stringified.
     asyncio.run(run())
