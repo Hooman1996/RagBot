@@ -57,6 +57,9 @@ class RetrievalNormalizationConsistencyTests(unittest.IsolatedAsyncioTestCase):
         classifier = IntentClassifier(
             embedding_model=embedding,
             classifier_model_path=None,
+            similarity_threshold=0.875,
+            required=False,
+            expected_sha256=None,
             device="cpu",
             blocking_runner=InlineRunner(),
         )
@@ -113,6 +116,8 @@ class RetrievalNormalizationConsistencyTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_empty_retrieval_has_stable_fallback_reason(self):
         class SearchEngine:
+            async def rerank_search_results(self, _query, results, **_kwargs):
+                return results
             async def rerank(self, *_args, **_kwargs):
                 return []
 

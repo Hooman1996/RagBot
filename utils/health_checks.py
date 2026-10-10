@@ -374,16 +374,20 @@ class HealthCoordinator:
         except (ValueError, UnicodeError):
             raise CheckFailure("CHECK_INVALID_RESPONSE") from None
 
-    async def service_health(self, url, **kwargs):
+    async def service_health(self, url, *, qdrant_readiness=False, **kwargs):
         body = await self.get(url, **kwargs)
-        # TEI and vLLM return an empty 200; Qdrant returns a fixed plain string.
-        if body.strip() not in {b"", b"healthz check passed"}:
+        # TEI/vLLM use an empty successful response. Qdrant's readiness
+        # contract is distinct from its healthz/liveness contract.
+        accepted = {b"all shards are ready"} if qdrant_readiness else {b""}
+        if body.strip() not in accepted:
             # Structured explicit unhealthy results still fail if a proxy has
             # rewritten the HTTP status. Do not match raw exception messages.
             try:
                 data = json.loads(body)
             except (ValueError, UnicodeError):
                 data = None
+            if qdrant_readiness and data == "all shards are ready":
+                return
             if isinstance(data, dict) and (data.get("error_type") == "unhealthy"
                                           or data.get("status") in ("down", "unhealthy")):
                 raise CheckFailure("CHECK_UNHEALTHY")
@@ -435,7 +439,7 @@ class HealthCoordinator:
         args = getattr(remote, "_rest_args", {})
         kwargs = dict(headers=getattr(remote, "_rest_headers", {}), auth=args.get("auth"))
         # A 404 on /readyz is explicitly unverifiable, never treated as healthy.
-        await self.service_health(endpoint(base, "readyz"), **kwargs)
+        await self.service_health(endpoint(base, "readyz"), qdrant_readiness=True, **kwargs)
         if not search.collection_name:
             raise CheckFailure("CHECK_CONFIG_MISMATCH")
         data = self.parse_json(await self.get(endpoint(base, "collections/" + quote(search.collection_name, safe="")),
@@ -444,9 +448,11 @@ class HealthCoordinator:
             if data["status"] != "ok":
                 raise CheckFailure("CHECK_UNHEALTHY")
             info = data["result"]
-            if info["status"] in {"red", "grey"}:
+            if info["status"] == "red":
                 raise CheckFailure("CHECK_UNHEALTHY")
-            if info["status"] not in {"green", "yellow"}:
+            # Active query_points does not request indexed_only or
+            # prevent_unoptimized: grey permits full scans of unindexed data.
+            if info["status"] not in {"green", "yellow", "grey"}:
                 raise CheckFailure("CHECK_INVALID_RESPONSE")
             vectors = info["config"]["params"]["vectors"]
         except (KeyError, TypeError):

@@ -45,7 +45,8 @@ EXPECTED = {
     ('GET', '/api/metrics/admission'): 'system',
 }
 EXEMPT = {
-    ('GET', '/'), ('POST', '/api/login'), ('GET', '/api/health'),
+    ('GET', '/'), ('POST', '/api/login'), ('GET', '/api/health'), ('GET', '/api/health/live'),
+    ('GET', '/api/health/ready'), ('GET', '/api/health/details'),
     ('GET', '/api/auth/me'), ('POST', '/api/auth/logout'),
     ('GET', '/access-denied'),
 }

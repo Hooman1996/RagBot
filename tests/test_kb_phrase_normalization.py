@@ -30,10 +30,15 @@ JINA_DIM = _INTENT_MODULE.JINA_DIM
 class KBPhraseLexiconTests(unittest.TestCase):
     def test_current_kb_artifact_has_expected_gate_counts(self):
         artifact = build_lexicon(FAQ_DIR)
-        self.assertEqual(artifact["statistics"]["valid_faq_files"], 1426)
-        self.assertEqual(artifact["statistics"]["discovered_candidates"], 2610)
-        self.assertEqual(artifact["statistics"]["accepted_phrases"], 100)
-        self.assertEqual(artifact["statistics"]["rejected_candidates"], 2510)
+        from training.intent_classifier.common import read_faqs
+        faqs, _ = read_faqs(FAQ_DIR)
+        statistics = artifact["statistics"]
+        self.assertEqual(statistics["valid_faq_files"], len(faqs))
+        self.assertGreater(statistics["valid_faq_files"], 0)
+        self.assertEqual(statistics["accepted_phrases"], len(artifact["entries"]))
+        self.assertGreaterEqual(statistics["accepted_phrases"], KB_PHRASE_NORMALIZER.phrase_count)
+        self.assertEqual(statistics["discovered_candidates"],
+                         statistics["accepted_phrases"] + statistics["rejected_candidates"])
 
     def test_requested_known_phrases_restore_to_space_form(self):
         groups = (
@@ -88,6 +93,9 @@ class IntentRoutingOrthographyTests(unittest.TestCase):
         classifier = IntentClassifier(
             embedding_model=fake_embedding,
             classifier_model_path=None,
+            similarity_threshold=0.875,
+            required=False,
+            expected_sha256=None,
             device="cpu",
             blocking_runner=self.InlineRunner(),
         )

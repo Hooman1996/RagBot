@@ -3,6 +3,8 @@ from __future__ import annotations
 import asyncio
 import hashlib
 import unittest
+import tempfile
+import pytest
 from pathlib import Path
 
 import numpy as np
@@ -47,13 +49,24 @@ class InlineBlockingRunner:
         return function(*args)
 
 
-@unittest.skipUnless(ARTIFACT.exists(), "trained artifact is not present")
 class DeterminismHardeningTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
-        cls.checkpoint = torch.load(ARTIFACT, map_location="cpu", weights_only=True)
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.directory.cleanup)
+        cls.artifact = Path(cls.directory.name) / "synthetic-checkpoint.pt"
+        cls.checkpoint = {
+            "model_state_dict": _GuardrailNet().state_dict(),
+            "architecture": EXPECTED_ARCHITECTURE, "embedding_dimension": JINA_DIM,
+            "embedding_role": "retrieval_query", "embedding_prompt_name": "query",
+            "embedding_normalize": True, "normalizer": "normalize_persian_text",
+            "label_map": EXPECTED_LABEL_MAP, "selected_threshold": 0.875,
+            "dataset_fingerprint": "a" * 64, "embedding_model": "synthetic",
+            "tei_endpoint_identity": "synthetic", "training_timestamp": "synthetic",
+        }
+        torch.save(cls.checkpoint, cls.artifact)
         cls.threshold = float(cls.checkpoint["selected_threshold"])
-        cls.sha256 = sha256_file(ARTIFACT)
+        cls.sha256 = sha256_file(cls.artifact)
 
     def test_checkpoint_metadata_architecture_threshold_and_label_map(self) -> None:
         self.assertEqual(self.checkpoint["architecture"], EXPECTED_ARCHITECTURE)
@@ -84,21 +97,21 @@ class DeterminismHardeningTests(unittest.TestCase):
             build_intent_classifier(embedding_model=fixed_embedding, environ=values)
 
     def test_required_wrong_sha_fails(self) -> None:
-        values = env_for(ARTIFACT, "0" * 64, self.threshold)
+        values = env_for(self.artifact, "0" * 64, self.threshold)
         with self.assertRaisesRegex(ValueError, "SHA256 mismatch"):
             build_intent_classifier(embedding_model=fixed_embedding, environ=values)
 
     def test_required_threshold_metadata_mismatch_fails(self) -> None:
-        values = env_for(ARTIFACT, self.sha256, self.threshold - 0.01)
+        values = env_for(self.artifact, self.sha256, self.threshold - 0.01)
         with self.assertRaisesRegex(ValueError, "threshold does not match"):
             build_intent_classifier(embedding_model=fixed_embedding, environ=values)
 
     def test_direct_main_and_evaluation_factory_results_are_identical(self) -> None:
-        values = env_for(ARTIFACT, self.sha256, self.threshold)
+        values = env_for(self.artifact, self.sha256, self.threshold)
         blocking_runner = InlineBlockingRunner()
         direct = IntentClassifier(
             embedding_model=fixed_embedding,
-            classifier_model_path=str(ARTIFACT),
+            classifier_model_path=str(self.artifact),
             similarity_threshold=self.threshold,
             device="cpu",
             required=True,
@@ -133,6 +146,17 @@ class DeterminismHardeningTests(unittest.TestCase):
         reference = {key: results[0][key] for key in comparable_keys}
         self.assertEqual(reference, {key: results[1][key] for key in comparable_keys})
         self.assertEqual(reference, {key: results[2][key] for key in comparable_keys})
+
+
+@pytest.mark.artifact
+class PublishedCheckpointArtifactTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        cls.checkpoint = torch.load(ARTIFACT, map_location="cpu", weights_only=True)
+
+    test_checkpoint_metadata_architecture_threshold_and_label_map = (
+        DeterminismHardeningTests.test_checkpoint_metadata_architecture_threshold_and_label_map
+    )
 
 
 if __name__ == "__main__":

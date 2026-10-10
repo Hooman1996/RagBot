@@ -26,6 +26,11 @@ def minimum_environment(*, production: bool = False) -> str:
         "MINIO_BUCKET=documents",
         "TEI_EMBED_URL=http://127.0.0.1:7997",
         "TEI_RERANK_URL=http://127.0.0.1:7998",
+        "INTENT_CLASSIFIER_MODEL_PATH=synthetic-checkpoint.pt",
+        "INTENT_CLASSIFIER_THRESHOLD=0.875",
+        "INTENT_CLASSIFIER_DEVICE=cpu",
+        "INTENT_CLASSIFIER_REQUIRED=false",
+        "INTENT_CLASSIFIER_EXPECTED_SHA256=" + "a" * 64,
     ]
     if production:
         lines.append("QDRANT_API_KEY=synthetic-qdrant-key")

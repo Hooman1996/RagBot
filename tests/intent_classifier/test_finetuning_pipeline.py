@@ -9,6 +9,7 @@ import unittest
 from collections import defaultdict
 from pathlib import Path
 
+import pytest
 import numpy as np
 import torch
 
@@ -36,6 +37,7 @@ NEW_CHECKPOINT = ROOT / "chitchat_guardrail_finetuned.pt"
 EXPECTED_OLD_SHA256 = "c1f55e9bd4c67764d10052ac45d8c34285329f56047bde7a48c0a7f6b8ae49cc"
 
 
+@pytest.mark.artifact
 class DatasetIntegrityTests(unittest.TestCase):
     @classmethod
     def setUpClass(cls) -> None:
@@ -159,19 +161,58 @@ class DatasetIntegrityTests(unittest.TestCase):
         )
 
 
+class FAQReaderTests(unittest.TestCase):
+    test_reader_ignores_gitkeep_hidden_empty_and_temporary_files = (
+        DatasetIntegrityTests.test_reader_ignores_gitkeep_hidden_empty_and_temporary_files
+    )
+
+
 class CheckpointCompatibilityTests(unittest.TestCase):
+    @classmethod
+    def setUpClass(cls):
+        from intent_classifier import (EXPECTED_ARCHITECTURE, EXPECTED_EMBEDDING_ROLE,
+                                       EXPECTED_EMBEDDING_PROMPT, EXPECTED_LABEL_MAP)
+        cls.directory = tempfile.TemporaryDirectory()
+        cls.addClassCleanup(cls.directory.cleanup)
+        cls.compatibility_checkpoint = Path(cls.directory.name) / "synthetic-checkpoint.pt"
+        torch.save({
+            "model_state_dict": _GuardrailNet().state_dict(),
+            "architecture": EXPECTED_ARCHITECTURE,
+            "embedding_dimension": JINA_DIM,
+            "embedding_role": EXPECTED_EMBEDDING_ROLE,
+            "embedding_prompt_name": EXPECTED_EMBEDDING_PROMPT,
+            "embedding_normalize": True,
+            "normalizer": "normalize_persian_text",
+            "label_map": EXPECTED_LABEL_MAP,
+            "selected_threshold": 0.875,
+        }, cls.compatibility_checkpoint)
+        cls.legacy_checkpoint = Path(cls.directory.name) / "synthetic-legacy-checkpoint.pt"
+        torch.save({"model_state_dict": _GuardrailNet().state_dict(),
+                    "input_dim": JINA_DIM, "label_map": LABEL_MAP}, cls.legacy_checkpoint)
+
     class _InlineRunner:
         async def run(self, function, *args):
             return function(*args)
 
+    @pytest.mark.artifact
     def test_original_checkpoint_checksum_is_unchanged(self) -> None:
         self.assertEqual(sha256_file(OLD_CHECKPOINT), EXPECTED_OLD_SHA256)
 
     def test_application_default_selects_finetuned_checkpoint(self) -> None:
+        from intent_classifier_factory import load_intent_classifier_config
         parameters = inspect.signature(IntentClassifier.__init__).parameters
-        default_path = parameters["classifier_model_path"].default
-        self.assertEqual(default_path, "chitchat_guardrail_finetuned.pt")
-        self.assertEqual(parameters["similarity_threshold"].default, 0.875)
+        for name in ("classifier_model_path", "similarity_threshold", "device", "required", "expected_sha256"):
+            self.assertIs(parameters[name].default, inspect.Parameter.empty)
+        with self.assertRaises(ValueError):
+            load_intent_classifier_config({})
+        config = load_intent_classifier_config({
+            "INTENT_CLASSIFIER_MODEL_PATH": "synthetic-checkpoint.pt",
+            "INTENT_CLASSIFIER_THRESHOLD": "0.875",
+            "INTENT_CLASSIFIER_DEVICE": "cpu",
+            "INTENT_CLASSIFIER_REQUIRED": "false",
+        })
+        self.assertEqual(config.model_path, "synthetic-checkpoint.pt")
+        self.assertEqual(config.threshold, 0.875)
 
     def test_probability_between_half_and_threshold_routes_to_banking(self) -> None:
         class FixedProbabilityNet(torch.nn.Module):
@@ -188,11 +229,14 @@ class CheckpointCompatibilityTests(unittest.TestCase):
         classifier = IntentClassifier(
             embedding_model=fake_embedding,
             classifier_model_path=None,
+            required=False,
+            expected_sha256=None,
             similarity_threshold=0.875,
             device="cpu",
             blocking_runner=self._InlineRunner(),
         )
         classifier.classifier = FixedProbabilityNet()
+        classifier._checkpoint_loaded = True  # The supplied deterministic test network is initialized.
         result = asyncio.run(
             classifier.classify_detailed("من کارتم مسدود شده باید چه کنم؟؟")
         )
@@ -215,22 +259,25 @@ class CheckpointCompatibilityTests(unittest.TestCase):
         classifier = IntentClassifier(
             embedding_model=fake_embedding,
             classifier_model_path=None,
+            required=False,
+            expected_sha256=None,
             similarity_threshold=0.875,
             device="cpu",
             blocking_runner=self._InlineRunner(),
         )
         classifier.classifier = FixedProbabilityNet()
+        classifier._checkpoint_loaded = True  # The supplied deterministic test network is initialized.
         result = asyncio.run(classifier.classify_detailed("سلام خوبی؟"))
         self.assertEqual(result["class_id"], LABEL_CHITCHAT)
         self.assertFalse(result["route_to_rag"])
 
     def test_current_architecture_loads_old_checkpoint_strictly(self) -> None:
-        model, payload = load_compatible_checkpoint(OLD_CHECKPOINT, torch.device("cpu"))
+        model, payload = load_compatible_checkpoint(self.legacy_checkpoint, torch.device("cpu"))
         output = model(torch.zeros((3, JINA_DIM)))
         self.assertEqual(tuple(output.shape), (3, 2))
         self.assertEqual(payload["label_map"], LABEL_MAP)
 
-    @unittest.skipUnless(NEW_CHECKPOINT.exists(), "fine-tuned checkpoint has not been produced")
+    @pytest.mark.artifact
     def test_current_architecture_loads_new_checkpoint_strictly(self) -> None:
         model, payload = load_compatible_checkpoint(NEW_CHECKPOINT, torch.device("cpu"))
         output = model(torch.zeros((3, JINA_DIM)))
@@ -244,7 +291,10 @@ class CheckpointCompatibilityTests(unittest.TestCase):
         classifier = IntentClassifier(
             embedding_model=fake_embedding,
             scenarios_path=str(ROOT / "scenarios.json"),
-            classifier_model_path=str(OLD_CHECKPOINT),
+            classifier_model_path=str(self.compatibility_checkpoint),
+            similarity_threshold=0.875,
+            required=True,
+            expected_sha256=sha256_file(self.compatibility_checkpoint),
             device="cpu",
             blocking_runner=self._InlineRunner(),
         )
@@ -252,7 +302,7 @@ class CheckpointCompatibilityTests(unittest.TestCase):
         self.assertIn(result["class_id"], (0, 1))
         self.assertAlmostEqual(result["p_actionable"] + result["p_chitchat"], 1.0, places=5)
 
-    @unittest.skipUnless(NEW_CHECKPOINT.exists(), "fine-tuned checkpoint has not been produced")
+    @pytest.mark.artifact
     def test_new_checkpoint_runs_same_public_preprocessing_path(self) -> None:
         async def fake_embedding(_: str) -> list[float]:
             return np.zeros(JINA_DIM, dtype=np.float32).tolist()
@@ -261,6 +311,9 @@ class CheckpointCompatibilityTests(unittest.TestCase):
             embedding_model=fake_embedding,
             scenarios_path=str(ROOT / "scenarios.json"),
             classifier_model_path=str(NEW_CHECKPOINT),
+            similarity_threshold=0.875,
+            required=True,
+            expected_sha256=sha256_file(NEW_CHECKPOINT),
             device="cpu",
             blocking_runner=self._InlineRunner(),
         )
