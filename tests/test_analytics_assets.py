@@ -12,6 +12,8 @@ from urllib.parse import urlsplit
 from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
+import pytest
+
 import main
 from analytics_metrics import aggregate_analytics
 from frontend_paths import STATIC_DIR
@@ -24,6 +26,7 @@ def _local_path(url):
     return urlsplit(url).path
 
 
+@pytest.mark.integration
 def test_served_analytics_page_assets_api_and_render_path(setup, monkeypatch, postgres_connect, tmp_path):
     setup.users[1]["role"] = "admin"
     populated_db = SyntheticDatabase(postgres_connect, sample_rows())

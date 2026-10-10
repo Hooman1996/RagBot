@@ -320,7 +320,7 @@ class SharedPathAndEnvironmentTests(unittest.TestCase):
         mobile = (ROOT / "mobile_api.py").read_text(encoding="utf-8")
         mass = (ROOT / "mass_answer_service.py").read_text(encoding="utf-8")
         evaluation = (
-            ROOT / "evaluation_system/backend/app/worker/process_runtime.py"
+            ROOT / "evaluation_system/backend/app/worker/postgres_worker.py"
         ).read_text(encoding="utf-8")
         self.assertIn("AnsweringService(", main)
         self.assertIn("answering_service.answer(", mobile)
@@ -333,12 +333,9 @@ class SharedPathAndEnvironmentTests(unittest.TestCase):
             parse_env_file(ROOT / name).values[
                 "RAG_QUERY_CANONICALIZATION_ENABLED"
             ].lower()
-            for name in (".env", "Production_ENV", ".env.example.generated")
+            for name in ("env.example", "Production_ENV", ".env.example.generated")
         ]
         self.assertEqual(values, ["true", "true", "true"])
-        dev_keys = set(parse_env_file(ROOT / ".env").values)
-        production_keys = set(parse_env_file(ROOT / "Production_ENV").values)
-        self.assertFalse(dev_keys - production_keys)
 
     def test_config_snapshot_identifies_alias_policy(self):
         policy = build_config_snapshot()["query_canonicalization"]

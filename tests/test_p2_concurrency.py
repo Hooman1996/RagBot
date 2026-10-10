@@ -1,6 +1,4 @@
 import asyncio
-import concurrent.futures
-import functools
 import threading
 import time
 import unittest
@@ -20,25 +18,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 class ThreadedAsyncTestCase(unittest.IsolatedAsyncioTestCase):
-    async def asyncSetUp(self):
-        self.executor = concurrent.futures.ThreadPoolExecutor(max_workers=24)
-        self.original_to_thread = asyncio.to_thread
-
-        async def working_to_thread(func, /, *args, **kwargs):
-            call = functools.partial(func, *args, **kwargs)
-            future = self.executor.submit(call)
-            while not future.done():
-                await asyncio.sleep(0.001)
-            return future.result()
-
-        # Python 3.14's default asyncio executor is unavailable in this audit
-        # interpreter. Tests retain real worker-thread behavior by supplying a
-        # dedicated executor at the asyncio.to_thread boundary.
-        asyncio.to_thread = working_to_thread
-
-    async def asyncTearDown(self):
-        asyncio.to_thread = self.original_to_thread
-        self.executor.shutdown(wait=True)
+    """Exercise the actual asyncio thread boundary without replacing it."""
 
 
 class ConcurrentRequestTests(ThreadedAsyncTestCase):
@@ -235,7 +215,7 @@ class StaticLifecycleAndBoundaryTests(unittest.TestCase):
         database_source = (
             ROOT / "new_architecture/app/services/history/database.py"
         ).read_text(encoding="utf-8")
-        agent_source = (ROOT / "agent_service.py").read_text(encoding="utf-8")
+        agent_source = (ROOT / "conversation_history.py").read_text(encoding="utf-8")
         auth_source = (
             ROOT
             / "new_architecture/app/services/authentication/authentication.py"
@@ -248,16 +228,15 @@ class StaticLifecycleAndBoundaryTests(unittest.TestCase):
         self.assertIn('"connect_timeout": connect_timeout', database_source)
         self.assertIn("statement_timeout=", database_source)
         self.assertIn(
-            "await self.blocking_runner.run(\n"
-            "            self.db_manager.get_session_metadata",
+            "await self._blocking_runner.run(\n"
+            "            self._db_manager.get_session_metadata",
             agent_source,
         )
         self.assertIn(
             "conn = self.db_manager.get_connection()", auth_source
         )
         self.assertIn(
-            "await self.blocking_runner.run(\n"
-            "                    self._classify_embedding",
+            "await self.blocking_runner.run(self._classify_embedding, embedding)",
             classifier_source,
         )
 

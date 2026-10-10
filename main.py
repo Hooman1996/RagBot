@@ -31,6 +31,7 @@ from psycopg2 import Error as PostgresError
 
 # Core Architecture Imports
 from new_architecture.app.config import Config
+from new_architecture.app.config import Config as db_connections_config
 from new_architecture.app.services.history.database import DatabaseManager, ChatManager
 from new_architecture.app.services.history.rewriting import HistoryRewritingService
 from new_architecture.app.services.db_connection import DatabaseConnections
@@ -40,6 +41,7 @@ from new_architecture.knowledge_sources import build_datasource_listing
 # AI & Domain Service Layers
 from utils.RagSystem import RAGSystem
 from intent_classifier_factory import build_intent_classifier
+from utils.health_checks import HealthCoordinator
 from agent_service import AgentService
 from answering_service import AnsweringService, AnswerRequestContext
 from conversation_history import ProductionHistoryProvider
@@ -212,6 +214,7 @@ async def lifespan(app: FastAPI):
     global text_processor, qdrant_client, blocking_runner, request_limiter
     global tei_http_client, tei_sync_http_client, llm_client
 
+    app.state.health_phase = "starting"
     validate_config()
     logging_runtime = start_logging()
     app.state.logging_runtime = logging_runtime
@@ -220,6 +223,7 @@ async def lifespan(app: FastAPI):
         REQUEST_CONCURRENCY_LIMIT, name="answering"
     )
     app.state.ready = False
+    app.state.health_coordinator = HealthCoordinator(app)
     try:
         text_processor = await blocking_runner.run(
             PersianTextProcessor, use_stemming=False
@@ -391,9 +395,14 @@ async def lifespan(app: FastAPI):
         app.state.history_rewriting_service = history_rewriting_service
         app.state.blocking_runner = blocking_runner
         app.state.request_limiter = request_limiter
+        app.state.health_minio_client = db_connections.minio_client
+        app.state.health_minio_bucket = db_connections_config.MINIO_BUCKET
+        app.state.health_ocr_service = ocr_service
         app.state.ready = True
+        app.state.health_phase = "running"
         yield
     finally:
+        app.state.health_phase = "stopping"
         app.state.ready = False
         active_exception = sys.exc_info()[1]
         cleanup_errors = []
@@ -404,6 +413,7 @@ async def lifespan(app: FastAPI):
             except Exception as exc:
                 cleanup_errors.append(exc)
 
+        await cleanup(app.state.health_coordinator.aclose)
         if mass_answer_job_manager is not None:
             await cleanup(mass_answer_job_manager.aclose)
         if rag_system is not None:
@@ -437,6 +447,9 @@ async def lifespan(app: FastAPI):
             "history_rewriting_service",
             "blocking_runner",
             "request_limiter",
+            "health_minio_client",
+            "health_minio_bucket",
+            "health_ocr_service",
         ):
             if hasattr(app.state, name):
                 delattr(app.state, name)
@@ -476,6 +489,7 @@ app = FastAPI(
     version="2.2.0",
     lifespan=lifespan
 )
+app.state.health_phase = "starting"
 
 @app.middleware("http")
 async def browser_auth_middleware(request: Request, call_next):
@@ -1583,12 +1597,45 @@ def _get_analytics_sync(days: int):
 
 @app.get("/api/health")
 async def health_check():
+    """Legacy shallow health endpoint; does not probe dependencies."""
     return {
         "status": "healthy",
         "system_initialized": rag_system is not None,
         "documents_available": len(available_documents),
         "ocr_available": ocr_service is not None
     }
+
+
+@app.get("/api/health/live")
+async def health_live():
+    return JSONResponse({"status": "alive", "code": "HEALTH_ALIVE"},
+                        headers={"Cache-Control": "no-store"})
+
+
+async def health_report(request: Request, *, details: bool):
+    coordinator = getattr(request.app.state, "health_coordinator", None)
+    if coordinator is None:
+        # Reachable before lifespan initialization, without allocating resources.
+        from utils.health_checks import COMPONENTS, REQUIRED, Check, snapshot
+        phase = getattr(request.app.state, "health_phase", "starting")
+        checks = {name: Check("down", name in REQUIRED, "CHECK_NOT_INITIALIZED")
+                  for name in COMPONENTS}
+        checks["ocr"] = Check("disabled", False, "CHECK_DISABLED")
+        result = snapshot(checks, "stopping" if phase == "stopping" else "starting")
+        status, body = result.response(details=details, now=result.completed)
+    else:
+        status, body = await coordinator.report(details=details)
+    return JSONResponse(body, status_code=status, headers={"Cache-Control": "no-store"})
+
+
+@app.get("/api/health/ready")
+async def health_ready(request: Request):
+    return await health_report(request, details=False)
+
+
+@app.get("/api/health/details")
+async def health_details(request: Request):
+    return await health_report(request, details=True)
 
 
 @app.get("/api/metrics/admission")

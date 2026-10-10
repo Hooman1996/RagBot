@@ -23,9 +23,9 @@ RagBot opens no logging network connection. It needs no `LOGSTASH_HOST`, `LOGSTA
 | `LOG_REQUEST_BODY` | `true` | Capture eligible request JSON/text. |
 | `LOG_RESPONSE_BODY` | `true` | Capture eligible response JSON/text. |
 | `LOG_PII_REDACTION` | `true` | Mandatory redaction policy. |
-| `LOG_PII_HMAC_SECRET` | deployment secret | National-code pseudonymization key. |
+| `LOG_PII_HMAC_SECRET` | unset | Optional; national codes become `[REDACTED]` by default. |
 
-Generate `LOG_PII_HMAC_SECRET` in the deployment secret manager. Never commit or log it, and never reuse `WEB_SESSION_SECRET`. Use the same dedicated value on replicas in one environment if stable pseudonyms across replicas are needed. If absent, national codes are redacted rather than emitted raw.
+No extra logging secret is needed for normal deployment. Leave `LOG_PII_HMAC_SECRET` unset and national codes are logged as `[REDACTED]`. If operators specifically need to recognize repeated national codes without seeing the original values, configure this optional dedicated key through the secret manager: the same code then produces the same `pii_...` label. Use the same dedicated key across replicas only when those labels must match. Never commit or log the key, and never reuse `WEB_SESSION_SECRET`. All tracked env references show this setting as a comment, not an active placeholder.
 
 ## Contract and privacy
 

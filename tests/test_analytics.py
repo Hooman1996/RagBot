@@ -113,6 +113,7 @@ def sample_rows():
     ]
 
 
+@pytest.mark.integration
 def test_empty_and_unrated_windows(postgres_connect):
     empty = aggregate_analytics(SyntheticDatabase(postgres_connect, []), 7, NOW)
     assert empty["kpis"]["total_queries"] == 0
@@ -133,6 +134,7 @@ def test_empty_and_unrated_windows(postgres_connect):
     assert unrated["completion_duration"]["unavailable_reason"]
 
 
+@pytest.mark.integration
 def test_mixed_votes_depth_boundaries_timezone_and_incomplete(postgres_connect):
     data = aggregate_analytics(SyntheticDatabase(postgres_connect, sample_rows()), 7, NOW)
     assert data["meta"]["start"] == "2026-09-21T00:00:00Z"
@@ -160,6 +162,7 @@ def test_mixed_votes_depth_boundaries_timezone_and_incomplete(postgres_connect):
     assert data["weekly_comparison"]["previous_total"] == 1
 
 
+@pytest.mark.integration
 def test_all_conversation_depth_buckets_and_failed_state(postgres_connect):
     created = datetime(2026, 9, 25, 12)
     rows = []
@@ -176,6 +179,7 @@ def test_all_conversation_depth_buckets_and_failed_state(postgres_connect):
 
 
 @pytest.mark.parametrize("days", [7, 14, 30])
+@pytest.mark.integration
 def test_allowed_windows_have_stable_shape(postgres_connect, days):
     data = aggregate_analytics(SyntheticDatabase(postgres_connect, sample_rows()), days, NOW)
     assert set(data) == {"meta", "kpis", "queries_per_day", "users_per_day",
@@ -186,6 +190,7 @@ def test_allowed_windows_have_stable_shape(postgres_connect, days):
     assert not any(key in json.dumps(data).lower() for key in ("query_text", "response_text", "retrieved_documents"))
 
 
+@pytest.mark.integration
 def test_api_range_shape_and_role_boundary(setup, monkeypatch, postgres_connect):
     synthetic = SyntheticDatabase(postgres_connect, sample_rows())
     monkeypatch.setattr(setup, "get_connection", synthetic.get_connection, raising=False)

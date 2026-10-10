@@ -166,6 +166,8 @@ def web_route(path: str, method: str = "GET") -> bool:
         return False
     if (method, path) in {
         ("GET", "/"), ("POST", "/api/login"), ("GET", "/api/health"),
+        ("GET", "/api/health/live"), ("GET", "/api/health/ready"),
+        ("GET", "/api/health/details"),
         ("GET", "/docs"), ("GET", "/redoc"), ("GET", "/openapi.json"),
     }:
         return False

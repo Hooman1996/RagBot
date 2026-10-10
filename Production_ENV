@@ -137,7 +137,7 @@ RAG_PIPELINE_DEBUG_TIMINGS=false
 RAG_PIPELINE_DEBUG_CHUNK_MAX_CHARS=1200
 RAG_PIPELINE_DEBUG_FULL_CHUNKS=false
 
-# RagBot structured JSON stdout; infrastructure forwards stdout to Logstash.
+# Structured JSON stdout logging. The collector handles forwarding.
 LOG_LEVEL=INFO
 LOG_FORMAT=json
 LOG_SERVICE_NAME=ragbot
@@ -146,5 +146,6 @@ LOG_BODY_MAX_BYTES=32768
 LOG_REQUEST_BODY=true
 LOG_RESPONSE_BODY=true
 LOG_PII_REDACTION=true
-# Generate/store LOG_PII_HMAC_SECRET in production secret management; do not commit it.
-# LOG_PII_HMAC_SECRET is intentionally absent from this tracked file.
+# Optional: leave unset to log national codes as [REDACTED].
+# Only set this for stable pseudonymous labels; never reuse WEB_SESSION_SECRET.
+# LOG_PII_HMAC_SECRET=<OPTIONAL_DEDICATED_SECRET_FROM_SECRET_MANAGER>

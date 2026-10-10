@@ -42,6 +42,7 @@ def route_log_policy(path: str) -> RouteLogPolicy:
     if path == "/static" or path.startswith("/static/"):
         return RouteLogPolicy(False, False, False)
     if path in {"/", "/app", "/analytics", "/api/health", "/docs",
+                "/api/health/live", "/api/health/ready", "/api/health/details",
                 "/redoc", "/openapi.json", "/favicon.ico", "/knowledge-base/"}:
         return RouteLogPolicy(True, False, False)
     if path.startswith("/api/sessions/") and path.endswith("/download"):
