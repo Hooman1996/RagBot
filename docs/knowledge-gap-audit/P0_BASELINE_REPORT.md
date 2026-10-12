@@ -4,6 +4,223 @@ Status: **READY_FOR_REVIEW_WITH_BLOCKED_CHECKS**. Recorded 2026-10-12 (Asia/Tehr
 This report requests review; it does not authorize P1. No retrieval behavior,
 prompts, defaults, routes, schema, KB records, vectors, or infrastructure changed.
 
+## P0.1 follow-up — current evidence
+
+Completed on the existing `p0/knowledge-coverage-baseline` branch, starting at
+P0 commit `3a9f9a4d05198686ac7b85cfe8370c01a3820825`. This follow-up changes only
+this report. All unrelated changes present at the start were preserved. No env
+keys/files, diagnostic code, dependencies or runtime behavior were changed.
+The sections below this follow-up retain the **initial P0 evidence**; the
+interpreter, effective-settings and live-capability findings here supersede its
+missing-dependency and unverified-target blockers. P1 has not begun.
+
+### Interpreter and checks
+
+Shell activation worked. Every Python command below ran from
+`/root/projects/faq` after this prefix:
+
+```sh
+source /root/miniconda3/etc/profile.d/conda.sh
+conda activate faq
+```
+
+`python -c 'import sys; print(sys.executable); print(sys.version.split()[0])'`
+exited **0**, selecting `/root/miniconda3/envs/faq/bin/python`, **Python 3.12.12**.
+`conda run` fallback was unnecessary. The initial P0 interpreter was base Python
+3.14.6; missing packages there did not describe the confirmed `faq` environment.
+
+| Executed command | Exit / result |
+|---|---|
+| `python -m pytest tests/test_kb_audit_tools.py tests/test_step5_query_canonicalization.py tests/test_web_permissions.py -q` | **0** outside the sandbox: **43 passed, 9 subtests passed**, 23 warnings, 15.22 s. The first sandbox execution stalled after 20 progress markers and was interrupted with Ctrl-C, exit **130**; it was not counted as a passing suite. |
+| `python -m unittest tests.test_kb_audit_tools -q` | **0**, **7 tests** in 0.005 s, OK. Signature/comparator/stability primitives use synthetic records; no service calls. |
+| `python scripts/knowledge_audit_p0_baseline.py` | **0**. Same source fingerprints and defect observations as initial P0; source-default fixture time **0.481 ms**. It deliberately does not load `.env`: this remains the 10-retrieval/50-dense/10-context source-default fixture, not the effective deployment configuration. |
+| `python -m unittest tests.test_answer_context_reranking tests.test_performance_config tests.test_answering_service tests.test_history_aware_query_routing tests.test_knowledge_update_consistency tests.test_mass_answer_jobs tests.test_persian_normalization -q` | **0**, **57 tests** in 0.889 s, OK. |
+| `python scripts/audit_offline_frontend.py` | **0**, PASS; zero external runtime dependencies. |
+| `node --test tests/analytics.frontend.test.cjs tests/kb_manager.frontend.test.cjs` | **0**, both test-file subtests passed; zero failures. |
+
+Pytest warnings concern SWIG types, unavailable NVML initialization and the
+existing deprecated `TemplateResponse` parameter order. They are recorded, not
+repaired in this baseline-only stage. The completed pytest run used existing
+isolated ASGI fixtures, replacing lifespan/service operations; it did not start
+the application, initialize schema, or persist test conversations.
+
+### Effective retrieval configuration
+
+Read `/root/projects/faq/.env` using the existing dotenv configuration policy:
+`load_dotenv(Path('/root/projects/faq/.env'), override=False)` **before** importing
+`utils.performance_config.PERFORMANCE_SETTINGS`. This matches the repository's
+explicit-root audit loader and environment-precedence semantics. Load returned
+true; none of the following keys was inherited before loading, so no shell
+override affected these results. No env contents, endpoint URLs, credential
+values, headers, or whole settings objects were printed or saved.
+
+| Non-secret effective key | Value |
+|---|---:|
+| `RAG_RETRIEVAL_TOP_K` | 50 |
+| `RAG_SEMANTIC_CANDIDATE_LIMIT` | 50 |
+| `RAG_CONTEXT_RERANK_ENABLED` | true |
+| `RAG_CONTEXT_RERANK_TOP_K` | 10 |
+| `RAG_QUERY_CANONICALIZATION_ENABLED` | true |
+| `RAG_RELATED_QUESTIONS_TOP_K` | 3 |
+| `RAG_RELATED_QUESTIONS_RERANK_THRESHOLD` | 0.1 |
+| `MOBILE_RELATED_QUESTIONS_RERANK_THRESHOLD` | 0.5 |
+
+The mobile threshold is loaded but unused by the current graph/response path,
+as established in the architecture map. The effective retrieval request is 50
+candidates, context rerank selects up to 10 (FAQ) or three (other prompt category).
+This is **configuration evidence**, not a measured real-query retrieval result.
+The fixed BM25 slice remains 50 and the RRF defect remains unchanged.
+
+Reproduction recipe for this settings-only observation (no live requests):
+
+```sh
+python - <<'PY'
+import os, json
+from pathlib import Path
+from dotenv import load_dotenv
+keys = (
+    'RAG_RETRIEVAL_TOP_K', 'RAG_SEMANTIC_CANDIDATE_LIMIT',
+    'RAG_CONTEXT_RERANK_ENABLED', 'RAG_CONTEXT_RERANK_TOP_K',
+    'RAG_QUERY_CANONICALIZATION_ENABLED', 'RAG_RELATED_QUESTIONS_TOP_K',
+    'RAG_RELATED_QUESTIONS_RERANK_THRESHOLD',
+    'MOBILE_RELATED_QUESTIONS_RERANK_THRESHOLD',
+)
+inherited = set(os.environ)
+loaded = load_dotenv(Path('/root/projects/faq/.env'), override=False)
+from utils.performance_config import PERFORMANCE_SETTINGS
+print(json.dumps({
+    'dotenv_loaded': loaded,
+    'effective_retrieval_settings': {
+        k: getattr(PERFORMANCE_SETTINGS, k.lower()) for k in keys
+    },
+    'inherited_override_keys': [k for k in keys if k in inherited],
+}, sort_keys=True))
+PY
+```
+
+### Confirmed development/staging checks
+
+The user explicitly confirmed **all** configured `TEI_EMBED_URL`,
+`TEI_RERANK_URL`, `VLLM_URL`, `POSTGRES_HOST` and `QDRANT_HOST` targets are
+development/staging. Configuration classification showed all are loopback;
+values were not printed. This removes the initial target-identity blocker.
+The managed environment-status tool and network-policy file remain unavailable.
+
+Initial sandbox HTTP/Qdrant probes failed with socket permission errors;
+PostgreSQL also failed there. These were not serving-limit observations.
+Bounded approved probes were then rerun with sandbox escalation: no proxy
+settings were removed, no redirects followed, and no credential/configuration
+dumps were made. Escalation also resolved the stalled offline ASGI test suite.
+
+Executed capability probes were activated `python -` stdin programs using
+`httpx.Client`, `psycopg2`, `QdrantClient` and filtered local Docker metadata.
+Their successful program exits were **0**; individual HTTP/CLI outcomes appear
+below. HTTP metadata timeouts were three seconds, rerank timeouts ten seconds,
+PG connect timeout three seconds, Qdrant timeout three seconds, local CLI timeout
+five seconds. No chat endpoints, answer generation, stress sweep, model loading,
+service restart, schema change, KB edit or vector write was performed.
+
+| Executed operation | Current result |
+|---|---|
+| GET configured `TEI_EMBED_URL` + `/info` | **200**; TEI **1.9.3**, model `/app/models/models--jinaai--jina-embeddings-v5-text-small-retrieval`, last-token pooling, max client batch **64**, max input length **32,768**, automatic truncation **false**, max batch tokens **32,768**, max batch requests **32**, max concurrent requests **100**. |
+| GET configured `TEI_RERANK_URL` + `/info` | **200**; TEI **1.9.3**, model `/app/models/BAAI--bge-reranker-v2-m3`, reranker type, max client batch **64**, max input length **8,192**, automatic truncation **false**, max batch tokens **32,768**, max batch requests **32**, max concurrent requests **100**. |
+| GET configured `VLLM_URL` + `/models` | **200**; served ID `/app/model`, advertised `max_model_len` **8,192**. |
+| GET vLLM origin + `/version` | **200**, version **0.26.0**. |
+| GET vLLM origin + `/tokenizer_info` | **404**; no runtime tokenizer-object information established through that endpoint. |
+| Three POSTs to TEI `/rerank` | Each **200**, three synthetic texts per request; `raw_scores=False`, repeated `False`, then `True`. All returned all three unique input indexes, descending score order and order `[0,2,1]`. Wall times **55.603 / 18.339 / 30.420 ms**; tiny sequential diagnostics, not throughput or production latency benchmarks. |
+| One POST to TEI `/rerank` with 65 short synthetic texts | **422**, **7.776 ms**, above reported batch limit 64. Response body not logged. This verifies rejection at 65; acceptance exactly at 64 was not tested. |
+| PostgreSQL connection, read-only transaction, `SELECT 1` | Succeeded; rollback and close. No DDL/DML or customer-query reads. |
+| Qdrant `get_collection` | Succeeded; **1,526 points**, green collection status. Collection name and credential values omitted. |
+| `nvidia-smi --query-gpu=name,memory.total,memory.used,utilization.gpu --format=csv,noheader,nounits` | Sandbox exit **9**, escalated exit **18**, no usable GPU rows. GPU memory/utilization/capacity remains unverified. |
+| Local `docker ps --format '{{.ID}}'`, after checking Docker daemon selector was local/unset | Sandbox inventory exit **1**; escalated exit **0**, nine running containers. Only inference command flags and model-mount configuration/tokenizer fingerprints were subsequently selected; no container environments/full configuration printed. |
+
+Reranker fixtures were query `alpha fixture` and texts `alpha fixture`,
+`beta fixture`, `gamma fixture`. Only response indexes/scores were inspected;
+no text-return option was requested. Repeated scores were **not exactly equal**:
+maximum difference **0.00033257**, while ID order was unchanged. False-mode scores
+were within [0,1]; true-mode scores included negative and positive logits. This
+does not establish calibrated probabilities or an exact score transform across
+separate executions. Cause and cross-batch score comparability remain unverified;
+future batching acceptance must not assume bitwise score reproducibility.
+
+Allowlisted launch flags corroborated both TEI services' float16 dtype,
+batch/concurrency settings and `--auto-truncate false`. vLLM flags corroborated
+`--max-model-len 8192`, bfloat16, `--max-num-seqs 64`,
+`--max-num-batched-tokens 8192`, and `--gpu-memory-utilization 0.75`.
+These are observed serving controls, **not proven safe audit concurrency or
+usable GPU headroom**. No oversized-token request was sent: input limits and
+truncation policy are metadata/launch-flag verified, not boundary-token tested.
+Production default 50 rerank candidates fit the current 64-item client limit;
+the proposed 150-item unbatched audit request still exceeds it.
+
+Mounted model artifacts were read without executing model code or printing
+chat templates/full JSON. Tokenizer configs identify GemmaTokenizer (vLLM),
+XLMRobertaTokenizer (reranker) and Qwen2Tokenizer (embedding); model configs
+identify Gemma4UnifiedForConditionalGeneration, XLMRobertaForSequenceClassification
+and Qwen3Model respectively. No immutable upstream model/weight revision was
+established. These are mounted-artifact identities, not proof of the exact
+in-memory tokenizer implementation. Fingerprints:
+
+| Service / artifact | SHA-256 |
+|---|---|
+| vLLM `config.json` | `e75e44bd91f24d077e83404c02b69a6e6d844b54b27ec929724d05f410258536` |
+| vLLM `tokenizer_config.json` | `09e6222fd7049dae603d0f61a8b10af5a813f22dca10e6cdc6918f76d7661104` |
+| Reranker `config.json` | `13dcd6c31d9fec9d1d8e158702072f62d7fa7d312a64b9fe057bec9a08cfe41a` |
+| Reranker `tokenizer_config.json` | `7e4c1cc848840aeccdd763458c18dd525eb0f795c992e00ebe9c28554e7db2d4` |
+| Reranker `tokenizer.json` | `69564b696052886ed0ac63fa393e928384e0f8caada38c1f4864a9bfbf379c15` |
+| Embedding `config.json` | `f59f2ca97a4c6bdaa97722d1f8a93ff8823612a4ccba94e0af1f338d226aec56` |
+| Embedding `tokenizer_config.json` | `1cc816812993bff176eb4f7495433b736f06fba9b6e7b05cac7b4a1780650c95` |
+| Embedding `tokenizer.json` | `be75606093db2094d7cd20f3c2f385c212750648bd6ea4fb2bf507a6a4c55506` |
+
+### Read-only KB fingerprint
+
+Reused `scripts.kb_signature.create_signature` after target confirmation and
+successful read-only PG/Qdrant connectivity. It uses the script's root `.env`
+loader and existing read-only/hash behavior. An activated Python stdin wrapper
+called `create_signature('dev-staging-p01')`, then `write_json_report` to
+`/tmp/ragbot-p01-kb-signature.json`, printing only counts/hashes and safe error
+types. Wrapper exit **0**; no exception or raw KB record was printed. The Qdrant
+SDK emitted its generic insecure-connection API-key warning, without key values.
+No configuration was changed in response.
+
+- PostgreSQL records **1,526**; Qdrant points **1,526**.
+- Cross-store consistent **true**; zero PG-only/Qdrant-only, duplicate logical
+  ID, missing vector, wrong dimension, content mismatch and metadata mismatch
+  counts. This is the tool's current consistency finding, not an immutable or
+  cross-store atomic snapshot guarantee.
+- PostgreSQL aggregate:
+  `948cae670aaec5faa350d977a0f381d6410a9b48d7853cdfd18bff7c76310750`.
+- Qdrant logical aggregate:
+  `1662fdbff79f96982d77dd45633b504c7abc4730b12de17563beddff8bee9343`.
+- Qdrant vector aggregate:
+  `047ced69c2c6beb50ab709aaa17b60472f3b3d71b2e9b6120185a729cae58b93`.
+- Collection configuration fingerprint:
+  `b3bc80fa69ee848cf02a3dabe11b67d9500b4b125f63a055608fcf109a7f06f3`.
+- Local signature artifact fingerprint:
+  `78d03e65f156eae2a06d54afdba0a94f0609cc3a77f8d226977c4323d46477cd`.
+
+The signature stays outside Git; no KB content, private CSV, prompt, raw model
+response, runtime env or credential is committed. The measured count is chunks/
+points, not a verified count of distinct FAQs. No controlled frozen Q/A/vector
+snapshot or real-query baseline was established in P0.1.
+
+### P1 readiness and remaining acceptance prerequisites
+
+**P0.1 is ready for review with remaining acceptance blockers.** Correct interpreter,
+offline test execution, configured target identity, current service limits,
+rerank index behavior and signature-tool execution are now established. The
+RRF defect has a reproducible mechanical baseline and a focused implementation
+contract; P1 remains awaiting explicit authorization, not automatically approved.
+
+P1 behavior-change acceptance still requires an approved consistent frozen
+evaluation input, labeled retrieval tests and answer-quality tests, and paired
+before/after retrieval/context/call-size/latency measurements with only RRF changed.
+No real-query answer-quality score or throughput claim can be made from these
+checks. GPU telemetry is unavailable; exact serving tokenizer/weight revisions,
+token-boundary behavior and cross-batch score comparability remain unresolved
+for later budgeting/batching/capacity work. Session/timestamp replay assumptions
+remain audit-stage prerequisites. No previous code defects were repaired.
+
 ## Repository and scope
 
 - Actual checkout: `/root/projects/faq`, repository identified by the request as
@@ -88,9 +305,9 @@ Additional risks for future acceptance: Qdrant IDs not in the fetched PG snapsho
 can cause `chunk_dict[cid]` failure; SQL corpus ordering can vary; mixed datasource
 category follows first title. Record these as uncertainty/scope errors, not gaps.
 
-## Runtime capabilities and safety boundary
+## Initial P0 runtime capabilities and safety boundary
 
-No current non-production service target was established. A local `.env` and
+During initial P0, no non-production service target was established. A local `.env` and
 historical staging reports do not prove identity of the configured PG, Qdrant,
 TEI, or vLLM target. No HTTP, database, Qdrant, normal chat, stress, or model call
 was made. No service configuration/environment/container-environment dump.
@@ -118,7 +335,7 @@ run only a few synthetic rerank pairs to verify response indexes, scores,
 batch boundary and truncation. No service restart or model changes are needed
 for baseline discovery. Do not infer production capacity from staging hardware.
 
-## Executed baseline
+## Initial P0 executed baseline
 
 Python interpreter: **3.14.6**. Available `httpx` and `dotenv`; missing pytest,
 NumPy, psycopg2, qdrant-client, Parsivar, rank-bm25, Torch in this interpreter.
@@ -233,7 +450,11 @@ applicable tracked templates + every applicable existing private runtime file
 (including `.env.server_git` if restored), preserving existing values. Report
 filenames/key names only and commit no private files. No speculative P0 keys.
 
-## Review blockers and P1 acceptance prerequisites
+## Initial P0 review blockers and P1 acceptance prerequisites
+
+Target identity, supported interpreter, offline execution and live service-limit
+discovery below are now resolved by P0.1. Its readiness subsection above is the
+current blocker list; the following preserves the initial P0 review record.
 
 - Obtain current non-production identity/configuration and a supported dependency
   environment; confirm TEI limits/index behavior and vLLM model/tokenizer/context.
