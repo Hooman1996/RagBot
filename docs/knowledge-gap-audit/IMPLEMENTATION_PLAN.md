@@ -6,10 +6,12 @@ P0/P0.1 established the baseline; production repairs are recorded in
 [P1_RRF_REPORT.md](P1_RRF_REPORT.md) and
 [P2_RETRIEVAL_DEPTH_REPORT.md](P2_RETRIEVAL_DEPTH_REPORT.md) and
 [P3_RERANKER_BATCHING_REPORT.md](P3_RERANKER_BATCHING_REPORT.md) and
-[P4_KB_TAXONOMY_REPORT.md](P4_KB_TAXONOMY_REPORT.md). Each later stage requires planner review
+[P4_KB_TAXONOMY_REPORT.md](P4_KB_TAXONOMY_REPORT.md). The combined validation is recorded in
+[PRODUCTION_REPAIR_ACCEPTANCE_REPORT.md](PRODUCTION_REPAIR_ACCEPTANCE_REPORT.md).
+Each later stage requires planner review
 and explicit authorization; Codex returns a scoped report/commit and stops after
-each stage. P4 implementation does not authorize the production acceptance gate,
-audit implementation, or deployment.
+each stage. The combined gate is validation only; it does not authorize audit
+implementation or deployment.
 
 ## Invariants
 
@@ -47,8 +49,42 @@ audit implementation, or deployment.
 | **P4 taxonomy preservation** | Explicitly preserve/create/edit/revert category/subcategory with safe legacy parsing and version provenance. No fabricated taxonomy recovery from missing historical versions. | Structured taxonomy survives PG/version/Qdrant/embedding/cache-revision paths; clean fields and legacy taxonomy-in-answer cases; revert with/without taxonomy, empty/unknown category, compensation/concurrent-edit tests. Retrieval/answer-quality checks and bounded before/after update/retrieval measurements on isolated fixtures. |
 | **Production acceptance gate** | Planner reviews P1–P4 evidence before any audit stage. | Correct mechanics, frozen input consistency, real labeled retrieval/answer quality, unchanged intended prompt/rerank policy, 50-second external deadline, paired latency/resource results and owner-approved regression tolerance. Missing live evidence prevents production acceptance, even if code can be reviewed. No deployment is implied. |
 
-P3 review readiness is not an authorization to deploy or start P4. No naturally
-occurring unlabeled queries can supply a measured answer-quality error rate.
+### Combined P1–P4 gate outcome
+
+Technical checks passed: 248 backend tests / 203 subtests, 18 lifecycle/admission
+tests, 36 asset/embedding tests / 10 subtests, 11 frontend tests and the offline
+dependency audit. Frozen P1/P2/P4 default results match; original/final comparisons
+reproduce the intended RRF correction and synthetic taxonomy preservation.
+Sequential staging 150/300 retrieval accounts for all candidates using 3/6
+requests of 50, with full content retained. Snapshot/signature/configuration
+checks and cold/cached discovery behavior passed. No substantive repair-code
+defect was confirmed and no implementation behavior changed in this gate.
+
+Development readiness: repairs are technically reviewable; these results support
+development planning. Release readiness: **blocked**, with no deployment approval.
+The 10 repository banking queries have relevance-only labels whose current
+validity needs review: original/final frozen retrieval both include only 3/19
+expected IDs; final context includes 1/19. Required-answer facts, unsupported-claim
+labels and human review are absent; the supplied `General_FAQ.csv` is the KB,
+not an independent evaluation set. Source-derived referral checks and nine
+synthetic lexical checks do not close that gap. Obtain current-snapshot labels,
+conditions/referral expectations and human-reviewed outputs before quality acceptance.
+
+Other blocked checks require exclusively owned isolated PG/Qdrant write fixtures
+for transactional create/edit/revert/cleanup; a local browser or an approved
+reachable isolated editor for actual visual/keyboard/RTL checks; and suitable
+staging GPU telemetry plus a defined load/deadline budget and regression tolerance.
+Serving-limit changes require client recreation because discovery is cached.
+Production gateway `/info` access and immutable weight/tokenizer provenance also
+remain release prerequisites. No production service was contacted.
+
+Recommended next audit stage is **A1 frozen-input and chronological replay
+foundation**, subject to explicit planner authorization and resolution/review of
+the gate's release blockers. It has not started. **A2 still includes the functional
+main-dashboard page and initial complete per-input-row CSV download**; all-query
+processing, explainability and row conservation remain locked requirements.
+
+No naturally occurring unlabeled queries can supply a measured answer-quality error rate.
 Choose tolerances and label sets before experiments, rather than after results.
 
 ## Audit stages after production acceptance
