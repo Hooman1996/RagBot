@@ -141,7 +141,8 @@ async def observations():
             except ValueError:
                 outcome = "rejected"
         validation.append({"keys": sorted(overrides), "outcome": outcome})
-    search._http = FakeHttp(maximum=50)
+    # Synthetic boundary follows the verified P0.1 staging client limit.
+    search._http = FakeHttp(maximum=64)
     candidates = [namespace["SearchResult"](
         doc_id=i, content="synthetic", score=0.1, bm25_score=1.0,
         semantic_score=0.5, original_rrf_rank=rank
@@ -174,17 +175,22 @@ async def observations():
         "production_source_defaults": {"retrieval": defaults.rag_retrieval_top_k,
             "dense_limit": defaults.rag_semantic_candidate_limit,
             "context_rerank": defaults.rag_context_rerank_top_k},
-        "sparse": {"positive_fixture_scores": 120, "returned_count": len(sparse)},
-        "rrf": {"missing_rank_contribution": 1/(60+61),
+        "sparse": {"positive_fixture_scores": 120, "returned_count": len(sparse),
+            "fixed_50_cap_still_outstanding": len(sparse) == 50},
+        "rrf": {"historical_missing_rank_contribution": 1/(60+61),
             "actual_disjoint_scores": {r.doc_id: r.score for r in disjoint},
-            "single_rank1_actual_unrounded": 1/(60+1)+1/(60+61),
-            "single_rank1_expected": 1/(60+1)},
+            "single_rank1_expected_unrounded": 1/(60+1),
+            "missing_branch_defect_resolved": all(
+                r.score == round(1/(60+1), 6) for r in disjoint
+            )},
         "baseline": {"candidate_count": len(first), "candidate_ids": [r.doc_id for r in first],
             "selected_context_ids": [r.doc_id for r in selected],
             "repeated_order_equal": [r.doc_id for r in first] == [r.doc_id for r in second],
             "dense_request_limits": dense_limits, "reranker_request_sizes": default_rerank_sizes,
             "synthetic_elapsed_ms": round(elapsed_ms, 3)},
         "audit_rerank": {"request_sizes": search._http.sizes, "outcome": batch_outcome,
+            "one_request_batching_still_outstanding": search._http.sizes == [150],
+            "synthetic_server_batch_limit": 64,
             "server_limit_is_synthetic": True},
         "depth_validation": validation,
         "taxonomy_marker_retained": round_trips,

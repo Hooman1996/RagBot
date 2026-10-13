@@ -2,8 +2,10 @@
 
 Contract version: `p0-contract-1`. Baseline: [P0_BASELINE_REPORT.md](P0_BASELINE_REPORT.md).
 UI/export contract: [DASHBOARD_AND_CSV_CONTRACT.md](DASHBOARD_AND_CSV_CONTRACT.md).
-Only P0 is authorized now. Each later stage requires planner review and explicit
-authorization; Codex returns a scoped report/commit and stops after each stage.
+P0/P0.1 established the baseline; P1 implementation is recorded for review in
+[P1_RRF_REPORT.md](P1_RRF_REPORT.md). Each later stage requires planner review
+and explicit authorization; Codex returns a scoped report/commit and stops after
+each stage. P1 implementation does not authorize P2 or deployment.
 
 ## Invariants
 

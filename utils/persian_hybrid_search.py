@@ -663,10 +663,13 @@ class PersianHybridSearch:
         bm25_scores_map = dict(bm25_candidates)
         hybrid_scores = {}
         for cid in candidate_ids:
-            rank_b = bm25_rank.get(cid, 61)
-            rank_s = semantic_rank.get(cid, 61)
+            rank_b = bm25_rank.get(cid)
+            rank_s = semantic_rank.get(cid)
             hybrid_scores[cid] = {
-                "hybrid": (1.0 / (RRF_K + rank_b)) + (1.0 / (RRF_K + rank_s)),
+                "hybrid": (
+                    (1.0 / (RRF_K + rank_b) if rank_b is not None else 0.0)
+                    + (1.0 / (RRF_K + rank_s) if rank_s is not None else 0.0)
+                ),
                 "bm25": bm25_scores_map.get(cid, 0.0),
                 "semantic": semantic_scores_map.get(cid, 0.0),
             }
