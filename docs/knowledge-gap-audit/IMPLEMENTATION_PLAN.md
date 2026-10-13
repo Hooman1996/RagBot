@@ -5,9 +5,11 @@ UI/export contract: [DASHBOARD_AND_CSV_CONTRACT.md](DASHBOARD_AND_CSV_CONTRACT.m
 P0/P0.1 established the baseline; production repairs are recorded in
 [P1_RRF_REPORT.md](P1_RRF_REPORT.md) and
 [P2_RETRIEVAL_DEPTH_REPORT.md](P2_RETRIEVAL_DEPTH_REPORT.md) and
-[P3_RERANKER_BATCHING_REPORT.md](P3_RERANKER_BATCHING_REPORT.md). Each later stage requires planner review
+[P3_RERANKER_BATCHING_REPORT.md](P3_RERANKER_BATCHING_REPORT.md) and
+[P4_KB_TAXONOMY_REPORT.md](P4_KB_TAXONOMY_REPORT.md). Each later stage requires planner review
 and explicit authorization; Codex returns a scoped report/commit and stops after
-each stage. P3 implementation does not authorize P4 or deployment.
+each stage. P4 implementation does not authorize the production acceptance gate,
+audit implementation, or deployment.
 
 ## Invariants
 

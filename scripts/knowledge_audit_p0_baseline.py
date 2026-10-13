@@ -161,20 +161,20 @@ async def observations():
         batch_outcome = "synthetic_server_batch_limit"
     kb = source("kb_manager.py")
     functions = {n.name: n for n in kb.body if isinstance(n, ast.FunctionDef)}
+    faq = source("utils/faq_content.py")
+    namespace["_clean_category_field"] = lambda value: value.strip().strip(" .،؛:|«»")
+    execute([n for n in faq.body if isinstance(n, (ast.ClassDef, ast.FunctionDef, ast.Assign))], namespace)
     execute([functions["extract_qa_components"]], namespace)
     content = "question: synthetic\nanswer: synthetic\nquestion category: fixture. sub_category: fixture"
     parsed = namespace["extract_qa_components"](content)
     round_trips = {}
-    for name in ["api_create_chunk", "api_sync_chunk"]:
-        reconstruction = next(n for n in ast.walk(functions[name])
-            if isinstance(n, ast.Assign) and any(isinstance(t, ast.Name)
-                and t.id == "reconstructed_content" for t in n.targets)
-            and isinstance(n.value, ast.JoinedStr))
-        for mode, answer in [("clean_fields", "synthetic"), ("editor_parsed", parsed["answer"])]:
-            scope = dict(namespace, payload=SimpleNamespace(question="synthetic", answer=answer),
-                         question="synthetic", answer=answer)
-            execute([reconstruction], scope)
-            round_trips[f"{name}:{mode}"] = "question category:" in scope["reconstructed_content"]
+    compose = namespace["compose_faq"]
+    for mode, result in {
+        "create_explicit_fields": compose("synthetic", "synthetic", {"main_category":"fixture","sub_category":"fixture"}),
+        "edit_omitted_fields": compose("synthetic", "updated synthetic", {}, current_content=content),
+        "legacy_metadata": compose("synthetic", "synthetic\nquestion category: fixture. sub_category: fixture", {}),
+    }.items():
+        round_trips[mode] = "question category:" in result
     return {
         "fixture_only": True, "network_calls": 0, "env_files_loaded": 0,
         "source_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in

@@ -9,7 +9,7 @@ from fastapi import APIRouter, Request, HTTPException, Query
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
 from versioned_assets import asset_integrity, vendor_integrity, versioned_asset
-from pydantic import BaseModel
+from pydantic import BaseModel, StrictStr, field_validator, model_validator
 from typing import Optional, List
 from qdrant_client.models import PointStruct, PointIdsList
 import psycopg2
@@ -18,6 +18,7 @@ from parsivar import Normalizer
 from frontend_paths import TEMPLATE_DIR
 from web_permissions import permissions_for
 from utils.structured_logging import log_event
+from utils.faq_content import FaqContentError, clean_taxonomy, compose_faq, parse_faq_content
 from new_architecture.knowledge_update import (
     KnowledgeChunkNotFound,
     KnowledgeUpdateCoordinator,
@@ -115,7 +116,34 @@ def get_db_connection():
     return conn
 
 
-class ChunkCreatePayload(BaseModel):
+class FaqTaxonomyPayload(BaseModel):
+    main_category: StrictStr | None = None
+    sub_category: StrictStr | None = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def accept_taxonomy_aliases(cls, values):
+        if not isinstance(values, dict):
+            return values
+        values = dict(values)
+        for name, alias in (("main_category", "category"), ("sub_category", "subcategory")):
+            if name in values and alias in values and clean_taxonomy(values[name]) != clean_taxonomy(values[alias]):
+                raise ValueError("Conflicting taxonomy aliases; provide one value per field.")
+            if alias in values and name not in values:
+                values[name] = values[alias]
+        return values
+
+    @field_validator("main_category", "sub_category")
+    @classmethod
+    def validate_taxonomy_label(cls, value):
+        return clean_taxonomy(value)
+
+    def explicit_taxonomy(self) -> dict:
+        return {name: getattr(self, name) for name in ("main_category", "sub_category")
+                if name in self.model_fields_set}
+
+
+class ChunkCreatePayload(FaqTaxonomyPayload):
     document_id: int
     question: Optional[str] = None
     answer: str
@@ -123,7 +151,7 @@ class ChunkCreatePayload(BaseModel):
     changed_by: Optional[str] = "Hooman (AI Engineer)"
 
 
-class ChunkSyncPayload(BaseModel):
+class ChunkSyncPayload(FaqTaxonomyPayload):
     chunk_id: int
     question: Optional[str] = None
     answer: str
@@ -203,24 +231,8 @@ def _knowledge_update_coordinator(main_module) -> KnowledgeUpdateCoordinator:
 
 
 def extract_qa_components(content: str) -> dict:
-    """Parses text content safely, cleaning up residual bracket or quote anomalies."""
-    content_clean = content.strip()
-
-    if content_clean.startswith('[') and content_clean.endswith(']'):
-        content_clean = content_clean[1:-1].strip()
-
-    q_match = re.search(r'question\s*:\s*["\']?(.*?)["\']?(?=\s*answer\s*\d*\s*:|\s*question category|$)',
-                        content_clean, re.DOTALL | re.IGNORECASE)
-    a_match = re.search(r'answer\s*:\s*["\']?(.*?)["\']?$', content_clean, re.DOTALL | re.IGNORECASE)
-
-    if q_match and a_match:
-        return {
-            "is_qa": True,
-            "question": q_match.group(1).strip().strip('"\''),
-            "answer": a_match.group(1).strip().strip('"\'')
-        }
-
-    return {"is_qa": False, "question": None, "answer": content}
+    """Return clean editor fields, explicit taxonomy and safe ambiguity status."""
+    return parse_faq_content(content).as_dict()
 
 
 @router.get("/", response_class=HTMLResponse)
@@ -281,7 +293,10 @@ def api_get_document_chunks(
                 "content": row["content"],
                 "is_qa": parsed["is_qa"],
                 "question": parsed["question"],
-                "answer": parsed["answer"]
+                "answer": parsed["answer"],
+                "main_category": parsed["main_category"],
+                "sub_category": parsed["sub_category"],
+                "taxonomy_error": parsed["taxonomy_error"],
             })
         return {"chunks": processed_chunks, "has_more": len(processed_chunks) == limit}
     except Exception as e:
@@ -307,7 +322,7 @@ def api_create_chunk(payload: ChunkCreatePayload):
             raise HTTPException(status_code=404, detail="Parent Document missing.")
 
         if payload.is_qa and payload.question:
-            reconstructed_content = f"question: {payload.question.strip()}\nanswer: {payload.answer.strip()}"
+            reconstructed_content = compose_faq(payload.question, payload.answer, payload.explicit_taxonomy())
         else:
             reconstructed_content = payload.answer.strip()
 
@@ -420,6 +435,8 @@ def api_create_chunk(payload: ChunkCreatePayload):
                 }, level=logging.ERROR)
         if isinstance(exc, HTTPException):
             raise
+        if isinstance(exc, FaqContentError):
+            raise HTTPException(status_code=422, detail={"message": str(exc)}) from exc
         log_event(logger, "knowledge_chunk_creation_failed", {
             "stage": stage, "error": {"type": type(exc).__name__},
             "sqlstate": getattr(exc, "pgcode", None),
@@ -455,18 +472,23 @@ def api_sync_chunk(payload: ChunkSyncPayload):
                 status_code=422,
                 detail={"message": "Question must not be empty for FAQ chunks."},
             )
-        reconstructed_content = f"question: {question}\nanswer: {answer}"
+        def prepare(current_content):
+            content = compose_faq(question, answer, payload.explicit_taxonomy(), current_content=current_content)
+            return content, normalizer.normalize(content)
     else:
         reconstructed_content = answer
 
     try:
+        kwargs = {"prepare_content": prepare} if payload.is_qa else {
+            "content": reconstructed_content,
+            "normalized_content": normalizer.normalize(reconstructed_content),
+        }
         result = _knowledge_update_coordinator(main).update(
-            chunk_id=payload.chunk_id,
-            content=reconstructed_content,
-            normalized_content=normalizer.normalize(reconstructed_content),
-            changed_by=payload.changed_by or "Knowledge Manager",
+            chunk_id=payload.chunk_id, changed_by=payload.changed_by or "Knowledge Manager", **kwargs,
         )
-        return result.as_dict()
+        return {**result.as_dict(), **extract_qa_components(result.updated_content)}
+    except FaqContentError as exc:
+        raise HTTPException(status_code=422, detail={"message": str(exc)}) from exc
     except KnowledgeChunkNotFound as exc:
         raise HTTPException(
             status_code=404,
@@ -555,7 +577,10 @@ def api_get_chunk_versions(chunk_id: int):
                 "created_at": v["created_at"].isoformat(),
                 "is_qa": parsed["is_qa"],
                 "question": parsed["question"],
-                "answer": parsed["answer"]
+                "answer": parsed["answer"],
+                "main_category": parsed["main_category"],
+                "sub_category": parsed["sub_category"],
+                "taxonomy_error": parsed["taxonomy_error"],
             })
         return {"versions": processed}
     except Exception as e:
