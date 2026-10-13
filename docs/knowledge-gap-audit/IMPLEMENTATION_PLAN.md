@@ -4,9 +4,10 @@ Contract version: `p0-contract-1`. Baseline: [P0_BASELINE_REPORT.md](P0_BASELINE
 UI/export contract: [DASHBOARD_AND_CSV_CONTRACT.md](DASHBOARD_AND_CSV_CONTRACT.md).
 P0/P0.1 established the baseline; production repairs are recorded in
 [P1_RRF_REPORT.md](P1_RRF_REPORT.md) and
-[P2_RETRIEVAL_DEPTH_REPORT.md](P2_RETRIEVAL_DEPTH_REPORT.md). Each later stage requires planner review
+[P2_RETRIEVAL_DEPTH_REPORT.md](P2_RETRIEVAL_DEPTH_REPORT.md) and
+[P3_RERANKER_BATCHING_REPORT.md](P3_RERANKER_BATCHING_REPORT.md). Each later stage requires planner review
 and explicit authorization; Codex returns a scoped report/commit and stops after
-each stage. P2 implementation does not authorize P3 or deployment.
+each stage. P3 implementation does not authorize P4 or deployment.
 
 ## Invariants
 
@@ -44,7 +45,7 @@ each stage. P2 implementation does not authorize P3 or deployment.
 | **P4 taxonomy preservation** | Explicitly preserve/create/edit/revert category/subcategory with safe legacy parsing and version provenance. No fabricated taxonomy recovery from missing historical versions. | Structured taxonomy survives PG/version/Qdrant/embedding/cache-revision paths; clean fields and legacy taxonomy-in-answer cases; revert with/without taxonomy, empty/unknown category, compensation/concurrent-edit tests. Retrieval/answer-quality checks and bounded before/after update/retrieval measurements on isolated fixtures. |
 | **Production acceptance gate** | Planner reviews P1–P4 evidence before any audit stage. | Correct mechanics, frozen input consistency, real labeled retrieval/answer quality, unchanged intended prompt/rerank policy, 50-second external deadline, paired latency/resource results and owner-approved regression tolerance. Missing live evidence prevents production acceptance, even if code can be reviewed. No deployment is implied. |
 
-P2 review readiness is not an authorization to deploy or start P3. No naturally
+P3 review readiness is not an authorization to deploy or start P4. No naturally
 occurring unlabeled queries can supply a measured answer-quality error rate.
 Choose tolerances and label sets before experiments, rather than after results.
 

@@ -115,6 +115,7 @@ class PerformanceSettings:
     tei_http_pool_timeout_seconds: float
     tei_embed_insert_batch_size: int
     tei_embed_max_client_batch_size: int
+    tei_rerank_max_client_batch_size: int
     vllm_http_max_connections: int
     vllm_http_max_keepalive_connections: int
     vllm_http_keepalive_expiry_seconds: float
@@ -238,6 +239,9 @@ def load_performance_settings() -> PerformanceSettings:
         ),
         tei_embed_max_client_batch_size=_positive_int(
             "TEI_EMBED_MAX_CLIENT_BATCH_SIZE", 50
+        ),
+        tei_rerank_max_client_batch_size=_positive_int(
+            "TEI_RERANK_MAX_CLIENT_BATCH_SIZE", 50
         ),
         vllm_http_max_connections=_positive_int(
             "VLLM_HTTP_MAX_CONNECTIONS", 32

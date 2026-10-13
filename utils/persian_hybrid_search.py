@@ -784,13 +784,114 @@ class PersianHybridSearch:
         return scores, candidates
 
 
+    async def _rerank_server_limit(self, metrics: dict) -> int:
+        """Cache the target's declared limit; never infer it from embedding TEI."""
+        if not hasattr(self, "_rerank_capability_lock"):
+            self._rerank_capability_lock = asyncio.Lock()
+            self._rerank_server_limits = {}
+        async with self._rerank_capability_lock:
+            if self.tei_rerank_url not in self._rerank_server_limits:
+                start = time.perf_counter()
+                metrics["capability_request_count"] += 1
+                try:
+                    response = await self._http.get(f"{self.tei_rerank_url}/info")
+                    response.raise_for_status()
+                    try:
+                        info = response.json()
+                    except ValueError as exc:
+                        raise ServiceProtocolError("Reranking service returned invalid capabilities") from exc
+                    limit = info.get("max_client_batch_size") if isinstance(info, dict) else None
+                    if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
+                        raise ServiceProtocolError("Reranking service returned invalid capabilities")
+                    self._rerank_server_limits[self.tei_rerank_url] = limit
+                finally:
+                    metrics["capability_duration_ms"] += (time.perf_counter() - start) * 1000
+            return self._rerank_server_limits[self.tei_rerank_url]
+
+    async def _rerank_scores_batched(
+        self, query: str, texts: list[str], *, raw_scores: bool | None,
+        metrics: dict,
+    ) -> list[tuple[int, float]]:
+        """Score all original positions sequentially, or fail the entire operation.
+
+        Results retain response encounter order for legacy related-question ties.
+        Callers apply their own single global sort/selection after full validation.
+        """
+        limit = validate_retrieval_depth("TEI_RERANK_MAX_CLIENT_BATCH_SIZE", getattr(
+            self, "rerank_max_client_batch_size", PERFORMANCE_SETTINGS.tei_rerank_max_client_batch_size
+        ))
+        metrics.update(client_batch_size=limit, batch_count=0, completed_batch_count=0,
+            request_sizes=[], batch_duration_ms=[], capability_request_count=0, capability_duration_ms=0.0)
+        if not texts:
+            return []
+        self._ensure_open()
+        self._tei_reranker_active = getattr(self, "_tei_reranker_active", 0) + 1
+        try:
+            server_limit = await self._rerank_server_limit(metrics)
+            metrics["server_batch_limit"] = server_limit
+            if limit > server_limit:
+                raise ServiceProtocolError("Configured reranker client batch size exceeds the server limit")
+            merged = []
+            for offset in range(0, len(texts), limit):
+                batch = texts[offset:offset + limit]
+                payload = {"query": query, "texts": batch}
+                if raw_scores is not None:
+                    payload["raw_scores"] = raw_scores
+                metrics["batch_count"] += 1
+                metrics["request_sizes"].append(len(batch))
+                start = time.perf_counter()
+                try:
+                    async with trace_span("reranker"):
+                        response = await self._http.post(f"{self.tei_rerank_url}/rerank", json=payload)
+                        response.raise_for_status()
+                    try:
+                        rankings = response.json()
+                    except ValueError as exc:
+                        raise ServiceProtocolError("Reranking service returned an invalid response") from exc
+                    if not isinstance(rankings, list) or len(rankings) != len(batch):
+                        raise ServiceProtocolError("Reranking service returned an incomplete response")
+                    seen = set()
+                    validated = []
+                    for ranking in rankings:
+                        if not isinstance(ranking, dict):
+                            raise ServiceProtocolError("Reranking service returned an invalid response")
+                        index, score = ranking.get("index"), ranking.get("score")
+                        if (isinstance(index, bool) or not isinstance(index, int) or
+                                index < 0 or index >= len(batch) or index in seen):
+                            raise ServiceProtocolError("Reranking service returned an invalid response")
+                        if isinstance(score, bool) or not isinstance(score, (int, float)):
+                            raise ServiceProtocolError("Reranking service returned an invalid response")
+                        try:
+                            score = float(score)
+                        except (OverflowError, ValueError) as exc:
+                            raise ServiceProtocolError("Reranking service returned an invalid response") from exc
+                        if not math.isfinite(score):
+                            raise ServiceProtocolError("Reranking service returned an invalid response")
+                        seen.add(index)
+                        validated.append((offset + index, score))
+                    # Unique in-range indexes plus exact length prove completeness.
+                    merged.extend(validated)
+                    metrics["completed_batch_count"] += 1
+                finally:
+                    metrics["batch_duration_ms"].append((time.perf_counter() - start) * 1000)
+            return merged
+        except httpx.PoolTimeout as exc:
+            self._tei_pool_timeout_total = getattr(self, "_tei_pool_timeout_total", 0) + 1
+            raise ServiceTimeoutError("Reranking HTTP pool timed out") from exc
+        except httpx.TimeoutException as exc:
+            raise ServiceTimeoutError("Reranking service timed out") from exc
+        except httpx.HTTPError as exc:
+            raise ServiceUnavailableError("Reranking service is unavailable") from exc
+        finally:
+            self._tei_reranker_active -= 1
+
     async def rerank_search_results(
         self,
         query: str,
         candidates: list[SearchResult],
         top_k: int,
     ) -> list[SearchResult]:
-        """Rerank FAQ intent fields once while preserving full answer chunks."""
+        """Rerank FAQ intent fields in bounded requests, preserving full chunks."""
 
         if top_k < 1:
             raise ValueError("top_k must be at least 1")
@@ -822,7 +923,9 @@ class PersianHybridSearch:
                 )
             ]
 
+        batch_metrics = {}
         if not candidates:
+            await self._rerank_scores_batched(normalized_query, texts, raw_scores=False, metrics=batch_metrics)
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.RERANK,
                 input_data={"candidates": []},
@@ -833,106 +936,37 @@ class PersianHybridSearch:
                     "selected_count": 0,
                     "top_k": top_k,
                     "raw_scores": False,
+                    **batch_metrics,
                 },
                 duration_ms=(time.perf_counter() - rerank_started) * 1000,
             ))
             return []
 
-        self._ensure_open()
-        self._tei_reranker_active = getattr(
-            self, "_tei_reranker_active", 0
-        ) + 1
         try:
-            try:
-                async with trace_span("reranker"):
-                    response = await self._http.post(
-                        f"{self.tei_rerank_url}/rerank",
-                        json={
-                            "query": normalized_query,
-                            "texts": texts,
-                            "raw_scores": False,
-                        },
-                    )
-                    response.raise_for_status()
-            except httpx.PoolTimeout as exc:
-                self._tei_pool_timeout_total = getattr(
-                    self, "_tei_pool_timeout_total", 0
-                ) + 1
-                raise ServiceTimeoutError(
-                    "Reranking HTTP pool timed out"
-                ) from exc
-            except httpx.TimeoutException as exc:
-                raise ServiceTimeoutError(
-                    "Reranking service timed out"
-                ) from exc
-            except httpx.HTTPError as exc:
-                raise ServiceUnavailableError(
-                    "Reranking service is unavailable"
-                ) from exc
-
-            try:
-                rankings = response.json()
-            except ValueError as exc:
-                raise ServiceProtocolError(
-                    "Reranking service returned an invalid response"
-                ) from exc
-            if not isinstance(rankings, list) or len(rankings) != len(candidates):
-                raise ServiceProtocolError(
-                    "Reranking service returned an incomplete response"
-                )
-
-            seen_indexes = set()
-            scored_candidates = []
-            for ranking in rankings:
-                if not isinstance(ranking, dict):
-                    raise ServiceProtocolError(
-                        "Reranking service returned an invalid response"
-                    )
-                index = ranking.get("index")
-                score = ranking.get("score")
-                if (
-                    isinstance(index, bool)
-                    or not isinstance(index, int)
-                    or index < 0
-                    or index >= len(candidates)
-                    or index in seen_indexes
-                ):
-                    raise ServiceProtocolError(
-                        "Reranking service returned an invalid response"
-                    )
-                if (
-                    isinstance(score, bool)
-                    or not isinstance(score, (int, float))
-                    or not math.isfinite(score)
-                ):
-                    raise ServiceProtocolError(
-                        "Reranking service returned an invalid response"
-                    )
-                seen_indexes.add(index)
-                candidate = candidates[index]
-                scored_candidates.append((
-                    candidate,
-                    float(score),
-                    candidate.original_rrf_rank or index + 1,
-                ))
-        except Exception as exc:
+            rankings = await self._rerank_scores_batched(
+                normalized_query, texts, raw_scores=False, metrics=batch_metrics,
+            )
+            scored_candidates = [
+                (candidates[index], score, candidates[index].original_rrf_rank or index + 1)
+                for index, score in rankings
+            ]
+        except (Exception, asyncio.CancelledError) as exc:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.RERANK,
-                status="ERROR",
+                status="CANCELLED" if isinstance(exc, asyncio.CancelledError) else "ERROR",
                 input_data={"candidates": candidate_rows()},
                 metrics={
                     "purpose": "answer_context",
                     "candidate_count": len(candidates),
                     "top_k": top_k,
                     "raw_scores": False,
+                    **batch_metrics,
                 },
                 duration_ms=(time.perf_counter() - rerank_started) * 1000,
                 error_code=getattr(exc, "error_code", type(exc).__name__),
                 error_data={"error_type": type(exc).__name__},
             ))
             raise
-        finally:
-            self._tei_reranker_active -= 1
 
         scored_candidates.sort(key=lambda item: (
             -item[1],
@@ -997,6 +1031,7 @@ class PersianHybridSearch:
                 "selected_count": selected_count,
                 "top_k": top_k,
                 "raw_scores": False,
+                **batch_metrics,
             },
             duration_ms=(time.perf_counter() - rerank_started) * 1000,
         ))
@@ -1014,69 +1049,30 @@ class PersianHybridSearch:
             normalize_persian_text(candidate.get("question", ""))
             for candidate in candidates
         ]
-        self._ensure_open()
-        self._tei_reranker_active = getattr(
-            self, "_tei_reranker_active", 0
-        ) + 1
+        batch_metrics = {}
         try:
-            async with trace_span("reranker"):
-                resp = await self._http.post(
-                    f"{self.tei_rerank_url}/rerank",
-                    json={"query": normalized_query, "texts": texts},
-                )
-                resp.raise_for_status()
-        except httpx.PoolTimeout as exc:
-            self._tei_pool_timeout_total = getattr(
-                self, "_tei_pool_timeout_total", 0
-            ) + 1
-            raise ServiceTimeoutError("Reranking HTTP pool timed out") from exc
-        except httpx.TimeoutException as exc:
-            raise ServiceTimeoutError("Reranking service timed out") from exc
-        except httpx.HTTPError as exc:
-            raise ServiceUnavailableError(
-                "Reranking service is unavailable"
-            ) from exc
-        finally:
-            self._tei_reranker_active -= 1
-        try:
-            rankings = resp.json()
-        except ValueError as exc:
-            raise ServiceProtocolError(
-                "Reranking service returned an invalid response"
-            ) from exc
-        if not isinstance(rankings, list):
-            raise ServiceProtocolError(
-                "Reranking service returned an invalid response"
+            rankings = await self._rerank_scores_batched(
+                normalized_query, texts, raw_scores=None, metrics=batch_metrics,
             )
+        except (Exception, asyncio.CancelledError) as exc:
+            emit_pipeline_stage_lazy(lambda: PipelineStageResult(
+                stage=PipelineStage.RERANK,
+                status="CANCELLED" if isinstance(exc, asyncio.CancelledError) else "ERROR",
+                metrics={"auxiliary_related_questions": {
+                    "purpose": "related_questions", "threshold": threshold,
+                    "candidate_count": len(candidates), **batch_metrics,
+                }},
+                duration_ms=(time.perf_counter() - rerank_started) * 1000,
+                error_code=getattr(exc, "error_code", type(exc).__name__),
+                error_data={"error_type": type(exc).__name__},
+            ))
+            raise
+        rankings.sort(key=lambda item: -item[1])
 
         ranked_candidates = []
         trace_rankings = []
-        seen_indexes = set()
         output_rows = []
-        for output_rank, ranking in enumerate(rankings, start=1):
-            if not isinstance(ranking, dict):
-                raise ServiceProtocolError(
-                    "Reranking service returned an invalid response"
-                )
-            index = ranking.get("index")
-            score = ranking.get("score")
-            if not isinstance(index, int) or index < 0 or index >= len(candidates):
-                raise ServiceProtocolError(
-                    "Reranking service returned an invalid response"
-                )
-            if index in seen_indexes:
-                raise ServiceProtocolError(
-                    "Reranking service returned an invalid response"
-                )
-            if (
-                isinstance(score, bool)
-                or not isinstance(score, (int, float))
-                or not math.isfinite(score)
-            ):
-                raise ServiceProtocolError(
-                    "Reranking service returned an invalid response"
-                )
-            seen_indexes.add(index)
+        for output_rank, (index, score) in enumerate(rankings, start=1):
             trace_rankings.append(
                 {
                     "candidate_id": str(
@@ -1125,6 +1121,9 @@ class PersianHybridSearch:
                 "auxiliary_related_questions": {
                     "purpose": "related_questions",
                     "threshold": threshold,
+                    "candidate_count": len(candidates),
+                    "selected_count": min(5, len(ranked_candidates)),
+                    **batch_metrics,
                 }
             },
             duration_ms=(time.perf_counter() - rerank_started) * 1000,

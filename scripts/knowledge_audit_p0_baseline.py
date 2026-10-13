@@ -53,6 +53,10 @@ class FakeHttp:
         self.maximum = maximum
         self.sizes = []
 
+    async def get(self, url):
+        return SimpleNamespace(raise_for_status=lambda: None,
+            json=lambda: {"max_client_batch_size": self.maximum or 64})
+
     async def post(self, url, json):
         size = len(json["texts"])
         self.sizes.append(size)
@@ -67,7 +71,8 @@ class FakeHttp:
 async def observations():
     tree = source("utils/persian_hybrid_search.py")
     classes = {n.name: n for n in tree.body if isinstance(n, ast.ClassDef)}
-    methods = {"search", "_score_bm25", "rerank_search_results", "_ensure_open"}
+    methods = {"search", "_score_bm25", "rerank_search_results", "_ensure_open",
+        "_rerank_scores_batched", "_rerank_server_limit"}
     hybrid = ast.ClassDef(name="ExtractedSearch", bases=[], keywords=[], body=[
         n for n in classes["PersianHybridSearch"].body
         if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef)) and n.name in methods
@@ -194,6 +199,7 @@ async def observations():
             "synthetic_elapsed_ms": round(elapsed_ms, 3)},
         "audit_rerank": {"request_sizes": search._http.sizes, "outcome": batch_outcome,
             "one_request_batching_still_outstanding": search._http.sizes == [150],
+            "safely_batched": batch_outcome == "accepted" and search._http.sizes == [50, 50, 50],
             "synthetic_server_batch_limit": 64,
             "server_limit_is_synthetic": True},
         "depth_validation": validation,

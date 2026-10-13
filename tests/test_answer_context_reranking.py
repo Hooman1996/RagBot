@@ -138,6 +138,9 @@ class RecordingHttp:
         self.calls.append((url, json))
         return Response(self.rankings)
 
+    async def get(self, url):
+        return Response({"max_client_batch_size": 64})
+
 
 class CollectingObserver:
     pipeline_hashes_enabled = False

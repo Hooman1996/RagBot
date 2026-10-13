@@ -340,6 +340,10 @@ def _specs() -> dict[str, VariableSpec]:
             component="Data insertion/TEI policy",
             restart="FastAPI or data-insertion command",
         ),
+        "TEI_RERANK_MAX_CLIENT_BATCH_SIZE": VariableSpec(
+            kind="int", default="50", minimum=1,
+            component="TEI reranker client", restart="FastAPI",
+        ),
         "VLLM_HTTP_MAX_CONNECTIONS": VariableSpec(
             kind="int", default="32", minimum=1, component="vLLM client", restart="FastAPI"
         ),

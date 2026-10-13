@@ -44,8 +44,34 @@ theoretical upper bound. Actual results are bounded by eligible distinct union
 membership: small branches or overlap yield fewer entries, never padding or
 duplication. Context top-k must still not exceed the configured final top-k.
 Effective depths/counts are recorded in request-local retrieval diagnostics.
-Expanded reranking remains dependent on P3: do not send more than the verified
-TEI client limit in a single request.
+Expanded reranking uses sequential P3 requests bounded by the independent client
+batch setting below. Do not send more than the verified target limit per request.
+
+### P3 reranker batch contract
+
+`TEI_RERANK_MAX_CLIENT_BATCH_SIZE` is an optional positive integer, default **50**,
+measured in texts per HTTP rerank request. It is independent of embedding batch
+settings and does not configure any TEI server flag. Existing custom values are
+preserved. The target limit is deployment-specific: the reranking client reads
+`/info` on its first nonempty operation and rejects settings above that target's
+`max_client_batch_size` before sending texts. Missing/invalid capabilities fail
+closed. A successful capability result is cached per target URL for the client
+lifetime; recreate the client after server-limit changes. No service is restarted
+as part of P3. Settings are loaded at import/startup, not hot-reloaded.
+
+Both answer-context and related-question paths use sequential batches, complete
+index/finite-score validation and global score merging, followed by their existing
+selection policies. There are no per-batch top-k losses or retries. Answer-context
+keeps `raw_scores=False`; related questions keep the field omitted, as before.
+Any failed batch fails the logical operation without returning a partial ranking.
+Content-safe metrics distinguish rerank request counts/sizes/times from the initial
+capability GET. Original full chunks/metadata and scoring text policies are kept.
+Batching does not remove per-input token limits or the generation context budget.
+
+This key is propagated to the same main-chatbot templates and private runtime
+files as the lexical key. The source-authored `.env.example.generated` template
+and validator manifest are guarded by tests; unrelated HTTP evaluation services
+do not configure this client and receive no new key.
 
 Main templates `env.example`, `Production_ENV` and `.env.example.generated`
 include this key. The generated-named template is source-authored; no automatic
@@ -85,6 +111,7 @@ the main chatbot through HTTP and do not load this retrieval implementation's en
 | `VLLM_URL` | No | Internal | OpenAI-compatible vLLM client | `http://localhost:8000/v1` | FastAPI |
 | `TEI_EMBED_URL` | Yes | Internal | TEI embedding clients | None on active path | FastAPI/tool |
 | `TEI_RERANK_URL` | Yes | Internal | TEI reranking client | Mixed: none/localhost `7998` | FastAPI |
+| `TEI_RERANK_MAX_CLIENT_BATCH_SIZE` | No | No | Both TEI reranking paths | `50` texts/request | FastAPI |
 | `EMBEDDING_MODEL` | Behaviorally unused | Internal | Loaded as legacy metadata | None | FastAPI |
 | `EMBEDDING_MODEL_NAME` | Legacy only | Internal | Inactive local embedding class | None | Legacy command |
 | `LLM_MODEL` | Behaviorally unused | Internal | Loaded only | None | None |

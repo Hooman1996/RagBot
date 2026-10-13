@@ -547,6 +547,7 @@ def build_runtime_snapshot(
             "knowledge_sources": list(selected_documents or []),
         },
         "rerank": {
+            "client_batch_size": PERFORMANCE_SETTINGS.tei_rerank_max_client_batch_size,
             "model": os.getenv("RERANKER_MODEL"),
             "enabled": PERFORMANCE_SETTINGS.rag_context_rerank_enabled,
             "top_k": PERFORMANCE_SETTINGS.rag_context_rerank_top_k,
