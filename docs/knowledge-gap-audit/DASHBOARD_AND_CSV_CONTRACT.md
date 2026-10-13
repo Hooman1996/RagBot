@@ -1,7 +1,8 @@
 # Main-dashboard and CSV contract
 
-Contract version `p0-contract-1`; design/specification only. No page, route,
-permissions, jobs, database schema or framework was implemented in P0.
+Contract version `p0-contract-1`; final coverage UI/export remains a specification.
+A1 adds the separate preparation-only schema below. No page, route, permissions,
+jobs, database schema or framework was implemented in P0 or A1.
 The primary deliverable of a completed run is a CSV with one result per selected
 input row. Private internal JSON/evidence supports it but cannot replace it.
 
@@ -294,3 +295,34 @@ an explicit migration/compatibility contract, not silent header changes.
 The A2 pilot must ship this functional page and initial schema-conforming CSV;
 A3/A4 extend evaluation/recommendations, A5/A6 refine and harden. Every stage is
 reviewed independently. P0 stops with these documents and baseline observations.
+
+## Implemented A1 preparation export
+
+`knowledge_audit.export.export_preparation` implements `a1-preparation-csv-1`
+and `a1-preparation-manifest-1`, distinct from the final coverage schema v1.
+Every selected CSV user record appears exactly once in original record order,
+including invalid records/unknown roles and preparation failures. Explicit
+assistant/system records are history-only. Unknown roles retain invalid selected
+results rather than silently disappearing.
+
+| Fields | A1 meaning |
+|---|---|
+| `schema_version`, `run_id`, `export_id` | Preparation schema, opaque run, shared manifest/export content identity. |
+| `source_row_id`, `source_query_id`, `source_record_ordinal`, `processing_ordinal` | Dataset-byte identity plus ordinal; optional keyed opaque query reference; separate source/processing order. |
+| `safe_session_ref`, `timestamp`, `timestamp_status`, `timestamp_provenance` | Keyed run/source session; UTC timestamp or empty; resolved/missing/invalid/unresolved/ambiguous; parser/calendar/timezone/source-offset provenance. |
+| `input_query_redacted`, `normalized_query_redacted`, `standalone_query_redacted`, `canonical_retrieval_query_redacted` | Distinct original, normalized, history-resolved semantic and eligible alias retrieval wording. Unavailable forms remain empty. |
+| `existing_intent`, `scope_status` | Existing classifier result; scope only `chitchat` or `unknown`; no new scope classification. |
+| `processing_status`, `coverage_status`, `preparation_status` | Always `preparation_only`; coverage empty; preparation `prepared`, `pending_model`, `needs_context`, `uncertain_preparation`, `invalid_input` or `failed`. |
+| `model_selected`, `model_prepared`, `rewrite_status` | Bounded selection and actual successful preparation booleans; rewrite/not-run/fallback/context state. Selection alone does not prove a service call. |
+| `history_status`, `history_provenance` | User-only/incomplete/unavailable/ambiguous; cutoff, preceding row IDs/digest, ordering/time uncertainty, redaction and capture limitations. No history text is copied into the CSV. |
+| `preparation_errors`, `uncertainty_codes` | JSON arrays of fixed safe diagnostic codes. |
+| `kb_snapshot_id`, `configuration_id`, `preparation_code_id`, `input_id` | Frozen content, effective configuration, base plus exact source hashes, input bytes identity. |
+| `input_scope`, `selected_input_row_count`, `source_input_row_count` | Full input preparation with bounded model sample; selected/source denominators; manifest lists exact selected/sample IDs. |
+
+CSV uses UTF-8 BOM, comma separator, quoted cells, CRLF records, JSON cells and
+effective-leading-character formula protection. Typed generated opaque IDs are
+preserved; query text is redacted before storage. Formula protection is a display
+transformation. Manifest includes file hash, counts/mapping/time policy, runtime
+configuration, code/artifact hashes, snapshot and obtainable serving identities.
+No arbitrary source columns or coverage/recommendation fields are projected.
+A2 must create its distinct coverage schema and preserve complete row accounting.

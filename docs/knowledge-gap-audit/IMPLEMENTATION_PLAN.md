@@ -78,9 +78,11 @@ Serving-limit changes require client recreation because discovery is cached.
 Production gateway `/info` access and immutable weight/tokenizer provenance also
 remain release prerequisites. No production service was contacted.
 
-Recommended next audit stage is **A1 frozen-input and chronological replay
-foundation**, subject to explicit planner authorization and resolution/review of
-the gate's release blockers. It has not started. **A2 still includes the functional
+The user explicitly authorized **A1 input/replay/snapshot foundations**. A1 is
+implemented for planner review in
+[A1_INPUT_REPLAY_SNAPSHOT_REPORT.md](A1_INPUT_REPLAY_SNAPSHOT_REPORT.md).
+This authorization does not resolve the repair gate's release blockers.
+**A2 still includes the functional
 main-dashboard page and initial complete per-input-row CSV download**; all-query
 processing, explainability and row conservation remain locked requirements.
 
@@ -91,7 +93,7 @@ Choose tolerances and label sets before experiments, rather than after results.
 
 | Stage | Scope and delivered acceptance boundary |
 |---|---|
-| **A1 frozen-input and replay foundation** | Input-row manifest, CSV mapping and supported read-only DB query source; private consistent KB snapshot and stable IDs; timestamp/session policy; chronological replay provider; production preparation parity; early scope routing; persisted run/row contract and bounded worker design. No invocation of production history writes/tickets/feedback. Tests prove row conservation and no future leakage. |
+| **A1 input/replay/snapshot foundations — implemented for review** | Explicit CSV mapping and future DB adapter interface; stable row IDs; private versioned redacted full-content PG snapshot verified against bracketing source/index signatures; confirmed calendar/timezone policy; strict cutoff history provider; production preparation components and parity tests; reusable preparation-only CSV/manifest and sequential CLI sample capped at 10 query rows. No DB input query implementation, scope extension, coverage evaluation, durable worker or page. No production history writes/tickets/feedback. See A1 report for executed evidence and limitations. |
 | **A2 early end-to-end pilot — page + CSV required** | Minimal complete coverage pipeline: aspect extraction, production-default baseline, broader candidates (~150), title/taxonomy rerank (~50 distinct entries), tokenizer-budgeted up-to-five full Q/A entries per batch, sentence citations, reconciliation, short full-coverage verification. **Functional new main-dashboard page**, authorized navigation, upload/mapping, DB/scope/session selection, validated settings, start/progress/retry, paginated/filterable results and evidence panel, **initial complete CSV download**. All selected rows exported including error/exclusion/context/invalid rows. Initial pilot may stop after the initial evaluated set and must record that scope; recommendation fields remain empty with explicit not-yet-run state. This stage is before expansion tuning and backend completion. |
 | **A3 bounded expansion and calibration** | Use pilot evidence to tune one variable at a time; expand unresolved cases with unrepeated evidence, initially up to 300 **total evaluated distinct entries**, not 300 additional entries. Preserve chronological prep, title-only production rerank policy, token budgets, CSV accounting and baseline reachability. Evaluate retrieval breadth, stopping reasons, conflicts and verifier rejection rates on controlled labeled tests. Any answer-aware diagnostic requires separate approval and named experiment. |
 | **A4 gap and taxonomy recommendations** | Gap analyst consumes structured findings; recommender consumes gap specifications, existing category/subcategory paths and relevant FAQ titles. Suggest question/category/subcategory, flag proposed new paths, cite equivalent/related entries; reviewer approves/rejects recommendations without writing KB automatically. UI details and CSV include multiple recommendations without multiplying rows. No factual-answer generation. |
@@ -118,7 +120,7 @@ Keep original, normalized, standalone/effective and canonical retrieval wording
 separate, with redacted views. Aspect extraction evaluates intended standalone
 meaning, not aliases that introduce expanded retrieval vocabulary. Record rewrite
 use, history completeness, alias artifact hash and classifier artifact hash.
-Early audit routing distinguishes KB questions, chitchat, personal requests,
+In A2, additional audit routing will distinguish KB questions, chitchat, personal requests,
 out-of-scope queries, missing-context questions and routing errors. The active
 classifier supplies only actionable/general versus chitchat: general is not proof
 of KB scope. Ambiguous scope must be reviewed, not silently excluded or called a gap.
@@ -129,6 +131,14 @@ Use a separate, non-production history provider. `TurnExecutionPolicy` and
 Do not use latest session summaries or regenerate factual assistant replies to
 fill missing historical answers. Reuse formatting/normalization without calling
 the full answering graph merely to prepare a query.
+
+A1 records only the classifier's existing intent and `chitchat`/`unknown`
+scope. It retains original redacted, normalized, history-resolved and canonical
+retrieval forms separately. All 918 supplied query rows were parsed/normalized/
+exported; the successful live pass prepared only the first 10 chronological
+query rows. Other rows are explicitly `pending_model` or `needs_context`;
+coverage fields are empty. Its distinct preparation schema is documented in the
+dashboard/CSV contract, and is not a final coverage result or full model replay.
 
 For DB inputs, read query ID/session/user message creation time and actual
 assistant completion time from approved source records. `get_session_queries`
