@@ -266,7 +266,7 @@ class SearchAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
         search._process_query = process
         search._normalise_query = normalise
-        search._score_bm25 = lambda _bm25, _ids, _tokens: (
+        search._score_bm25 = lambda _bm25, _ids, _tokens, _limit: (
             np.array([1.0]),
             [("chunk-1", 1.0)],
         )

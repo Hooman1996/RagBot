@@ -17,6 +17,13 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def validate_retrieval_depth(name: str, value: int) -> int:
+    """Validate internal request overrides without coercion or shared mutation."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
 def _positive_float(name: str, default: float) -> float:
     raw = os.getenv(name, str(default))
     try:
@@ -118,6 +125,7 @@ class PerformanceSettings:
     qdrant_concurrency: int
     rag_query_canonicalization_enabled: bool
     rag_retrieval_top_k: int
+    rag_bm25_candidate_limit: int
     rag_semantic_candidate_limit: int
     rag_context_rerank_enabled: bool
     rag_context_rerank_top_k: int
@@ -257,6 +265,7 @@ def load_performance_settings() -> PerformanceSettings:
             "RAG_QUERY_CANONICALIZATION_ENABLED", True
         ),
         rag_retrieval_top_k=_positive_int("RAG_RETRIEVAL_TOP_K", 10),
+        rag_bm25_candidate_limit=_positive_int("RAG_BM25_CANDIDATE_LIMIT", 50),
         rag_semantic_candidate_limit=_positive_int(
             "RAG_SEMANTIC_CANDIDATE_LIMIT", 50
         ),
@@ -339,11 +348,6 @@ def load_performance_settings() -> PerformanceSettings:
         raise ValueError(
             "VLLM_HTTP_MAX_KEEPALIVE_CONNECTIONS cannot exceed "
             "VLLM_HTTP_MAX_CONNECTIONS"
-        )
-    if settings.rag_retrieval_top_k > settings.rag_semantic_candidate_limit:
-        raise ValueError(
-            "RAG_RETRIEVAL_TOP_K cannot exceed "
-            "RAG_SEMANTIC_CANDIDATE_LIMIT"
         )
     if settings.rag_context_rerank_top_k > settings.rag_retrieval_top_k:
         raise ValueError(

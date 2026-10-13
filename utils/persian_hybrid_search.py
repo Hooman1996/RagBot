@@ -28,7 +28,7 @@ load_dotenv()
 import httpx
 from utils.structured_logging import log_event
 from utils.concurrency import BoundedBlockingRunner
-from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.performance_config import PERFORMANCE_SETTINGS, validate_retrieval_depth
 from utils.service_errors import (
     ServiceProtocolError,
     ServiceTimeoutError,
@@ -588,11 +588,35 @@ class PersianHybridSearch:
     #  Main search
     # ------------------------------------------------------------------
     async def search(self, query: str, top_k: int | None = None, rerank: bool = False,
-                      allowed_docs: list = None) -> list:
+                      allowed_docs: list = None, *,
+                      bm25_candidate_limit: int | None = None,
+                      semantic_candidate_limit: int | None = None) -> list:
         search_started = time.perf_counter()
         if not allowed_docs:
             raise ValueError("allowed_docs must be provided for filtered search.")
-        top_k = top_k or PERFORMANCE_SETTINGS.rag_retrieval_top_k
+        top_k = validate_retrieval_depth("top_k", (
+            PERFORMANCE_SETTINGS.rag_retrieval_top_k if top_k is None else top_k
+        ))
+        bm25_limit = validate_retrieval_depth("bm25_candidate_limit", (
+            PERFORMANCE_SETTINGS.rag_bm25_candidate_limit
+            if bm25_candidate_limit is None else bm25_candidate_limit
+        ))
+        semantic_limit = validate_retrieval_depth("semantic_candidate_limit", (
+            PERFORMANCE_SETTINGS.rag_semantic_candidate_limit
+            if semantic_candidate_limit is None else semantic_candidate_limit
+        ))
+        depth_metrics = {
+            "bm25_candidate_limit": bm25_limit,
+            "semantic_candidate_limit": semantic_limit,
+            "retrieval_top_k": top_k,
+            "bm25_candidate_count": 0,
+            "semantic_candidate_count": 0,
+            "candidate_union_count": 0,
+            "returned_candidate_count": 0,
+        }
+        trace = current_trace()
+        if trace is not None:
+            trace.set_diagnostic("retrieval_depths", dict(depth_metrics))
 
         # CPU-bound Persian NLP + BM25 lookup — off the event loop
         bm25, bm25_chunk_ids, chunk_dict = await self._blocking_runner.run(
@@ -608,7 +632,7 @@ class PersianHybridSearch:
                 },
                 output_data={"candidates": []},
                 metrics={
-                    "semantic_candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+                    **depth_metrics,
                     "reason": "NO_CHUNKS",
                 },
                 duration_ms=(time.perf_counter() - search_started) * 1000,
@@ -618,7 +642,7 @@ class PersianHybridSearch:
             self._process_query, query
         )
         bm25_scores, bm25_candidates = await self._blocking_runner.run(
-            self._score_bm25, bm25, bm25_chunk_ids, query_tokens
+            self._score_bm25, bm25, bm25_chunk_ids, query_tokens, bm25_limit
         )
         bm25_top_ids = [cid for cid, score in bm25_candidates if score > 0]
 
@@ -628,13 +652,16 @@ class PersianHybridSearch:
         semantic_scores_map = await self._semantic_search(
             semantic_query,
             allowed_docs,
-            top_k=PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+            top_k=semantic_limit,
         )
         semantic_top_ids = list(semantic_scores_map.keys())
+        depth_metrics["bm25_candidate_count"] = len(bm25_top_ids)
+        depth_metrics["semantic_candidate_count"] = len(semantic_top_ids)
 
         candidate_ids = list(dict.fromkeys(
             bm25_top_ids + semantic_top_ids
         ))
+        depth_metrics["candidate_union_count"] = len(candidate_ids)
         if not candidate_ids:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.RETRIEVAL,
@@ -646,7 +673,7 @@ class PersianHybridSearch:
                 },
                 output_data={"candidates": []},
                 metrics={
-                    "semantic_candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+                    **depth_metrics,
                     "reason": "NO_CANDIDATES",
                 },
                 duration_ms=(time.perf_counter() - search_started) * 1000,
@@ -694,8 +721,10 @@ class PersianHybridSearch:
             )
             for original_rrf_rank, cid in enumerate(sorted_ids, start=1)
         ]
+        depth_metrics["returned_candidate_count"] = len(search_results)
         trace = current_trace()
         if trace is not None:
+            trace.set_diagnostic("retrieval_depths", dict(depth_metrics))
             trace.set_diagnostic(
                 "retrieval_top",
                 [
@@ -732,7 +761,7 @@ class PersianHybridSearch:
                 ]
             },
             metrics={
-                "semantic_candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
+                **depth_metrics,
                 "rrf_k": RRF_K,
                 "embedding_dimension": 1024,
                 "embedding_prompt_name": "query",
@@ -742,12 +771,16 @@ class PersianHybridSearch:
         return search_results
 
     @staticmethod
-    def _score_bm25(bm25, chunk_ids, query_tokens):
+    def _score_bm25(bm25, chunk_ids, query_tokens, candidate_limit: int | None = None):
+        candidate_limit = validate_retrieval_depth("bm25_candidate_limit", (
+            PERFORMANCE_SETTINGS.rag_bm25_candidate_limit
+            if candidate_limit is None else candidate_limit
+        ))
         scores = bm25.get_scores(query_tokens)
         candidates = sorted(
             zip(chunk_ids, scores),
             key=lambda item: (-item[1], str(item[0])),
-        )[:50]
+        )[:candidate_limit]
         return scores, candidates
 
 

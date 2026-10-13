@@ -24,6 +24,7 @@ class PerformanceSettingsTests(unittest.TestCase):
         self.assertEqual(settings.vllm_http_max_connections, 32)
         self.assertEqual(settings.qdrant_concurrency, 4)
         self.assertEqual(settings.rag_retrieval_top_k, 10)
+        self.assertEqual(settings.rag_bm25_candidate_limit, 50)
         self.assertEqual(settings.rag_semantic_candidate_limit, 50)
         self.assertEqual(settings.rag_related_questions_top_k, 3)
         self.assertEqual(
@@ -71,8 +72,8 @@ class PerformanceSettingsTests(unittest.TestCase):
                 "TEI_HTTP_MAX_KEEPALIVE_CONNECTIONS": "11",
             },
             {
-                "RAG_RETRIEVAL_TOP_K": "51",
-                "RAG_SEMANTIC_CANDIDATE_LIMIT": "50",
+                "RAG_RETRIEVAL_TOP_K": "9",
+                "RAG_CONTEXT_RERANK_TOP_K": "10",
             },
             {
                 "TEI_EMBED_INSERT_BATCH_SIZE": "51",

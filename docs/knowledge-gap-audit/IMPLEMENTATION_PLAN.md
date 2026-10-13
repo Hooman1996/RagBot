@@ -2,10 +2,11 @@
 
 Contract version: `p0-contract-1`. Baseline: [P0_BASELINE_REPORT.md](P0_BASELINE_REPORT.md).
 UI/export contract: [DASHBOARD_AND_CSV_CONTRACT.md](DASHBOARD_AND_CSV_CONTRACT.md).
-P0/P0.1 established the baseline; P1 implementation is recorded for review in
-[P1_RRF_REPORT.md](P1_RRF_REPORT.md). Each later stage requires planner review
+P0/P0.1 established the baseline; production repairs are recorded in
+[P1_RRF_REPORT.md](P1_RRF_REPORT.md) and
+[P2_RETRIEVAL_DEPTH_REPORT.md](P2_RETRIEVAL_DEPTH_REPORT.md). Each later stage requires planner review
 and explicit authorization; Codex returns a scoped report/commit and stops after
-each stage. P1 implementation does not authorize P2 or deployment.
+each stage. P2 implementation does not authorize P3 or deployment.
 
 ## Invariants
 
@@ -38,12 +39,12 @@ each stage. P1 implementation does not authorize P2 or deployment.
 |---|---|---|
 | **P0 baseline** | Documentation, safe reproducible observations and implementation contract only. | Current source/state, executed offline diagnostics, blocked live checks explicitly separated. Completed for review. |
 | **P1 RRF correction** | Missing-list contribution becomes zero; retain k=60 and deterministic secondary ordering. Do not change depths, batching, taxonomy, prompts or defaults. | Single-list rank-1 score 1/61, disjoint/overlap/empty lists, long-list ranks >61, stable ties. Before/after count/ID/rank/context/call-size/latency plus labeled retrieval and answer quality on same frozen fixtures. Rank changes are expected and must be reviewed, not hidden by old rankings. |
-| **P2 configurable retrieval depths** | Separate sparse/dense/fused/context depths, with explicit per-run audit overrides rather than changing production globals. Preserve existing production-default behavior except the approved sparse-depth repair. | Positive/bounded/consistent validation; independently verify requested candidate depths including >50 and small corpora. Tie/duplicate/stale cross-store cases; default parity. Benchmark one depth variable at a time. All permanent env keys follow the inventory/propagation rule. |
+| **P2 configurable retrieval depths** | Separate lexical/dense/fused depths with internal request-local overrides; preserve configured context selection and production defaults. `RAG_BM25_CANDIDATE_LIMIT=50` replaces the fixed slice. | Positive integer validation; final count is a maximum over the distinct combined pool, with no single-branch upper bound or padding. Preserve context-versus-final validation. Verify >50, small corpora, ties, deduplication, concurrent isolation, corpus-cache reuse and default parity. Benchmark one depth variable at a time. Propagate permanent env keys. Expanded end-to-end validation depends on P3. |
 | **P3 safe reranker batching** | Bound each client request by currently verified server max_client_batch_size and token/input limits. Keep question/category/subcategory scoring. Map local indexes to global IDs and perform one global ordering/selection. | Exact/multiple/remainder batches; out-of-order/duplicate/missing/boolean/out-of-range indexes; nonfinite scores; empty input, ties, partial service failures and cancellation; stable global selection and comparable score mode across batches. Validate context and separate related-question paths. Before/after batching benchmark with other depths fixed. |
 | **P4 taxonomy preservation** | Explicitly preserve/create/edit/revert category/subcategory with safe legacy parsing and version provenance. No fabricated taxonomy recovery from missing historical versions. | Structured taxonomy survives PG/version/Qdrant/embedding/cache-revision paths; clean fields and legacy taxonomy-in-answer cases; revert with/without taxonomy, empty/unknown category, compensation/concurrent-edit tests. Retrieval/answer-quality checks and bounded before/after update/retrieval measurements on isolated fixtures. |
 | **Production acceptance gate** | Planner reviews P1–P4 evidence before any audit stage. | Correct mechanics, frozen input consistency, real labeled retrieval/answer quality, unchanged intended prompt/rerank policy, 50-second external deadline, paired latency/resource results and owner-approved regression tolerance. Missing live evidence prevents production acceptance, even if code can be reviewed. No deployment is implied. |
 
-P1 acceptance is not an authorization to deploy or start P2. No naturally
+P2 review readiness is not an authorization to deploy or start P3. No naturally
 occurring unlabeled queries can supply a measured answer-quality error rate.
 Choose tolerances and label sets before experiments, rather than after results.
 

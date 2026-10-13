@@ -374,6 +374,9 @@ def _specs() -> dict[str, VariableSpec]:
         "RAG_RETRIEVAL_TOP_K": VariableSpec(
             kind="int", default="10", minimum=1, component="Retrieval", restart="FastAPI"
         ),
+        "RAG_BM25_CANDIDATE_LIMIT": VariableSpec(
+            kind="int", default="50", minimum=1, component="Retrieval", restart="FastAPI"
+        ),
         "RAG_SEMANTIC_CANDIDATE_LIMIT": VariableSpec(
             kind="int", default="50", minimum=1, component="Retrieval", restart="FastAPI"
         ),
@@ -826,17 +829,6 @@ def analyze_environment(
         add_relationship_error(
             "TEI_EMBED_INSERT_BATCH_SIZE",
             "cannot exceed TEI_EMBED_MAX_CLIENT_BATCH_SIZE",
-        )
-    top_k = as_number("RAG_RETRIEVAL_TOP_K")
-    candidate_limit = as_number("RAG_SEMANTIC_CANDIDATE_LIMIT")
-    if (
-        top_k is not None
-        and candidate_limit is not None
-        and top_k > candidate_limit
-    ):
-        add_relationship_error(
-            "RAG_RETRIEVAL_TOP_K",
-            "cannot exceed RAG_SEMANTIC_CANDIDATE_LIMIT",
         )
 
     severity_counts = {

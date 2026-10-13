@@ -22,6 +22,39 @@ reproduced here.
 
 ## Summary
 
+### P2 retrieval depth contract
+
+`RAG_BM25_CANDIDATE_LIMIT` is an optional positive integer, default **50**,
+measured in lexical candidates per query. It limits the score-sorted BM25
+slice; nonpositive scores remain excluded afterward. The corpus/revision cache
+does not depend on query depths. The existing `RAG_SEMANTIC_CANDIDATE_LIMIT`
+independently limits dense candidates, and `RAG_RETRIEVAL_TOP_K` limits final
+distinct fused entries. Source defaults are 50 / 50 / 10 respectively; existing
+runtime values are preserved. These import-scoped settings are not hot-reloaded.
+No service restart is performed as part of P2.
+
+Internal `RAGSystem.retrieve` and `PersianHybridSearch.search` accept keyword-only
+`bm25_candidate_limit` and `semantic_candidate_limit` overrides, alongside
+`top_k`. None uses the configured value. Explicit overrides must be positive
+integers (booleans, strings and floats are rejected); they do not mutate process
+environment, settings or cached corpus state. No web/UI controls are added.
+
+Final depth need not fit either individual branch and has no configured
+theoretical upper bound. Actual results are bounded by eligible distinct union
+membership: small branches or overlap yield fewer entries, never padding or
+duplication. Context top-k must still not exceed the configured final top-k.
+Effective depths/counts are recorded in request-local retrieval diagnostics.
+Expanded reranking remains dependent on P3: do not send more than the verified
+TEI client limit in a single request.
+
+Main templates `env.example`, `Production_ENV` and `.env.example.generated`
+include this key. The generated-named template is source-authored; no automatic
+repository generator was found. Keep the loader, validator `_specs` manifest and
+templates aligned; `tests/test_retrieval_depths.py` checks that contract. Preserve
+private runtime values and propagate new permanent keys to applicable existing
+main-chatbot env files without committing them. Separate evaluation services use
+the main chatbot through HTTP and do not load this retrieval implementation's env.
+
 | Variable | Required | Secret | Used by | Default | Restart required |
 |---|---|---:|---|---|---|
 | `ENVIRONMENT` | Apparently unused | No | No consumer found | None | None |
@@ -79,8 +112,9 @@ reproduced here.
 | `VLLM_HTTP_WRITE_TIMEOUT_SECONDS` | No | No | vLLM HTTPX | `5` | FastAPI |
 | `VLLM_HTTP_POOL_TIMEOUT_SECONDS` | No | No | vLLM HTTPX | `3` | FastAPI |
 | `QDRANT_CONCURRENCY` | No | No | Retrieval semaphore | `4` | FastAPI |
-| `RAG_RETRIEVAL_TOP_K` | No | No | Retrieval | `10` | FastAPI |
-| `RAG_SEMANTIC_CANDIDATE_LIMIT` | No | No | Retrieval | `50` | FastAPI |
+| `RAG_RETRIEVAL_TOP_K` | No | No | Maximum final fused entries | `10` | FastAPI |
+| `RAG_BM25_CANDIDATE_LIMIT` | No | No | Maximum lexical candidates | `50` | FastAPI |
+| `RAG_SEMANTIC_CANDIDATE_LIMIT` | No | No | Maximum dense candidates | `50` | FastAPI |
 | `RAG_RELATED_QUESTIONS_RERANK_THRESHOLD` | No | No | Web and mobile related questions | `0.1` | FastAPI |
 | `MOBILE_RELATED_QUESTIONS_RERANK_THRESHOLD` | Legacy only | No | Settings parser only; no behavioral consumer | `0.5` | None |
 | `RAG_MAX_NEW_TOKENS` | No | No | General generation | `500` | FastAPI |

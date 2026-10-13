@@ -537,6 +537,7 @@ def build_runtime_snapshot(
         },
         "retrieval": {
             "top_k": PERFORMANCE_SETTINGS.rag_retrieval_top_k,
+            "bm25_candidate_limit": PERFORMANCE_SETTINGS.rag_bm25_candidate_limit,
             "candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
             "qdrant_collection": getattr(
                 search_engine,

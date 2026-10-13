@@ -93,6 +93,7 @@ async def observations():
     with patch.dict(os.environ, {}, clear=True):
         defaults = load()
     namespace["PERFORMANCE_SETTINGS"] = defaults
+    namespace["validate_retrieval_depth"] = settings_namespace["validate_retrieval_depth"]
     execute([classes["SearchResult"], hybrid], namespace)
     search = namespace["ExtractedSearch"]()
     search._blocking_runner = ImmediateRunner()
@@ -119,6 +120,7 @@ async def observations():
     elapsed_ms = (time.perf_counter() - started) * 1000
     default_rerank_sizes = list(search._http.sizes)
     _, sparse = search._score_bm25(bm25, ids[:120], ["fixture"])
+    _, expanded_sparse = search._score_bm25(bm25, ids[:120], ["fixture"], 150)
     search._get_or_build_bm25 = lambda docs: (
         SimpleNamespace(get_scores=lambda tokens: [1.0]), [ids[0]], chunks
     )
@@ -173,10 +175,12 @@ async def observations():
         "source_sha256": {p: hashlib.sha256((ROOT / p).read_bytes()).hexdigest() for p in
             ["utils/persian_hybrid_search.py", "utils/performance_config.py", "kb_manager.py"]},
         "production_source_defaults": {"retrieval": defaults.rag_retrieval_top_k,
+            "bm25_limit": defaults.rag_bm25_candidate_limit,
             "dense_limit": defaults.rag_semantic_candidate_limit,
             "context_rerank": defaults.rag_context_rerank_top_k},
         "sparse": {"positive_fixture_scores": 120, "returned_count": len(sparse),
-            "fixed_50_cap_still_outstanding": len(sparse) == 50},
+            "expanded_limit": 150, "expanded_returned_count": len(expanded_sparse),
+            "bm25_cap_configurable": len(expanded_sparse) == 120},
         "rrf": {"historical_missing_rank_contribution": 1/(60+61),
             "actual_disjoint_scores": {r.doc_id: r.score for r in disjoint},
             "single_rank1_expected_unrounded": 1/(60+1),
