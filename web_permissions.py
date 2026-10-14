@@ -53,6 +53,15 @@ def landing_for(role: str | None) -> str:
 # remain unclassified and are denied by the browser middleware.
 ROUTES = (
     ("GET", r"/knowledge-coverage", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+/recommendations", "coverage_evidence_view"),
+    ("POST", r"/api/knowledge-coverage/runs/[^/]+/recommendations", "coverage_run_start"),
+    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+", "coverage_evidence_view"),
+    ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/cancel", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/reviews", "coverage_recommendation_review"),
+    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/metadata/[^/]+", "coverage_evidence_view"),
+    ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/export-revisions", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/export", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/export-manifest", "coverage_export_download"),
     ("GET", r"/api/knowledge-coverage/calibrations", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/calibrations/[^/]+", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/calibrations/[^/]+/export", "coverage_export_download"),

@@ -1,0 +1,107 @@
+{
+  "version": "a4-fictional-inputs-1",
+  "scope": "controlled_candidate_manifests_not_hybrid_recall",
+  "records": [
+    {
+      "id": "f201",
+      "question": "For fictional FableBank Standard paper cards, what are the approval duration and submission cutoff?",
+      "answer": "Fictional FableBank Standard paper-card approval takes two working days. This record supplies no submission cutoff.",
+      "category": "Fictional banking",
+      "subcategory": "Paper cards"
+    },
+    {
+      "id": "f202",
+      "question": "FableBank Silver weekday approval duration",
+      "answer": "For fictional FableBank Silver paper cards, approval takes two working days only for weekday applications. This duration does not apply to weekend applications.",
+      "category": "Fictional banking",
+      "subcategory": "Paper cards"
+    },
+    {
+      "id": "f203",
+      "question": "FableBank Silver weekend submission cutoff",
+      "answer": "For fictional FableBank Silver paper cards, the submission cutoff is 18:00 only for weekend applications. This cutoff does not apply to weekday applications.",
+      "category": "Fictional banking",
+      "subcategory": "Paper cards"
+    },
+    {
+      "id": "n201",
+      "question": "FableBank fictional owl mascot",
+      "answer": "The fictional FableBank mascot is a paper owl.",
+      "category": "Fictional banking",
+      "subcategory": null
+    },
+    {
+      "id": "n202",
+      "question": "FableBank decorative paper colours",
+      "answer": "Fictional decorative cards use purple paper.",
+      "category": "Fictional banking",
+      "subcategory": null
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "compatibility",
+      "query": "For fictional FableBank Silver paper cards, what are both the approval duration and submission cutoff under one compatible set of conditions? Include the applicability conditions.",
+      "production_ids": [
+        "n201"
+      ],
+      "initial_ids": [
+        "f202",
+        "n202",
+        "f203"
+      ],
+      "broader_ids": [
+        "f202",
+        "n202",
+        "f203"
+      ],
+      "model_selected": true
+    },
+    {
+      "case_id": "partial",
+      "query": "For fictional FableBank Standard paper cards, what are the approval duration and submission cutoff?",
+      "production_ids": [
+        "n201"
+      ],
+      "initial_ids": [
+        "f201"
+      ],
+      "broader_ids": [
+        "f201"
+      ],
+      "model_selected": true
+    },
+    {
+      "case_id": "total",
+      "query": "What is the replacement fee for fictional FableBank Standard paper cards?",
+      "production_ids": [
+        "n201"
+      ],
+      "initial_ids": [
+        "n201",
+        "n202"
+      ],
+      "broader_ids": [
+        "n201",
+        "n202"
+      ],
+      "model_selected": true
+    },
+    {
+      "case_id": "duplicate_pending",
+      "query": "What is the replacement fee for fictional FableBank Standard paper cards?",
+      "production_ids": [
+        "n201"
+      ],
+      "initial_ids": [
+        "n201",
+        "n202"
+      ],
+      "broader_ids": [
+        "n201",
+        "n202"
+      ],
+      "model_selected": false
+    }
+  ]
+}

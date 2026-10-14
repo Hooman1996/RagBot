@@ -169,3 +169,49 @@ the cap-2 model-derived scope/aspects, never expected labels; other model settin
 and candidate order stay fixed. Returned models can still differ nondeterministically.
 The protected real-query package remains unlabeled until an independent reviewer
 supplies completed fields; model/Codex outputs never become human ground truth.
+
+
+## A4 separate recommendation responsibilities
+
+Coverage remains `coverage-rubric-4`, with exactly the original five schemas and
+prompt hashes. `AuditModel` accepts an instance-local schema/message registry;
+its defaults retain coverage behavior, strict served-token counting, JSON schema,
+local validation, safe diagnostics, admission/deadlines and bounded syntax recovery.
+Recommendation templates/schemas live in `recommendation_prompts.py` and
+`recommendation_schemas.py`; they are never inserted into old coverage manifests.
+
+Current recommendation rubric: `question-recommendation-rubric-2`. Responsibility
+schemas are `gap-analysis-1` and `question-recommendations-1`, both strict with
+unknown fields forbidden. No answer field exists. Gap analysis returns up to
+three gaps g1–g3, partitioning exactly the unresolved IDs, descriptions of needed
+information, supplied conditions, validated partial-support references, bounded
+search/human-label limitations and mandatory independent/knowledge-team review.
+Its input contains resolved intent, requested/missing aspects, concise structured
+supports, source IDs, scope/stopping/uncertainty, never full Q/A chunks.
+
+The question responsibility returns up to three q1–q3 proposals: neutral question,
+gap/missing IDs, original category/subcategory, existing/proposed-new path marker,
+path ID, related/equivalent FAQ IDs, equivalence basis, action, justification and
+uncertainty. It receives gaps, structured partial relationships, existing taxonomy
+paths and up to twenty relevant snapshot titles/IDs, never answers. Empty
+subcategory is a valid null. Exact normalized-word title matches, or declared
+equivalent titles, require existing-FAQ/taxonomy review rather than duplication.
+Title similarity cannot prove coverage or answer incompleteness; an evaluated
+partial-support basis must actually be present. New paths are proposals requiring
+review. Normalization collisions cannot be silently merged.
+
+Local checks enforce gap/aspect membership, conditions, citation membership, all
+missing IDs addressed, FAQ/path identities, explicit new-path flags, question
+punctuation and no new numeric premises. Free prose still requires human review;
+these guards cannot establish full semantic fidelity or immunity to injection.
+Model/context/schema failures remain errors, never coverage gaps or drafts.
+
+Rubric 1's partial-gap response violated the existing equivalent-title/action
+rule and was retained as an error. Rubric 2 clarifies cross-field consistency;
+a paired boundary check retained exactly the same structured input hash. That
+response still selected a new question by dropping the equivalence flag. A
+separate deterministic lookup defect was then corrected: production punctuation
+spacing must not hide a lexical title match. `snapshot-titles-taxonomy-2` uses
+normalized word tokens for titles, retaining original display strings and the
+unchanged taxonomy normalization. A metadata-only paired check kept rubric 2
+fixed. All attempts, hashes and limitations are in the A4 report.

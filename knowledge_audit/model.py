@@ -22,17 +22,17 @@ DIAGNOSTIC_TYPES = frozenset({"json_invalid", "missing", "literal_error", "extra
     "dict_type", "value_error", "model_type", "none_required"})
 
 
-def schema_version(role):
-    return SCHEMAS[role].model_fields["version"].annotation.__args__[0]
+def schema_version(role, schemas=SCHEMAS):
+    return schemas[role].model_fields["version"].annotation.__args__[0]
 
 
-def validation_diagnostics(error, role, stage, metric):
+def validation_diagnostics(error, role, stage, metric, schemas=SCHEMAS):
     """Never include values, messages, contexts, URLs or arbitrary field names."""
-    schema = SCHEMAS[role].model_json_schema()
+    schema = schemas[role].model_json_schema()
     fields = set(schema.get("properties", {}))
     for definition in schema.get("$defs", {}).values():
         fields.update(definition.get("properties", {}))
-    return [{"responsibility": role, "schema_version": schema_version(role), "stage": stage,
+    return [{"responsibility": role, "schema_version": schema_version(role, schemas), "stage": stage,
              "field_path": [part if isinstance(part, str) and part in fields else "*" for part in item["loc"]],
              "error_type": item["type"] if item["type"] in DIAGNOSTIC_TYPES else "validation_error",
              "prompt_tokens": metric["prompt_tokens"], "completion_tokens": metric["completion_tokens"],
@@ -57,7 +57,8 @@ def json_syntax_summary(value):
 
 
 class AuditModel:
-    def __init__(self, rag, http, origin, settings, redactor: Redactor, *, limiter=None):
+    def __init__(self, rag, http, origin, settings, redactor: Redactor, *, limiter=None,
+                 schemas=None, message_builder=None, identity_fields=()):
         self.rag, self.http, self.origin = rag, http, origin.rstrip("/").removesuffix("/v1")
         self.settings, self.redactor, self.limiter = settings, redactor, limiter
         self.context_limit = None
@@ -66,6 +67,9 @@ class AuditModel:
         self.progress_callback = None
         self.metrics_path = None
         self.call_sequence = 0
+        self.schemas = SCHEMAS if schemas is None else schemas
+        self.message_builder = messages if message_builder is None else message_builder
+        self.identity_fields = frozenset(identity_fields)
 
     async def discover(self):
         models = await self.http.get(self.origin + "/v1/models")
@@ -85,7 +89,7 @@ class AuditModel:
     async def count(self, role, data):
         if self.context_limit is None:
             raise AuditError("model_not_discovered")
-        msg = messages(role, data)
+        msg = self.message_builder(role, data)
         response = await self.http.post(self.origin + "/tokenize", json={"model": self.rag.model_id,
             "messages": msg, "add_generation_prompt": True})
         response.raise_for_status()
@@ -117,7 +121,7 @@ class AuditModel:
         started = time.perf_counter()
         phase = "progress"
         phase_started = started
-        metric = {"role": role, "responsibility": role, "schema_version": schema_version(role),
+        metric = {"role": role, "responsibility": role, "schema_version": schema_version(role, self.schemas),
                   "started_at": datetime.now(timezone.utc).isoformat(),
                   "call_id": call_id, "attempt": attempt, "maximum_attempts": 2,
                   "recovery_policy": "json-invalid-stop-one-fresh-response-1",
@@ -151,8 +155,8 @@ class AuditModel:
                 with bind_pipeline_observer(None):
                     return await self.rag._completion(model=self.rag.model_id, messages=msg,
                         max_tokens=self.settings.model_max_tokens, temperature=0, top_p=1, seed=42,
-                        response_format={"type": "json_schema", "json_schema": {"name": role + "_" + schema_version(role).replace("-", "_"),
-                            "strict": True, "schema": SCHEMAS[role].model_json_schema()}})
+                        response_format={"type": "json_schema", "json_schema": {"name": role + "_" + schema_version(role, self.schemas).replace("-", "_"),
+                            "strict": True, "schema": self.schemas[role].model_json_schema()}})
             enter("admission")
             deadline = asyncio.timeout(PERFORMANCE_SETTINGS.application_request_timeout_seconds)
             try:
@@ -183,15 +187,15 @@ class AuditModel:
             # JSON grammar. No parser repair or free-text fallback. The wrapper
             # permits only the versioned, single JSON-syntax recovery attempt.
             stage = "before_redaction"
-            result = SCHEMAS[role].model_validate_json(choice.message.content)
+            result = self.schemas[role].model_validate_json(choice.message.content)
             stage = "after_redaction"
             safe = self._safe(result.model_dump())
-            result = SCHEMAS[role].model_validate(safe)
+            result = self.schemas[role].model_validate(safe)
             metric["status"] = "validated"
             return result.model_dump()
         except ValidationError as error:
             metric["failure_category"] = "schema_validation"
-            metric["validation_diagnostics"] = validation_diagnostics(error, role, stage, metric)
+            metric["validation_diagnostics"] = validation_diagnostics(error, role, stage, metric, self.schemas)
             if stage == "before_redaction":
                 metric["json_syntax"] = json_syntax_summary(choice.message.content)
             raise AuditError("invalid_model_schema") from None
@@ -251,6 +255,6 @@ class AuditModel:
             return {k: self._safe(v, k) for k, v in value.items()}
         if isinstance(value, list):
             return [self._safe(v, key) for v in value]
-        if isinstance(value, str) and key not in {"snapshot_id", "chunk_id", "faq_entry_id", "entry_id", "aspect_id", "support_ids"}:
+        if isinstance(value, str) and key not in {"snapshot_id", "chunk_id", "faq_entry_id", "entry_id", "aspect_id", "support_ids"} | self.identity_fields:
             return self.redactor.text(value)
         return value

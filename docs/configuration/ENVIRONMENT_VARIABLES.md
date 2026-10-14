@@ -965,3 +965,20 @@ template; no deleted staging template is recreated. Manifest policy becomes
 The A3 campaign's 120-completion ceiling and preselected 12+3 controlled records
 are versioned operator experiment bounds, not unused permanent env settings.
 No production retrieval/timeouts/output defaults or role grants change.
+
+
+## A4 recommendation review access
+
+No new permanent env variable or default is introduced.
+`KNOWLEDGE_COVERAGE_ACCESS_GRANTS` additionally accepts the explicit capability
+`coverage_recommendation_review`, default denied by `{}`. It permits owned
+question/taxonomy review only, requires results/evidence/kb_read too, and does not
+grant KB writes or confirm factual answers. Existing role permissions and real
+account grants are unchanged. All four applicable tracked templates document the
+capability; private `.env`/`.env_latest` bytes remain unchanged. No template
+generator exists for the source-authored generated-named file; the deleted staging
+template stays deleted. Fixed versioned A4 bounds: up to five selected rows, up
+to three gaps/questions, twenty title candidates, sequential responsibilities and
+40 total staging pilot completion dispatches including checks/recovery. These are
+experiment/schema/algorithm bounds, not unused runtime knobs. Existing model
+output/token-margin/deadline/admission/zero-network-retry settings are reused.

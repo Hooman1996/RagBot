@@ -36,7 +36,7 @@ def _redact(value, redactor, key=""):
                           "run_identity_id", "export_revision_id", "run_id"}
         if (key in reference_keys or key.endswith("_sha256")) and re.fullmatch(r"(?:row|query|session|r|rev)_[0-9a-f]{32}|[0-9a-f]{64}", value):
             return value
-        if key in {"chunk_id", "faq_entry_id", "support_id", "entry_id", "supporting_chunk_ids", "supporting_faq_ids", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids"} and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
+        if key in {"chunk_id", "faq_entry_id", "support_id", "entry_id", "supporting_chunk_ids", "supporting_faq_ids", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids", "related_faq_ids", "equivalent_faq_ids"} and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
             return value
         return redactor.text(value)
     if isinstance(value, list):

@@ -352,3 +352,7 @@ async def retry(run_id: str, request: Request, user: WebUser):
 SAFE_API_CODES = {"invalid_pilot_selection", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run"}
+
+# A4 responsibilities and revisions remain separate from coverage run versions.
+from knowledge_audit.recommendation_api import router as recommendation_router
+router.include_router(recommendation_router)

@@ -1,0 +1,62 @@
+/* Actual isolated Chromium checks: fictional data and temporary synthetic auth. */
+const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path'),crypto=require('node:crypto');
+const local=require('node:module').createRequire(path.resolve(process.argv[2],'package.json'));
+const {chromium:engine}=local('playwright');const mod=local('@sparticuz/chromium'),chromium=mod.default||mod;
+const origin=process.argv[3],output=path.resolve(process.argv[4]);assert.equal(new URL(origin).hostname,'127.0.0.1');fs.mkdirSync(output,{recursive:true,mode:0o700});
+const checks=[];
+async function run(){
+ chromium.setGraphicsMode=false;const browser=await engine.launch({executablePath:await chromium.executablePath(),args:[...chromium.args,'--disable-gpu'],headless:true});
+ const context=await browser.newContext({viewport:{width:1440,height:1000},acceptDownloads:true,reducedMotion:'reduce'});const page=await context.newPage();let errors=0;const requests=[];
+ page.on('pageerror',()=>errors++);page.on('request',r=>requests.push(new URL(r.url()).pathname));
+ await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
+ try{
+  assert.equal((await context.request.post(origin+'/api/login',{data:{username:'planner-synthetic',password:'synthetic-browser-only'}})).status(),200);
+  await page.goto(origin+'/knowledge-coverage');await page.waitForSelector('#coverageRoot[data-contract="coverage-page-2"]');
+  await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('coverage-skip')),true);
+  const questions=['Synthetic partial approval duration and cutoff? پرسش آزمایشی، چندخطی\nخط دوم','Synthetic approval duration and cutoff?','','Synthetic partial approval duration and cutoff? پرسش آزمایشی، چندخطی\nخط دوم'];
+  const quote=v=>'"'+v.replaceAll('"','""')+'"';const csv='\ufeffquery\r\n'+questions.map(quote).join('\r\n')+'\r\n';
+  await page.locator('#coverageFile').setInputFiles({name:'synthetic-a4.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});
+  await page.waitForFunction(()=>document.getElementById('coverageQueryColumn').value==='query');await page.locator('#coverageUpload').click();
+  await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('input[type=checkbox]').length===4);
+  await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
+  await page.locator('#coverageRows input[type=checkbox]').nth(0).check();await page.locator('#coverageRows input[type=checkbox]').nth(1).check();await page.locator('#coverageStart').click();
+  await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.startsWith('completed'),{},{timeout:30000});
+  checks.push('synthetic_authenticated_upload_mapping_pilot_duplicate_and_error_preservation');
+  await page.locator('#coverageFilter').selectOption('possible_partial_gap');await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('button').length===1);
+  await page.locator('#coverageRows button').click();await page.getByRole('button',{name:'Draft questions for review',exact:true}).waitFor();
+  await page.getByRole('button',{name:'Draft questions for review',exact:true}).click();await page.getByRole('button',{name:'Cancel question drafting',exact:true}).waitFor();await page.getByRole('button',{name:'Cancel question drafting',exact:true}).click();
+  await page.getByRole('button',{name:'Create new draft revision',exact:true}).waitFor();assert.match(await page.locator('.coverage-recommendations').textContent(),/interrupted/);
+  await page.getByRole('button',{name:'Create new draft revision',exact:true}).click();await page.locator('.recommendation-card').waitFor();
+  assert.match(await page.locator('.recommendation-card').textContent(),/مهلت ارسال/);assert.match(await page.locator('.recommendation-card').textContent(),/existing path/);
+  checks.push('eligible_structured_gap_draft_background_cancel_new_revision_and_persian_question');
+  const faq=page.locator('.recommendation-card a').first();const response=await context.request.get(origin+await faq.getAttribute('href'));assert.equal(response.status(),200);assert.equal((await response.json()).coverage_claim,'not_established_by_title');
+  const approve=page.getByRole('button',{name:'Approve question proposal',exact:true});await approve.focus();await page.keyboard.press('Enter');
+  await page.waitForFunction(()=>document.querySelector('.recommendation-review-state')?.textContent.includes('approved'));
+  assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('coverage-recommendations')),true);
+  checks.push('readonly_faq_metadata_link_explicit_question_only_approval_keyboard_focus');
+  await page.getByRole('button',{name:'Prepare CSV with pinned recommendations',exact:true}).click();
+  await page.locator('.recommendation-downloads a').first().waitFor();const csvLink=await page.locator('.recommendation-downloads a').first().getAttribute('href');const manifestLink=await page.locator('.recommendation-downloads a').nth(1).getAttribute('href');
+  const downloadPromise=page.waitForEvent('download');await page.locator('.recommendation-downloads a').first().click();const download=await downloadPromise;const csvPath=path.join(output,'synthetic-a4-export.csv');await download.saveAs(csvPath);fs.chmodSync(csvPath,0o600);
+  const manifest=await (await context.request.get(origin+manifestLink)).json(),body=fs.readFileSync(csvPath);
+  assert.equal(crypto.createHash('sha256').update(body).digest('hex'),manifest.csv_sha256);assert.equal(manifest.row_count,4);assert.ok(manifest.review_revision_id);
+  assert.ok(body.subarray(0,3).equals(Buffer.from([239,187,191])));assert.match(body.toString(),/recommendation_review_status/);
+  await page.getByRole('button',{name:'Request changes',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.recommendation-review-state')?.textContent.includes('needs changes'));
+  const oldBody=await (await context.request.get(origin+csvLink)).body();assert.deepEqual(oldBody,body);
+  await page.getByRole('button',{name:'Reject proposal',exact:true}).click();await page.waitForFunction(()=>document.querySelector('.recommendation-review-state')?.textContent.includes('rejected'));
+  checks.push('four_row_bom_csv_manifest_hash_and_old_review_export_immutability');
+  await page.locator('.coverage-recommendations').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,'a4-dark-desktop.png')});
+  await page.locator('#coverageTheme').click();await page.locator('.coverage-recommendations').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,'a4-light-desktop.png')});
+  await page.locator('#coverageLanguage').click();assert.equal(await page.locator('html').getAttribute('dir'),'rtl');
+  await page.setViewportSize({width:390,height:844});await page.locator('.coverage-recommendations').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,'a4-rtl-mobile.png')});
+  assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));const focus=page.getByRole('button',{name:'Approve question proposal',exact:true});await focus.focus();assert.ok(Number(await focus.evaluate(el=>parseFloat(getComputedStyle(el).outlineWidth)))>=3);
+  checks.push('actual_dark_light_persian_rtl_mobile_overflow_and_visible_keyboard_focus');
+  await page.locator('#coverageCloseEvidence').click();await page.locator('#coverageFilter').selectOption('covered_reachable');await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('button').length===1);await page.locator('#coverageRows button').click();
+  await page.waitForFunction(()=>document.querySelector('.coverage-recommendations')?.textContent.includes('already covers'));
+  assert.equal(await page.getByRole('button',{name:'Draft questions for review',exact:true}).count(),0);
+  assert.equal(errors,0);assert.ok(!requests.some(p=>/chunks\/(create|update|delete|revert)/.test(p)));
+  checks.push('covered_result_blocks_gap_draft_no_page_errors_or_kb_write_requests');
+  for(const name of fs.readdirSync(output))fs.chmodSync(path.join(output,name),0o600);
+  const summary={browser_version:browser.version(),checks,source_records:4,independent_human_labels:'none_synthetic_ui_decisions_only',screenshots:['a4-dark-desktop.png','a4-light-desktop.png','a4-rtl-mobile.png']};fs.writeFileSync(path.join(output,'checks.json'),JSON.stringify(summary,null,2),{mode:0o600});process.stdout.write(JSON.stringify(summary)+'\n');
+ }finally{await browser.close();}
+}
+run().catch(error=>{process.stderr.write('Synthetic A4 browser acceptance failed: '+error.name+'\n');process.exitCode=1;});

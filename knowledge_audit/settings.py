@@ -7,7 +7,8 @@ from pathlib import Path
 from knowledge_audit.privacy import AuditError
 
 CAPABILITIES = frozenset({"coverage_run_start", "coverage_results_view",
-                          "coverage_evidence_view", "coverage_export_download"})
+                          "coverage_evidence_view", "coverage_export_download",
+                          "coverage_recommendation_review"})
 
 
 @dataclass(frozen=True)

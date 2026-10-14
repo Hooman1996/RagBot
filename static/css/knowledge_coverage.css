@@ -81,3 +81,18 @@ html[dir=rtl] .sidebar { border-inline-start: none; }
 @media (max-width: 720px) { .coverage-page { padding: 16px; } .coverage-card { padding: 16px; } .coverage-intro, .coverage-section-heading { flex-direction: column; } .coverage-form-grid, .coverage-filters { grid-template-columns: minmax(0,1fr); } .coverage-section-heading label { width: 100%; } .coverage-intro .coverage-pill { white-space: normal; } .coverage-page .coverage-primary { width: 100%; } .coverage-table-scroll { margin-inline: -8px; } }
 @media (max-width: 760px) { .app-shell { flex-direction: column; height: 100dvh; } .sidebar { width: 100%; min-width: 0; height: auto; } .sidebar__brand, .coverage-private-note { display: none; } .sidebar__nav { display: flex; gap: 8px; padding: 8px; overflow-x: auto; } .sidebar__nav-item { flex: 0 0 auto; white-space: nowrap; font-size: 12px; padding: 8px 10px; margin: 0; } .main-content { min-height: 0; } .topbar { padding-inline: 12px; gap: 8px; } .topbar__title { font-size: 12px; } .coverage-header-controls { gap: 6px; } }
 @media (prefers-reduced-motion: reduce) { .coverage-page *, .coverage-page *::before, .coverage-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
+/* A4: missing information -> question proposal -> separately reviewed decision. */
+.coverage-recommendations { margin-block: 24px; border-block-start: 2px solid var(--border-strong); padding-block-start: 8px; }
+.coverage-recommendations h3 { font-size: 16px; }
+.coverage-recommendations .recommendation-status { margin-block: 12px; padding: 10px 12px; border-inline-start: 3px solid var(--color-accent-blue); background: var(--color-bg-elevated); }
+.recommendation-reasons { margin-block: 12px; padding-inline-start: 20px; font-size: 13px; line-height: 1.8; }
+.recommendation-gap { border-inline-start: 3px solid var(--border-strong); padding-inline-start: 12px; margin-block: 16px; font-size: 13px; }
+.recommendation-card { border: 1px solid var(--border-strong); padding: 16px; margin-block: 16px; border-radius: 6px; }
+.recommendation-action { text-transform: none; color: var(--text-secondary); font-size: 12px; }
+.recommendation-card > p { margin-block: 10px; }
+.recommendation-card > p:nth-child(2) { font-family: 'Vazirmatn', 'Inter', sans-serif; font-size: 16px; }
+.recommendation-card .recommendation-taxonomy { color: var(--text-secondary); font-size: 12px; }
+.recommendation-card textarea { width: 100%; min-height: 70px; resize: vertical; background: var(--color-bg-base); color: var(--text-primary); border: 1px solid var(--border-strong); border-radius: 6px; padding: 10px; font: inherit; }
+.recommendation-review-controls, .recommendation-downloads { display: flex; gap: 8px; flex-wrap: wrap; margin-block: 12px; }
+.recommendation-downloads p { flex-basis: 100%; }
+@media (max-width: 720px) { .recommendation-review-controls button { width: 100%; } .recommendation-card { padding: 12px; } }

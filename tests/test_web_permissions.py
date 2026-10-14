@@ -15,6 +15,15 @@ from web_permissions import PERMISSIONS, ROLE_PERMISSIONS, route_permission
 # Independent expected inventory: method and FastAPI route path -> grant.
 EXPECTED = {
     ('GET', '/knowledge-coverage'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/rows/{row_id}/recommendations'): 'coverage_evidence_view',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/recommendations'): 'coverage_run_start',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}'): 'coverage_evidence_view',
+    ('POST', '/api/knowledge-coverage/recommendations/{revision_id}/cancel'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/recommendations/{revision_id}/reviews'): 'coverage_recommendation_review',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/metadata/{faq_id}'): 'coverage_evidence_view',
+    ('POST', '/api/knowledge-coverage/recommendations/{revision_id}/export-revisions'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/export'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/export-manifest'): 'coverage_export_download',
     ('GET', '/api/knowledge-coverage/calibrations'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/calibrations/{calibration_id}'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/calibrations/{calibration_id}/export'): 'coverage_export_download',

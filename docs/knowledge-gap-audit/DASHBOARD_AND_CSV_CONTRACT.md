@@ -560,3 +560,73 @@ human provenance. Independence is declared, not independently authenticated.
 Blank fields remain `not_reviewed`; zero-label metrics are null with denominator
 zero. Both A2.1 and A2.2 observations remain distinct, particularly rows 121/518.
 Reviewer identity, labels, corrections and notes remain outside Git/public assets.
+
+
+## Implemented A4 recommendation contract
+
+Historical coverage CSV/manifest v4, coverage rubric 4, verdicts and exports are
+unchanged. A4 creates separate `recommendation-revision-1` artifacts bound to an
+explicit evidence-visible immutable coverage export, its ID/revision/CSV and
+manifest hashes, row hashes, snapshot, recommendation code/prompts and serving
+identity. At most five explicit source rows are drafted per revision. No result
+or old coverage prompt/version is overwritten.
+
+Eligibility requires a completed in-scope `possible_gap`/`possible_partial_gap`,
+prepared intent, identifiable requested/unresolved aspects, recorded bounded
+scope/stopping reason and no unresolved errors/context/conflicts/verification.
+Covered/unreachable remains retrieval work. Pending, excluded, errors and
+context/review results expose why drafting is unavailable. Comparable verified
+full observations (same input row/snapshot/normalized resolved intent) block
+automatic drafting and approval; they are review disagreements, not human truth.
+Source freshness is checked before/after model responsibilities and projected in
+detail/export/review without altering immutable saved results. Older lookup-policy
+revisions require a new recommendation revision before approval.
+
+New capability `coverage_recommendation_review` is default denied, including
+admins; existing roles are unchanged. It is allowed in the existing grants JSON
+only when explicitly assigned. Review decisions are separate immutable
+`recommendation-review-1` rvw revisions: unreviewed/approved/rejected/needs_changes,
+reviewer ID, redacted note, previous revision and draft-result hash. Approval is
+question/taxonomy proposal approval only: no factual answer or KB write.
+Independent human gap confirmation/calibration remain separate and pending.
+
+| New route under `/api/knowledge-coverage` | Access |
+|---|---|
+| GET `/runs/{run_id}/rows/{row_id}/recommendations` | owned row, results + evidence + kb_read |
+| POST `/runs/{run_id}/recommendations` | owned source/export, run-start + export + results + evidence + kb_read; CSRF |
+| GET `/recommendations/{revision_id}` | owned revision, results + evidence + kb_read |
+| POST `/recommendations/{revision_id}/cancel` | same, run-start; CSRF |
+| POST `/recommendations/{revision_id}/reviews` | same, recommendation-review; CSRF |
+| GET `/recommendations/{revision_id}/metadata/{faq_id}` | same; frozen titles/taxonomy, no full answers |
+| POST `/recommendations/{revision_id}/export-revisions` | owner, export + results; CSRF, projection-specific immutable pair |
+| GET `/recommendations/{revision_id}/export`, GET `/recommendations/{revision_id}/export-manifest` | owner, export + results; explicit rex export revision |
+
+Evidence projection additionally requires evidence permission and kb_read. There
+are nine new routes (29 total audit routes including the page). No arbitrary
+server-path input, access-grant endpoint or KB write exists. Jobs reuse tracked
+tasks, the coverage serial gate/global lease, existing admission and sequential
+model calls. Interrupted attempts remain interrupted; new drafting is explicit
+and creates a new revision rather than uncontrolled retry.
+
+The main page adds a restrained missing-information/question/review panel in
+query details. It shows eligibility/reasons, gap descriptions/conditions, proposed
+questions and existing/new path badges, snapshot FAQ links, provenance, separate
+review controls and pinned combined CSV/manifest links. Text-only rendering, local
+assets, themes, keyboard focus, Persian/RTL and responsive layout are retained.
+Real synthetic Chromium acceptance is recorded in the A4 report.
+
+`coverage-recommendations-csv-1` and `coverage-recommendations-manifest-1` combine
+the frozen coverage source with a pinned draft/review projection. They reuse the
+A1 encoder: one row per original selected input record, duplicates/order, pending/
+error/exclusion rows, BOM, quoting, JSON cells and formula protection. Multiple
+questions are in one JSON cell, never extra rows. Old coverage fields retain
+their original meanings and coverage prompt/model provenance. New fields include
+source coverage export/row hash/evidence visibility, recommendation/review revision
+IDs, status/reasons/errors, gap specifications, question arrays, recommendation
+prompt/model/code versions, lookup scope and separate human/calibration status.
+`recommendation_approval_scope` and manifest `approval_scope` explicitly limit
+approval to question/taxonomy proposals; no factual answer or KB write is approved.
+Restricted CSVs blank recommendation/evidence text and phase maps, and explicitly
+mark evidence restricted. A CSV and manifest always resolve to the same immutable
+rex revision even after later review/progress; a new POST creates new bytes.
+No historical 918-row export is regenerated or replaced.

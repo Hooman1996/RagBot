@@ -32,7 +32,8 @@
         <div id="coverageRoot" class="coverage-page" data-contract="{{ contract_version }}" data-upload-limit="{{ upload_max_bytes }}"
              data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}"
              data-can-evidence="{{ 'true' if 'coverage_evidence_view' in permissions and 'kb_read' in permissions else 'false' }}"
-             data-can-export="{{ 'true' if 'coverage_export_download' in permissions else 'false' }}">
+             data-can-export="{{ 'true' if 'coverage_export_download' in permissions else 'false' }}"
+             data-can-review="{{ 'true' if 'coverage_recommendation_review' in permissions else 'false' }}">
             <div class="coverage-intro"><div><p class="coverage-eyebrow">KNOWLEDGE REVIEW · EARLY PILOT</p><h1>What can our knowledge answer?</h1>
                 <p>Review a small selection against a frozen knowledge revision. Every imported query stays in the results and download.</p></div>
                 <span class="coverage-pill">Up to 5 questions per pilot</span>
@@ -107,6 +108,7 @@
         </div>
     </main>
 </div>
+<script src="{{ versioned_asset(request, 'js/knowledge_recommendations.js') }}" integrity="{{ asset_integrity('js/knowledge_recommendations.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/knowledge_coverage.js') }}" integrity="{{ asset_integrity('js/knowledge_coverage.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

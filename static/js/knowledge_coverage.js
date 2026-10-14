@@ -159,11 +159,12 @@
             const p = node(document, 'p', text || 'Unavailable'); if (dir) p.dir = dir; container.append(p);
         }
         async function openEvidence(rowId, button) {
-            lastEvidenceButton = button; const panel = $('EvidenceContent'); panel.replaceChildren(node(document, 'p', 'Loading evidence…'));
+            const evidenceRun = currentRun; lastEvidenceButton = button; const panel = $('EvidenceContent'); panel.replaceChildren(node(document, 'p', 'Loading evidence…'));
             $('Evidence').focus();
             if ($('Evidence').scrollIntoView) $('Evidence').scrollIntoView({block:'start',behavior:'auto'});
             try {
-                const data = await api('runs/' + encodeURIComponent(currentRun) + '/rows/' + encodeURIComponent(rowId));
+                const data = await api('runs/' + encodeURIComponent(evidenceRun) + '/rows/' + encodeURIComponent(rowId));
+                if (evidenceRun !== currentRun) return;
                 panel.replaceChildren();
                 if (data.evidence_visibility === 'snapshot_mismatch') { panel.append(node(document, 'p', 'This run is incompatible with its recorded knowledge revision. Evidence is withheld.')); return; }
                 const row = data.result;
@@ -219,6 +220,7 @@
                 (row.failure_diagnostics || []).forEach(d => appendText(panel, 'Model request',
                     label(d.failure_category) + ' · ' + label(d.boundary) + ' · ' + label(d.evaluation_phase || 'unknown') +
                     ' · attempt ' + (d.attempt || 1) + ' · ' + (d.duration_ms || 0) + ' ms'));
+                if (global.KnowledgeRecommendations) global.KnowledgeRecommendations.mount(panel, {runId:evidenceRun,rowId:rowId});
                 const details = node(document, 'details'); details.append(node(document, 'summary', 'Query forms and audit scope'));
                 appendText(details, 'Original query · redacted', row.input_query_redacted, 'auto');
                 appendText(details, 'Retrieval wording', row.canonical_retrieval_query_redacted, 'auto');
