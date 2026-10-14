@@ -113,7 +113,7 @@ COVERAGE_FIELDS = FIELDS + ("outcome", "support_arrangement", "production_contex
     "equivalent_existing_faq_ids", "rubric_version", "model_versions", "prompt_versions", "tokenizer_versions",
     "normalization_version", "alias_version", "classifier_version", "run_settings_version", "review_codes",
     "run_identity_id", "export_revision_id", "review_codes_by_phase", "evidence_phases", "validation_diagnostics",
-    "output_recovery_count", "recovery_policy", "failure_diagnostics")
+    "output_recovery_count", "recovery_policy", "failure_diagnostics", "batch_max_entries")
 ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
     "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
     "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "failure_diagnostics",
@@ -126,7 +126,8 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
     rows = []
     for source in results:
         row = {k: source.get(k, [] if k in ARRAY_FIELDS else {} if k in MAP_FIELDS else "") for k in COVERAGE_FIELDS}
-        row.update(schema_version="coverage-csv-3", run_id=meta["run_id"], export_id="",
+        row.update(schema_version="coverage-csv-4", run_id=meta["run_id"], export_id="",
+            batch_max_entries=meta["settings"].get("batch_max_entries",meta["settings"].get("batch_entries",2)),
             run_identity_id=meta.get("run_identity_id", ""), export_revision_id=meta.get("export_revision_id", ""),
             kb_snapshot_id=meta["snapshot_id"], configuration_id=meta["configuration_id"], input_id=meta["input_id"],
             input_scope="pilot_subset_full_input_export", selected_input_row_count=len(meta["row_ids"]),
@@ -146,7 +147,7 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
                 row[key] = ""
         rows.append(_redact(row, redactor))
     data, export_id = encode_csv(rows, COVERAGE_FIELDS, meta["row_ids"])
-    manifest = {"schema_version": "coverage-export-manifest-3", "run_id": meta["run_id"], "export_id": export_id,
+    manifest = {"schema_version": "coverage-export-manifest-4", "run_id": meta["run_id"], "export_id": export_id,
                 "export_revision_id": meta.get("export_revision_id", ""), "export_captured_at": meta.get("export_captured_at", ""),
                 "run_identity_id": meta.get("run_identity_id", ""), "run_identities": meta.get("run_identities", {}),
                 "run_identity_captured_at": meta.get("run_identity_captured_at", ""),

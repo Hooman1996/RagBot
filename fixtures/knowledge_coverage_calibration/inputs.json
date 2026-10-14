@@ -1,0 +1,446 @@
+{
+  "version": "fablebank-inputs-2",
+  "fictional_only": true,
+  "retrieval_scope": "controlled_candidate_manifests_not_hybrid_recall",
+  "records": [
+    {
+      "chunk_id": "f01",
+      "faq_entry_id": "f01",
+      "question": "FableBank paper-card approval terms",
+      "answer": "For fictional FableBank paper cards, approval takes two working days. The submission cutoff is 18:00.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f02",
+      "faq_entry_id": "f02",
+      "question": "Equivalent FableBank paper-card terms",
+      "answer": "The fictional FableBank paper-card approval duration is two working days. Submit before 18:00.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f03",
+      "faq_entry_id": "f03",
+      "question": "FableBank paper-card duration",
+      "answer": "Fictional FableBank paper-card approval takes two working days.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f04",
+      "faq_entry_id": "f04",
+      "question": "FableBank paper-card cutoff",
+      "answer": "The fictional FableBank paper-card submission cutoff is 18:00.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f05",
+      "faq_entry_id": "f05",
+      "question": "FableBank Silver account duration",
+      "answer": "For fictional FableBank Silver accounts only, approval takes two days. This duration does not apply to Gold accounts.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f06",
+      "faq_entry_id": "f06",
+      "question": "FableBank Gold account cutoff",
+      "answer": "For fictional FableBank Gold accounts only, submit before 18:00. This cutoff does not apply to Silver accounts.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f07",
+      "faq_entry_id": "f07",
+      "question": "Submit a FableBank card support ticket",
+      "answer": "For a fictional FableBank card support ticket, open Help, choose New ticket, describe the issue, then press Submit.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f08",
+      "faq_entry_id": "f08",
+      "question": "Contact FableBank support",
+      "answer": "For fictional FableBank paper-card questions, submit a support ticket. This record supplies no fee or approval duration.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "f09",
+      "faq_entry_id": "f09",
+      "question": "FableBank assistance",
+      "answer": "Contact fictional FableBank support for help. No fee or approval duration is specified here.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "n01",
+      "faq_entry_id": "n01",
+      "question": "FableBank decorative card colors",
+      "answer": "Fictional FableBank decorative cards are purple.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    },
+    {
+      "chunk_id": "n02",
+      "faq_entry_id": "n02",
+      "question": "FableBank mascot",
+      "answer": "The fictional FableBank mascot is a paper owl.",
+      "document_title": "Synthetic_FableBank",
+      "main_category": "Fictional banking",
+      "sub_category": "Paper cards",
+      "document_revision": 1,
+      "redaction_changed": false
+    }
+  ],
+  "cases": [
+    {
+      "case_id": "c01",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f01",
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "f01"
+      ],
+      "initial_ids": [
+        "n01"
+      ],
+      "broader_ids": [
+        "n01"
+      ]
+    },
+    {
+      "case_id": "c02",
+      "query": "For fictional FableBank paper cards, how many working days does approval need, and by what time must I submit?",
+      "baseline_record_ids": [
+        "f01",
+        "f02",
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "f02"
+      ],
+      "initial_ids": [
+        "f01"
+      ],
+      "broader_ids": [
+        "f01"
+      ]
+    },
+    {
+      "case_id": "c03",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f03",
+        "n01",
+        "f04",
+        "n02"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "n01"
+      ],
+      "initial_ids": [
+        "f03",
+        "n02",
+        "f04"
+      ],
+      "broader_ids": [
+        "f03",
+        "n02",
+        "f04"
+      ]
+    },
+    {
+      "case_id": "c04",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f03",
+        "n01",
+        "f04",
+        "n02"
+      ],
+      "removed_ids": [
+        "f04"
+      ],
+      "production_ids": [
+        "n01"
+      ],
+      "initial_ids": [
+        "f03",
+        "n01"
+      ],
+      "broader_ids": [
+        "f03",
+        "n01"
+      ]
+    },
+    {
+      "case_id": "c05",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f03",
+        "n01",
+        "f04",
+        "n02"
+      ],
+      "removed_ids": [
+        "f03",
+        "f04"
+      ],
+      "production_ids": [
+        "n01"
+      ],
+      "initial_ids": [
+        "n01"
+      ],
+      "broader_ids": [
+        "n01"
+      ]
+    },
+    {
+      "case_id": "c06",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f01",
+        "f02",
+        "n01"
+      ],
+      "removed_ids": [
+        "f01"
+      ],
+      "production_ids": [
+        "f02"
+      ],
+      "initial_ids": [
+        "f02",
+        "n01"
+      ],
+      "broader_ids": [
+        "f02",
+        "n01"
+      ]
+    },
+    {
+      "case_id": "c07",
+      "query": "For one fictional FableBank account type, what are both the approval duration and submission cutoff? Both facts must apply to the same type.",
+      "baseline_record_ids": [
+        "f05",
+        "n01",
+        "f06",
+        "n02"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "n01"
+      ],
+      "initial_ids": [
+        "f05",
+        "n02",
+        "f06"
+      ],
+      "broader_ids": [
+        "f05",
+        "n02",
+        "f06"
+      ]
+    },
+    {
+      "case_id": "c08",
+      "query": "How do I submit a support ticket for a fictional FableBank card?",
+      "baseline_record_ids": [
+        "f07",
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "f07"
+      ],
+      "initial_ids": [
+        "f07"
+      ],
+      "broader_ids": [
+        "f07"
+      ]
+    },
+    {
+      "case_id": "c09",
+      "query": "What are the replacement fee and approval duration for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f08",
+        "n01",
+        "f09",
+        "n02"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "n01"
+      ],
+      "initial_ids": [
+        "f08",
+        "n01",
+        "f09",
+        "n02"
+      ],
+      "broader_ids": [
+        "f08",
+        "n01",
+        "f09",
+        "n02"
+      ]
+    },
+    {
+      "case_id": "c10",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f01",
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [
+        "n01"
+      ],
+      "initial_ids": [
+        "f01"
+      ],
+      "broader_ids": [
+        "f01"
+      ]
+    },
+    {
+      "case_id": "c11",
+      "query": "How long does it take?",
+      "baseline_record_ids": [
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [],
+      "initial_ids": [],
+      "broader_ids": []
+    },
+    {
+      "case_id": "c12",
+      "query": "Compose a fantasy poem about a dragon.",
+      "baseline_record_ids": [
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [],
+      "initial_ids": [],
+      "broader_ids": []
+    },
+    {
+      "case_id": "c13",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f01"
+      ],
+      "removed_ids": [],
+      "production_ids": [],
+      "initial_ids": [
+        "f01"
+      ],
+      "broader_ids": [
+        "f01"
+      ],
+      "fault": "malformed_batch",
+      "deterministic_only": true
+    },
+    {
+      "case_id": "c14",
+      "query": "What are the approval duration and submission cutoff for fictional FableBank paper cards?",
+      "baseline_record_ids": [
+        "f01"
+      ],
+      "removed_ids": [],
+      "production_ids": [],
+      "initial_ids": [
+        "f01"
+      ],
+      "broader_ids": [
+        "f01"
+      ],
+      "fault": "invalid_citation",
+      "deterministic_only": true
+    },
+    {
+      "case_id": "c15",
+      "query": "What is my private FableBank account balance right now?",
+      "baseline_record_ids": [
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [],
+      "initial_ids": [],
+      "broader_ids": [],
+      "deterministic_only": true
+    },
+    {
+      "case_id": "c16",
+      "query": "Hello! How are you?",
+      "baseline_record_ids": [
+        "n01"
+      ],
+      "removed_ids": [],
+      "production_ids": [],
+      "initial_ids": [],
+      "broader_ids": [],
+      "deterministic_only": true
+    }
+  ],
+  "live_selection": [
+    "c01",
+    "c02",
+    "c03",
+    "c04",
+    "c05",
+    "c06",
+    "c07",
+    "c08",
+    "c09",
+    "c10",
+    "c11",
+    "c12"
+  ],
+  "batch_comparisons": [
+    "c03",
+    "c07",
+    "c09"
+  ]
+}

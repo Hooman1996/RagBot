@@ -902,6 +902,7 @@ manifests include effective limits and a grant-map hash, not authentication data
 | `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Integer 1024–20971520; decoded CSV bytes, with an additional bounded JSON/base64 transport envelope. |
 | `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Integer 256–4096; reserved structured-output tokens for each audit completion. Complete input plus this reserve/margin must fit the served context limit. |
 | `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
+| `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` | `2` | Audit-local integer 1–5; whole Q/A entries per batch, with fewer when required by served-token budgeting. Pinned in run/configuration/export identity; changed cap rejects resume. |
 
 A2.2 adds no env variables and does not alter those defaults or production HTTP
 settings. Fixed manifest policies `audit-failures-1` and `full-entries-two-1` add
@@ -929,12 +930,12 @@ validated snapshots can be explicitly registered for another owner without
 sharing datasets/runs. No browser path-read or snapshot-grant endpoint exists.
 
 Constants in the versioned run manifest: five pilot queries, sequential model
-calls, five entries per batch, initial depths 150/150/150 and 50 initial entries,
+calls, configurable 1–5 entries per batch (default two), initial depths 150/150/150 and 50 initial entries,
 broader depths 300/300/300, maximum 300 distinct evaluated entries. The per-run
 budget is validated 1–300. These are current A2 limits, not unused env knobs.
 Existing performance/history/classifier settings are reused where semantics match.
 
-All five names/defaults appear in `env.example`, `Production_ENV`,
+All six names/defaults appear in `env.example`, `Production_ENV`,
 `.env.example.generated` and `scripts/validate_environment.py`. The generated-named
 template is source-authored; no automatic generator was found. Existing private
 `.env`/`.env_latest` were extended with missing keys only; no private values were
@@ -952,3 +953,15 @@ pool, Redis runtime, JWT secret/token lifetime/authentication flags,
 observability exporters, or a full `DATABASE_URL`. These may be configured
 outside the repository, but inventing local variables would not affect the
 current code.
+
+
+A3 adds only `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES=2`. Defaults/validation and
+all applicable tracked templates (`env.example`, `env.review.example`,
+`Production_ENV`, `.env.example.generated`) agree. Existing local `.env` and
+`.env_latest` receive only the missing key; existing values stay preserved.
+No generator implementation exists for the source-authored generated-named
+template; no deleted staging template is recreated. Manifest policy becomes
+`full-entries-configurable-1`, settings schema `coverage-settings-3`, CSV v4.
+The A3 campaign's 120-completion ceiling and preselected 12+3 controlled records
+are versioned operator experiment bounds, not unused permanent env settings.
+No production retrieval/timeouts/output defaults or role grants change.

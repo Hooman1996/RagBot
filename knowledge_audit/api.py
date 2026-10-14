@@ -98,6 +98,51 @@ async def page(request: Request, user: WebUser):
         "contract_version": "coverage-page-2"}, headers={"Cache-Control": "no-store"})
 
 
+def calibration_summary(meta):
+    # Controlled results stay separate; no private review notes or run checkpoints.
+    return {key:meta[key] for key in ("calibration_id","scope","state","created_at","finished_at",
+        "configuration","configuration_id","run_identity_id","selection","summary","human_labels",
+        "dispatches","returned_completions","reported_usage") if key in meta}
+
+
+@router.get("/api/knowledge-coverage/calibrations")
+async def calibrations(request: Request, user: WebUser):
+    require(user,"coverage_results_view")
+    from knowledge_audit.calibration import CalibrationArtifacts
+    _,store,_ = runtime(request)
+    rows = await safe_call(CalibrationArtifacts(store).list_owned,user.id)
+    return [calibration_summary(meta) for meta in rows]
+
+
+@router.get("/api/knowledge-coverage/calibrations/{calibration_id}")
+async def calibration_detail(calibration_id: str, request: Request, user: WebUser):
+    require(user,"coverage_results_view")
+    from knowledge_audit.calibration import CalibrationArtifacts
+    _,store,_ = runtime(request)
+    return calibration_summary(await safe_call(CalibrationArtifacts(store).owned,calibration_id,user.id))
+
+
+async def calibration_download(calibration_id,request,user):
+    require(user,"coverage_export_download","coverage_results_view")
+    from knowledge_audit.calibration import CalibrationArtifacts
+    _,store,_ = runtime(request)
+    visible = {"coverage_evidence_view","kb_read"} <= permissions_for_user(user.role,user.id)
+    return await safe_call(CalibrationArtifacts(store).download,calibration_id,user.id,visible)
+
+
+@router.get("/api/knowledge-coverage/calibrations/{calibration_id}/export")
+async def calibration_csv(calibration_id: str, request: Request, user: WebUser):
+    body,manifest = await calibration_download(calibration_id,request,user)
+    return Response(body,media_type="text/csv; charset=utf-8",headers={"Cache-Control":"no-store",
+        "Content-Disposition":'attachment; filename="calibration-'+manifest["export_id"]+'.csv"'})
+
+
+@router.get("/api/knowledge-coverage/calibrations/{calibration_id}/export-manifest")
+async def calibration_manifest(calibration_id: str, request: Request, user: WebUser):
+    _,manifest = await calibration_download(calibration_id,request,user)
+    return Response(json.dumps(manifest),media_type="application/json",headers={"Cache-Control":"no-store"})
+
+
 @router.post("/api/knowledge-coverage/datasets", status_code=201)
 async def import_dataset(request: Request, user: WebUser):
     require(user, "coverage_run_start")

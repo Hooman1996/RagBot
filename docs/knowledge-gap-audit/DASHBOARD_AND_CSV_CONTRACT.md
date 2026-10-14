@@ -329,8 +329,8 @@ A2 must create its distinct coverage schema and preserve complete row accounting
 
 ## Implemented A2 pilot contract
 
-Implemented A2.2 versions `coverage-page-2`, `coverage-csv-3`,
-`coverage-export-manifest-3`, rubric `coverage-rubric-4`. This section specifies
+Implemented A3 versions `coverage-page-2`, `coverage-csv-4`,
+`coverage-export-manifest-4`, rubric `coverage-rubric-4`. This section specifies
 the shipped pilot where it is narrower/different from the future v1 proposal
 above. See [A2_END_TO_END_PILOT_REPORT.md](A2_END_TO_END_PILOT_REPORT.md) and
 [A2_RUBRIC_AND_SCHEMAS.md](A2_RUBRIC_AND_SCHEMAS.md) and
@@ -375,7 +375,7 @@ capture code; datasets and runs remain single-owner.
 | POST `/runs/{run_id}/export-revisions` | export-download + results-view, CSRF, owned run; capture a new immutable permission-specific pair |
 
 Names above abbreviate `coverage_run_start`, `coverage_results_view`,
-`coverage_evidence_view`, `coverage_export_download`. Sixteen routes are
+`coverage_evidence_view`, `coverage_export_download`. Twenty routes are
 registered, including the page. Upload transport is bounded streamed JSON with
 base64 CSV bytes and explicit mapped column names; accepted bytes stay in memory
 until mapped/redacted. There is no multipart spool, raw upload download, arbitrary
@@ -513,3 +513,50 @@ explicitly distinguish post-pilot configuration observations from configuration
 captured before execution; saved-evidence export corrections retain original
 pilot files and exact inference-code hashes. Later full-run/retention/visual and
 human-review acceptance remain separate planner gates.
+
+
+## A3 controlled calibration additions
+
+`KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` is an audit-local integer 1–5, default 2.
+Served-token budgeting may pack fewer whole entries. `coverage-settings-3` records
+the cap and `full-entries-configurable-1`; customer CSV v4 adds `batch_max_entries`.
+Changing it rejects resume against pinned identities. Historical export revisions
+are immutable and retain their original schemas. Production settings are unchanged.
+
+Calibration artifacts use a separate `calibrations/cal_<opaque>` namespace.
+`controlled-calibration-1` explicitly means fictional controlled candidates; it
+is neither customer audit output nor a hybrid-retrieval recall measurement.
+The operator campaign has a durable 120-dispatch cap including probes/recovery,
+12 preselected baseline records and three preselected cap-5 comparisons.
+
+| New GET route under `/api/knowledge-coverage` | Required access |
+|---|---|
+| `/calibrations`, `/calibrations/{calibration_id}` | results-view, owner |
+| `/calibrations/{calibration_id}/export`, `/calibrations/{calibration_id}/export-manifest` | export-download + results-view, owner; evidence additionally requires evidence-view + `kb_read` |
+
+These read-only routes reuse authentication/default-deny capabilities and cannot
+start a model run, read arbitrary server paths or grant another account access.
+Operator owner 0 is not a browser account. Summary responses expose run identity,
+configuration and denominated scores. No dashboard layout or user flow changed.
+
+`calibration-export-1` reuses the A1 CSV encoder: BOM, quoting, JSON cells, formula
+protection, row-order/identity checks. One immutable CSV/manifest pair is frozen
+per permission projection at campaign termination/interruption. Later checkpoint
+changes cannot regenerate that pair. Every selected baseline/comparison record,
+including errors/unexecuted cases, has its own stable row ID and CSV row.
+Fields include case/comparison identity, batch cap and effective configuration
+identity, baseline/variant snapshot and removal IDs, query, processing/coverage/
+production state, evidence/verifications, missing aspects, errors, stopping reason,
+counts/tokens/duration and explicitly unassessed recommendations. Manifests hold
+fixture/hidden-label hashes, prompt/schema/code/model identities, configuration
+variants and completed/overall metric denominators. Restricted exports omit
+source/aspect evidence. No historical 918-row export is changed.
+
+Human-review import `human-label-import-1` is an offline protected interface,
+bound to the original package manifest and row/run/snapshot/citation identities.
+Completed reviews require intended question, aspects, applicability/conditions,
+coverage, production sufficiency, missing facts/evidence and declared independent
+human provenance. Independence is declared, not independently authenticated.
+Blank fields remain `not_reviewed`; zero-label metrics are null with denominator
+zero. Both A2.1 and A2.2 observations remain distinct, particularly rows 121/518.
+Reviewer identity, labels, corrections and notes remain outside Git/public assets.

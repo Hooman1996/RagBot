@@ -7,19 +7,21 @@ from knowledge_audit.evidence import EvidenceIndex
 from knowledge_audit.history import AuditHistoryProvider
 from knowledge_audit.privacy import AuditError
 from knowledge_audit.failures import TRANSPORT_CODES, VALIDATION_CODES, category
-from knowledge_audit.settings import BATCH_ENTRY_LIMIT
 from utils.read_only_audit import canonical_sha256
 
 
 class CoverageEvaluator:
     def __init__(self, *, snapshot, model, retrieval, preparer, redactor, dataset,
-                 entry_budget=300, documents=None, checkpoint=None):
+                 entry_budget=300, documents=None, checkpoint=None, batch_max_entries=2):
         if type(entry_budget) is not int or not 1 <= entry_budget <= 300:
             raise AuditError("invalid_entry_budget")
         self.index = EvidenceIndex(snapshot)
         self.model, self.retrieval, self.preparer, self.redactor = model, retrieval, preparer, redactor
         self.dataset, self.entry_budget, self.documents = dataset, entry_budget, documents
         self.checkpoint = checkpoint
+        if type(batch_max_entries) is not int or not 1 <= batch_max_entries <= 5:
+            raise AuditError("invalid_coverage_batch_max_entries")
+        self.batch_max_entries = batch_max_entries
         self.history = AuditHistoryProvider(dataset, redactor)
 
     async def evaluate(self, event, initial):
@@ -201,7 +203,7 @@ class CoverageEvaluator:
         limited = False
         while position < len(pending):
             pack = []
-            while position < len(pending) and len(pack) < BATCH_ENTRY_LIMIT:
+            while position < len(pending) and len(pack) < self.batch_max_entries:
                 cid = pending[position]
                 position += 1
                 new_ids = {x["chunk_id"] for x in pack} | {cid}

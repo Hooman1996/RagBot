@@ -150,3 +150,22 @@ The [A2.2 report](A2_2_MODEL_RELIABILITY_REPORT.md) records a maximum-12-dispatc
 diagnosis and one new same-five-query pilot, including unknown usage. The protected
 review package supplies blank human-label fields; automated inspection is not
 independent human validation or calibrated accuracy.
+
+
+## A3 controlled calibration policy
+
+The current baseline remains `coverage-rubric-4`; all five responsibility schema
+versions and prompt templates are unchanged. No rubric candidate or prompt tuning
+is introduced. `full-entries-configurable-1` replaces the fixed implementation
+cap with `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` (integer 1–5, default 2). Strict
+schema ceiling 5, token budgeting, output limit, production defaults, deadlines,
+syntax recovery and full-verification requirements remain unchanged.
+
+Fictional fixture facts/conditions, expected aspect support and seeded missing
+facts are frozen independently in an evaluator-hidden label manifest. The live
+operator loads labels only after predictions complete. Controlled candidate
+ordering is explicit and does not test hybrid recall. Cap-5 comparisons reuse
+the cap-2 model-derived scope/aspects, never expected labels; other model settings
+and candidate order stay fixed. Returned models can still differ nondeterministically.
+The protected real-query package remains unlabeled until an independent reviewer
+supplies completed fields; model/Codex outputs never become human ground truth.

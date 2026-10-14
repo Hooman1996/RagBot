@@ -223,16 +223,15 @@ def test_review_package_has_blank_human_labels_full_sources_and_escaped_html(tmp
 
 def test_two_entry_policy_preserves_complete_entries_and_distinct_budget():
     from tests.test_knowledge_coverage_pipeline import snapshot,LabeledModel,Retrieval,evaluate
-    from knowledge_audit.settings import BATCH_ENTRY_LIMIT
     answers={str(i):'Fictional fact '+str(i)+'\nCondition: fictional scope only.' for i in range(1,10)}
     snap=snapshot(answers);model=LabeledModel(snap,{})
     row=evaluate(snap,model,Retrieval([],list(answers),list(answers)))[0]
     batches=[data['entries'] for role,data in model.calls if role=='batch']
-    assert BATCH_ENTRY_LIMIT==2 and max(map(len,batches))==2
+    assert load_coverage_settings({}).batch_max_entries==2 and max(map(len,batches))==2
     assert [e['chunk_id'] for b in batches for e in b]==list(answers)
     assert all(e['answer']==answers[e['chunk_id']] for b in batches for e in b)
     assert row['evaluated_entry_count']==9
-    assert load_coverage_settings({}).manifest()['batch_policy']=='full-entries-two-1'
+    assert load_coverage_settings({}).manifest()['batch_policy']=='full-entries-configurable-1'
 
 
 def test_failure_categories_survive_restricted_immutable_csv_projection(tmp_path):
@@ -246,7 +245,7 @@ def test_failure_categories_survive_restricted_immutable_csv_projection(tmp_path
     store.save_row(meta['run_id'],row,1)
     body,manifest=store.export_revision(meta['run_id'],1,False,create=True)
     rows=list(csv.DictReader(io.StringIO(body.decode('utf-8-sig'))))
-    assert rows[0]['schema_version']=='coverage-csv-3' and rows[0]['error_code']=='model_read_timeout'
+    assert rows[0]['schema_version']=='coverage-csv-4' and rows[0]['error_code']=='model_read_timeout'
     assert json.loads(rows[0]['failure_diagnostics'])==row['failure_diagnostics']
     assert all(r['export_id']==manifest['export_id'] for r in rows)
 

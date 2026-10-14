@@ -224,7 +224,7 @@ def test_recovery_does_not_retry_length_semantic_or_redaction_failures(code,fini
     asyncio.run(run())
 
 
-@pytest.mark.parametrize('change',['unchanged','serving','runtime','audit_settings'])
+@pytest.mark.parametrize('change',['unchanged','serving','runtime','audit_settings','batch_cap'])
 def test_resume_pins_original_identities_before_retaining_completed_rows(tmp_path,change):
     store,d,s,meta,data,redactor,prep=seed(tmp_path)
     meta['selected_row_ids']=[e.source_row_id for e in data.selected[:2]]
@@ -254,6 +254,10 @@ def test_resume_pins_original_identities_before_retaining_completed_rows(tmp_pat
         if change=='audit_settings':
             edited=store.owned('runs',meta['run_id'],1)
             edited['settings']['entry_budget']=299
+            store.update_run(meta['run_id'],1,edited)
+        if change=='batch_cap':
+            edited=store.owned('runs',meta['run_id'],1)
+            edited['settings']['batch_max_entries']=5
             store.update_run(meta['run_id'],1,edited)
         await jobs.recover(meta['run_id'],1)
         await asyncio.gather(*list(jobs.tasks._tasks.values()))

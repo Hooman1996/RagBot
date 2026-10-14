@@ -57,7 +57,7 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
         preparer = AdmittedPreparer(QueryPreparer.from_answering_service(answering), limiter)
         engine = CoverageEvaluator(snapshot=snapshot, model=model, retrieval=retrieval, preparer=preparer,
             redactor=redactor, dataset=dataset, entry_budget=meta["settings"]["entry_budget"],
-            documents=meta["settings"].get("documents"))
+            documents=meta["settings"].get("documents"), batch_max_entries=settings.batch_max_entries)
         from knowledge_audit.runtime import configuration_identity
         async def observe():
             preparation_config = configuration_identity(dataset.timestamp_policy, len(meta["selected_row_ids"]), redactor)

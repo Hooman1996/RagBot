@@ -53,6 +53,10 @@ def landing_for(role: str | None) -> str:
 # remain unclassified and are denied by the browser middleware.
 ROUTES = (
     ("GET", r"/knowledge-coverage", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/calibrations", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/calibrations/[^/]+", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/calibrations/[^/]+/export", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/calibrations/[^/]+/export-manifest", "coverage_export_download"),
     ("POST", r"/api/knowledge-coverage/datasets", "coverage_run_start"),
     ("GET", r"/api/knowledge-coverage/datasets", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/datasets/[^/]+/rows", "coverage_results_view"),

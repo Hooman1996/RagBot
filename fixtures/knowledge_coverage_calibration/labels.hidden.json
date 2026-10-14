@@ -1,0 +1,492 @@
+{
+  "version": "fablebank-labels-1",
+  "independent_human_labels": false,
+  "authority": "literal-fictional-fixture-specification",
+  "cases": {
+    "c01": {
+      "family": "exact_production_proof",
+      "expected_coverage": "full",
+      "expected_production": "full",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f01",
+            "sentences": [
+              1
+            ]
+          }
+        ],
+        "a2": [
+          {
+            "entry_id": "f01",
+            "sentences": [
+              2
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c02": {
+      "family": "paraphrase_equivalent",
+      "expected_coverage": "full",
+      "expected_production": "full",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f02",
+            "sentences": [
+              1
+            ]
+          }
+        ],
+        "a2": [
+          {
+            "entry_id": "f02",
+            "sentences": [
+              2
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c03": {
+      "family": "complementary_across_batches",
+      "expected_coverage": "full",
+      "expected_production": "unsupported",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f03",
+            "sentences": [
+              1
+            ]
+          }
+        ],
+        "a2": [
+          {
+            "entry_id": "f04",
+            "sentences": [
+              1
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c04": {
+      "family": "seeded_partial",
+      "expected_coverage": "partial",
+      "expected_production": "unsupported",
+      "missing_aspect_ids": [
+        "a2"
+      ],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f03",
+            "sentences": [
+              1
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c05": {
+      "family": "seeded_complete_gap",
+      "expected_coverage": "unsupported",
+      "expected_production": "unsupported",
+      "missing_aspect_ids": [
+        "a1",
+        "a2"
+      ],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c06": {
+      "family": "equivalent_survives_removal",
+      "expected_coverage": "full",
+      "expected_production": "full",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f02",
+            "sentences": [
+              1
+            ]
+          }
+        ],
+        "a2": [
+          {
+            "entry_id": "f02",
+            "sentences": [
+              2
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c07": {
+      "family": "mutually_exclusive_conditions",
+      "expected_coverage": "uncertain",
+      "expected_production": "unsupported",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": [
+            "same account type as cutoff"
+          ]
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": [
+            "same account type as duration"
+          ]
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f05",
+            "sentences": [
+              1
+            ],
+            "conditions": [
+              "Silver only"
+            ]
+          }
+        ],
+        "a2": [
+          {
+            "entry_id": "f06",
+            "sentences": [
+              1
+            ],
+            "conditions": [
+              "Gold only"
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c08": {
+      "family": "ticket_procedure",
+      "expected_coverage": "full",
+      "expected_production": "full",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Steps to submit a support ticket",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f07",
+            "sentences": [
+              1
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c09": {
+      "family": "referral_does_not_supply_facts",
+      "expected_coverage": "unsupported",
+      "expected_production": "unsupported",
+      "missing_aspect_ids": [
+        "a1",
+        "a2"
+      ],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Replacement fee",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Approval duration",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c10": {
+      "family": "audit_present_production_miss",
+      "expected_coverage": "full",
+      "expected_production": "unsupported",
+      "missing_aspect_ids": [],
+      "expected_scope": "kb_question",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {
+        "a1": [
+          {
+            "entry_id": "f01",
+            "sentences": [
+              1
+            ]
+          }
+        ],
+        "a2": [
+          {
+            "entry_id": "f01",
+            "sentences": [
+              2
+            ]
+          }
+        ]
+      },
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c11": {
+      "family": "missing_history",
+      "expected_coverage": "uncertain",
+      "expected_production": "not_evaluated",
+      "missing_aspect_ids": [],
+      "expected_scope": "needs_context",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c12": {
+      "family": "out_of_scope",
+      "expected_coverage": "",
+      "expected_production": "not_evaluated",
+      "missing_aspect_ids": [],
+      "expected_scope": "out_of_scope",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c13": {
+      "family": "malformed_output",
+      "expected_coverage": "uncertain",
+      "expected_production": "not_evaluated",
+      "missing_aspect_ids": [],
+      "expected_scope": "error",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c14": {
+      "family": "invalid_citation",
+      "expected_coverage": "uncertain",
+      "expected_production": "not_evaluated",
+      "missing_aspect_ids": [],
+      "expected_scope": "error",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c15": {
+      "family": "private_account",
+      "expected_coverage": "",
+      "expected_production": "not_evaluated",
+      "missing_aspect_ids": [],
+      "expected_scope": "private_account",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    },
+    "c16": {
+      "family": "chitchat",
+      "expected_coverage": "",
+      "expected_production": "not_evaluated",
+      "missing_aspect_ids": [],
+      "expected_scope": "chitchat",
+      "aspects": [
+        {
+          "aspect_id": "a1",
+          "description": "Approval duration",
+          "conditions": []
+        },
+        {
+          "aspect_id": "a2",
+          "description": "Submission cutoff",
+          "conditions": []
+        }
+      ],
+      "support_relationships": {},
+      "provenance": "fixture-author-specified-literal-facts-not-model-output",
+      "label_version": "fablebank-labels-1"
+    }
+  }
+}
