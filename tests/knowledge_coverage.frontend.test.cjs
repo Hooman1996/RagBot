@@ -49,6 +49,7 @@ test('upload → explicit selection → progress → evidence → complete expor
     const assessed={...input,preparation_status:'prepared',outcome:'covered_reachable',coverage_status:'full',evaluated_entry_count:1,
         standalone_query_redacted:'پرسش مستقل',canonical_retrieval_query_redacted:'عبارت جستجو',explanation:'Supported synthetic fact.',verification_result:'accepted',
         production_context_sufficiency:'full',stopping_reason:'verified_full',kb_snapshot_id:sid,
+        failure_diagnostics:[{failure_category:'model_read_timeout',boundary:'completion',evaluation_phase:'production',attempt:1,duration_ms:40000}],
         requested_aspects:[{aspect_id:'a1',description:'مدت زمان',conditions:['Working days']}],
         supporting_sentence_refs:[{chunk_id:'1',faq_entry_id:'1',sentence_number:1}],
         audit_assessment:{witness:[{aspect_id:'a1',applicability:'applicable',conditions:[],citations:[{chunk_id:'1',faq_entry_id:'1',sentence_number:1}]}]}};
@@ -91,6 +92,8 @@ test('upload → explicit selection → progress → evidence → complete expor
         const review=buttons($('Rows')).find(n=>n.textContent==='Review'); await review.dispatch('click'); await flush();
         assert.equal(document.activeElement,$('Evidence')); assert.match(text($('EvidenceContent')),/مدت زمان/);
         assert.match(text($('EvidenceContent')),/دو روز کاری/); assert.match(text($('EvidenceContent')),/sentence 1/);
+        assert.match(text($('EvidenceContent')),/Model request/); assert.match(text($('EvidenceContent')),/40000 ms/);
+        assert.match(text($('EvidenceContent')),/read.timeout/i);
         $('Evidence').dispatch('keydown',{key:'Escape'}); assert.equal(document.activeElement,review);
         $('Language').dispatch('click'); assert.equal(document.documentElement.dir,'rtl');
         $('Theme').dispatch('click'); assert(document.body.classList.values.has('light-mode'));

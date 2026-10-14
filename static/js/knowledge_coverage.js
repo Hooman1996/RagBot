@@ -216,6 +216,9 @@
                     'Bounded search · at most ' + search.seed_limit + ' seeds · ' + search.bundles_considered + ' bundles considered. A missing compatible proof is not proof of a missing fact.');
                 (row.validation_diagnostics || []).forEach(d => appendText(panel, 'Output validation',
                     d.responsibility + ' · ' + d.schema_version + ' · ' + d.stage + ' · ' + (d.field_path || []).join('.') + ' · ' + d.error_type));
+                (row.failure_diagnostics || []).forEach(d => appendText(panel, 'Model request',
+                    label(d.failure_category) + ' · ' + label(d.boundary) + ' · ' + label(d.evaluation_phase || 'unknown') +
+                    ' · attempt ' + (d.attempt || 1) + ' · ' + (d.duration_ms || 0) + ' ms'));
                 const details = node(document, 'details'); details.append(node(document, 'summary', 'Query forms and audit scope'));
                 appendText(details, 'Original query · redacted', row.input_query_redacted, 'auto');
                 appendText(details, 'Retrieval wording', row.canonical_retrieval_query_redacted, 'auto');

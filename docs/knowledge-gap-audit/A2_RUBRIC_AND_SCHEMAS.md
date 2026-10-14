@@ -128,3 +128,25 @@ vLLM documents the JSON-schema request mechanism in its
 The A2.1 report distinguishes actual capability checks, non-reproduced transient
 syntax failures, and remaining output-length failures; it does not claim a serving
 root cause or a guaranteed repair.
+
+## A2.2 reliability policy (rubric/schema shapes unchanged)
+
+The schema's five-entry ceiling remains valid; the implementation now uses a
+narrower **two-entry maximum**, `full-entries-two-1`, based on bounded paired
+output-budget checks. Every full Q/A and condition is preserved, and all remaining
+candidates retain their own evaluation. Complete served input counting, 1,200
+reserved output tokens by default, strict output/citation/semantic checks and
+verification of full proofs remain unchanged. No network retry or global timeout
+increase was introduced. A two-entry request can still be incomplete/malformed.
+
+`audit-failures-1` records typed transport causes and phase timings separately from
+schema/citation/semantic validation and output-length termination. These failures
+never establish a gap or insufficient production reachability. Failed production
+assessment remains uncertain if an independent audit proof succeeds. The same
+one-fresh-response syntax recovery is explicit, counted and may be blocked by a
+diagnostic dispatch cap; it does not repair content or retry network failures.
+
+The [A2.2 report](A2_2_MODEL_RELIABILITY_REPORT.md) records a maximum-12-dispatch
+diagnosis and one new same-five-query pilot, including unknown usage. The protected
+review package supplies blank human-label fields; automated inspection is not
+independent human validation or calibrated accuracy.

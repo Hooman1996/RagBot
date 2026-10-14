@@ -8,6 +8,7 @@ from knowledge_audit.privacy import AuditError
 
 CAPABILITIES = frozenset({"coverage_run_start", "coverage_results_view",
                           "coverage_evidence_view", "coverage_export_download"})
+BATCH_ENTRY_LIMIT = 2  # Fixed A2.2 output-budget policy; full entries, never truncation.
 
 
 @dataclass(frozen=True)
@@ -26,8 +27,11 @@ class CoverageSettings:
                 "structured_output_mode": "json_schema_strict_1", "proof_reuse_version": "question-ledger-1",
                 "run_identity_version": "run-identity-1", "export_revision_version": "immutable-export-1",
                 "json_syntax_recovery_attempts": 1, "recovery_policy": "json-invalid-stop-one-fresh-response-1",
+                "failure_policy": "audit-failures-1", "model_deadline_policy": "production-client-inherited-1",
+                "network_retries": 0, "unknown_server_completion_policy": "retain_error_no_automatic_retry",
                 "initial_depths": [150, 150, 150], "expanded_depths": [300, 300, 300],
-                "initial_entries": 50, "maximum_distinct_entries": 300, "batch_entries": 5,
+                "initial_entries": 50, "maximum_distinct_entries": 300, "batch_entries": BATCH_ENTRY_LIMIT,
+                "batch_policy": "full-entries-two-1",
                 "pilot_query_limit": 5, "model_concurrency": 1}
 
 

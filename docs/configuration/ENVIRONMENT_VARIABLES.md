@@ -903,6 +903,16 @@ manifests include effective limits and a grant-map hash, not authentication data
 | `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Integer 256–4096; reserved structured-output tokens for each audit completion. Complete input plus this reserve/margin must fit the served context limit. |
 | `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
 
+A2.2 adds no env variables and does not alter those defaults or production HTTP
+settings. Fixed manifest policies `audit-failures-1` and `full-entries-two-1` add
+content-safe failure categories and cap audit batches at two complete entries.
+The existing 40-second effective staging model read timeout, 50-second
+admission/completion deadline and zero network retries are inherited unchanged;
+the source default for model read remains 45 seconds. Tokenization is outside that
+outer deadline and retains its HTTP timeout. Diagnostic read overrides are local
+experiments only, not permanent runtime values. Existing templates/private runtime
+envs require no new keys; the user-deleted staging template remains deleted.
+
 Allowed capabilities are `coverage_run_start`, `coverage_results_view`,
 `coverage_evidence_view`, `coverage_export_download`. An entirely synthetic
 example grants all four to imaginary account 123:

@@ -6,6 +6,8 @@ import time
 from knowledge_audit.evidence import EvidenceIndex
 from knowledge_audit.history import AuditHistoryProvider
 from knowledge_audit.privacy import AuditError
+from knowledge_audit.failures import TRANSPORT_CODES, VALIDATION_CODES, category
+from knowledge_audit.settings import BATCH_ENTRY_LIMIT
 from utils.read_only_audit import canonical_sha256
 
 
@@ -25,6 +27,7 @@ class CoverageEvaluator:
         metric_start = len(self.model.metrics)
         retrieval_start = len(self.retrieval.metrics)
         self.evaluated_ids = set()
+        self.model.evaluation_phase = "unknown"
         self.verifications, self.review_codes = [], []
         self.evidence_batches, self.proofs = [], []
         self.verification_cache, self.reconciliation_cache = {}, {}
@@ -134,9 +137,9 @@ class CoverageEvaluator:
             else:
                 result.update(processing_status="failed", coverage_status="uncertain", outcome="error",
                               stopping_reason="processing_error", error_code=code if code in ERROR_CODES else "audit_failed")
-        except Exception:
+        except Exception as error:
             result.update(processing_status="failed", coverage_status="uncertain", outcome="error",
-                          stopping_reason="processing_error", error_code="audit_failed")
+                          stopping_reason="processing_error", error_code=category(error))
         finally:
             result.setdefault("question_evidence", {"version": "question-evidence-1", "batches": self.evidence_batches,
                 "entry_phases": dict(self.entry_phases), "entry_status": self.entry_status})
@@ -148,6 +151,19 @@ class CoverageEvaluator:
                           output_recovery_count=sum(m.get("attempt", 1) > 1 for m in self.model.metrics[metric_start:]),
                           recovery_policy="json-invalid-stop-one-fresh-response-1",
                           duration_ms=round((time.perf_counter() - started) * 1000, 3))
+            keys = {"failure_policy", "failure_category", "role", "evaluation_phase", "boundary", "attempt",
+                "dispatched", "phase_timings_ms", "duration_ms", "prompt_tokens", "server_prompt_tokens",
+                "completion_tokens", "finish_reason", "server_request_ref", "http_status"}
+            keys.add("server_completion_state")
+            result["failure_diagnostics"] = [{k:v for k,v in m.items() if k in keys}
+                for m in self.model.metrics[metric_start:] if m.get("failure_category", "none") != "none"]
+            if result.get("error_code") in VALIDATION_CODES and not result["failure_diagnostics"]:
+                result["failure_diagnostics"].append({"failure_policy":"audit-failures-1",
+                    "failure_category":"citation_validation" if result["error_code"] == "invalid_citation" else "semantic_validation",
+                    "boundary":"evidence_validation"})
+            if result.get("error_code") in TRANSPORT_CODES and not result["failure_diagnostics"]:
+                result["failure_diagnostics"].append({"failure_policy":"audit-failures-1",
+                    "failure_category":result["error_code"], "boundary":"preparation_or_retrieval"})
             if self.checkpoint:
                 await self.checkpoint(result)
         return result
@@ -174,6 +190,7 @@ class CoverageEvaluator:
         Per-entry support can be reused. A verdict for a joint batch is never
         copied to a subset; full requires a verified proof wholly in that view.
         """
+        self.model.evaluation_phase = phase
         ids = list(dict.fromkeys(ids))
         if phase != "question":
             for cid in ids:
@@ -184,7 +201,7 @@ class CoverageEvaluator:
         limited = False
         while position < len(pending):
             pack = []
-            while position < len(pending) and len(pack) < 5:
+            while position < len(pending) and len(pack) < BATCH_ENTRY_LIMIT:
                 cid = pending[position]
                 position += 1
                 new_ids = {x["chunk_id"] for x in pack} | {cid}
@@ -421,7 +438,7 @@ class CoverageEvaluator:
 
 ERROR_CODES = frozenset({"invalid_citation", "invalid_evidence_support", "invalid_full_claim", "invalid_aspect_identity",
     "invalid_reconciliation_identity", "invalid_model_schema", "model_input_token_overflow", "incomplete_structured_output",
-    "token_count_serving_mismatch", "unsupported_snapshot_entry", "unverified_context_limit", "input_artifact_drift"})
+    "token_count_serving_mismatch", "unsupported_snapshot_entry", "unverified_context_limit", "input_artifact_drift"}) | TRANSPORT_CODES
 
 
 def explicit_subject(query):

@@ -4,6 +4,7 @@ import asyncio
 import time
 import os
 import json
+from datetime import datetime, timezone
 
 from pydantic import ValidationError
 from knowledge_audit.privacy import AuditError, Redactor
@@ -12,6 +13,8 @@ from knowledge_audit.schemas import SCHEMAS
 from pipeline_observer import bind_pipeline_observer
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
+from knowledge_audit.failures import VERSION as FAILURE_VERSION, category, safe_correlation
+from utils.read_only_audit import canonical_sha256
 
 DIAGNOSTIC_TYPES = frozenset({"json_invalid", "missing", "literal_error", "extra_forbidden", "string_type",
     "string_pattern_mismatch", "string_too_short", "string_too_long", "int_type", "int_parsing",
@@ -111,34 +114,66 @@ class AuditModel:
                 # no semantic/citation/redaction/length/network retry.
 
     async def _call_once(self, role, data, *, purpose, call_id, attempt):
-        if self.progress_callback:
-            await self.progress_callback(role)
         started = time.perf_counter()
+        phase = "progress"
+        phase_started = started
         metric = {"role": role, "responsibility": role, "schema_version": schema_version(role),
+                  "started_at": datetime.now(timezone.utc).isoformat(),
                   "call_id": call_id, "attempt": attempt, "maximum_attempts": 2,
                   "recovery_policy": "json-invalid-stop-one-fresh-response-1",
                   "purpose": purpose, "status": "error", "prompt_tokens": None, "finish_reason": "not_returned",
                   "validation_diagnostics": [],
                   "reserved_output_tokens": self.settings.model_max_tokens,
-                  "context_limit": self.context_limit, "completion_tokens": None}
+                  "context_limit": self.context_limit, "completion_tokens": None,
+                  "failure_policy": FAILURE_VERSION, "failure_category": "none", "dispatched": False,
+                  "phase_timings_ms": {}, "boundary": "progress",
+                  "payload_sha256": canonical_sha256(data),
+                  "evaluation_phase": getattr(self, "evaluation_phase", "unknown") if getattr(self, "evaluation_phase", "unknown")
+                      in {"production", "initial", "broader", "question", "unknown"} else "unknown"}
+        def enter(next_phase):
+            nonlocal phase, phase_started
+            metric["phase_timings_ms"][phase] = round((time.perf_counter() - phase_started) * 1000, 3)
+            phase, phase_started = next_phase, time.perf_counter()
+            metric["boundary"] = phase
         try:
+            if self.progress_callback:
+                await self.progress_callback(role)
+            enter("tokenization")
             tokens, msg = await self.count(role, data)
             metric["prompt_tokens"] = tokens
+            metric["messages_sha256"] = canonical_sha256(msg)
             if tokens + self.settings.model_max_tokens + self.settings.token_margin > self.context_limit:
                 metric["status"] = "token_overflow"
                 raise AuditError("model_input_token_overflow")
             async def operation():
+                enter("completion")
+                metric["dispatched"] = True
                 with bind_pipeline_observer(None):
                     return await self.rag._completion(model=self.rag.model_id, messages=msg,
                         max_tokens=self.settings.model_max_tokens, temperature=0, top_p=1, seed=42,
                         response_format={"type": "json_schema", "json_schema": {"name": role + "_" + schema_version(role).replace("-", "_"),
                             "strict": True, "schema": SCHEMAS[role].model_json_schema()}})
-            response = await asyncio.wait_for(run_with_limit(self.limiter, operation,
-                acquire_timeout=PERFORMANCE_SETTINGS.request_admission_timeout_seconds) if self.limiter else operation(),
-                PERFORMANCE_SETTINGS.application_request_timeout_seconds)
+            enter("admission")
+            deadline = asyncio.timeout(PERFORMANCE_SETTINGS.application_request_timeout_seconds)
+            try:
+                async with deadline:
+                    response = await (run_with_limit(self.limiter, operation,
+                        acquire_timeout=PERFORMANCE_SETTINGS.request_admission_timeout_seconds) if self.limiter else operation())
+            except TimeoutError:
+                if deadline.expired():
+                    raise AuditError("outer_operation_deadline") from None
+                raise
+            metric.update(safe_correlation(response, self.redactor))
+            metric["server_completion_state"] = "response_received"
+            enter("validation")
             choice = response.choices[0]
             metric["completion_tokens"] = response.usage.completion_tokens
             metric["server_prompt_tokens"] = response.usage.prompt_tokens
+            metric["content_characters"] = len(choice.message.content) if isinstance(choice.message.content, str) else 0
+            metric["reasoning_characters"] = max([len(v) for v in (
+                getattr(choice.message, "reasoning", None), getattr(choice.message, "reasoning_content", None)) if isinstance(v, str)] or [0])
+            reasoning = getattr(getattr(response.usage, "completion_tokens_details", None), "reasoning_tokens", None)
+            metric["reasoning_tokens"] = reasoning if type(reasoning) is int else None
             metric["finish_reason"] = choice.finish_reason if choice.finish_reason in {"stop", "length", "content_filter", "tool_calls", "function_call"} else "unknown"
             if response.usage.prompt_tokens != tokens:
                 raise AuditError("token_count_serving_mismatch")
@@ -155,11 +190,26 @@ class AuditModel:
             metric["status"] = "validated"
             return result.model_dump()
         except ValidationError as error:
+            metric["failure_category"] = "schema_validation"
             metric["validation_diagnostics"] = validation_diagnostics(error, role, stage, metric)
             if stage == "before_redaction":
                 metric["json_syntax"] = json_syntax_summary(choice.message.content)
             raise AuditError("invalid_model_schema") from None
+        except asyncio.CancelledError:
+            metric.update(status="cancelled", failure_category="cancellation")
+            raise
+        except Exception as error:
+            code = category(error)
+            if code == "dispatch_budget_exhausted":
+                metric.update(dispatched=False, status="blocked")
+            metric["failure_category"] = "output_length" if metric["finish_reason"] == "length" else code
+            metric.update(safe_correlation(error, self.redactor))
+            if isinstance(error, AuditError):
+                raise
+            raise AuditError(code) from None
         finally:
+            metric.setdefault("server_completion_state", "unknown" if metric["dispatched"] else "not_dispatched")
+            metric["phase_timings_ms"][phase] = round((time.perf_counter() - phase_started) * 1000, 3)
             metric["duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
             self.metrics.append(metric)
             if self.metrics_path:

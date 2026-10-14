@@ -61,6 +61,10 @@ async def run(args):
             'source_row_count':data['structure']['source_row_count'],'preparation_counts':data['preparation_counts'],
             'durable_root':str(store.root)},sort_keys=True))
         return 0
+    if args.command=='review':
+        from knowledge_audit.review import review_package
+        print(json.dumps(review_package(store,args.run_ids,args.owner_id),sort_keys=True))
+        return 0
     confirm_staging(confirmed=args.confirmed_staging,model=True,snapshot=True)
     dataset,redactor=store.dataset(args.dataset_id,args.owner_id)
     prepared=store.preparations(args.dataset_id,args.owner_id)
@@ -132,6 +136,7 @@ async def run(args):
             'missing_aspect_ids':[a['aspect_id'] for a in r.get('unresolved_aspects',[])],
             'review_codes':r.get('review_codes',[]),
             'validation_categories':r.get('validation_diagnostics',[]),
+            'failure_diagnostics':r.get('failure_diagnostics',[]),
             'verification_counts':dict(Counter(v['verdict'] for v in r.get('verifications',[]))),
             'model_calls':len(r.get('model_metrics',[])),
             'prompt_tokens':sum(m.get('prompt_tokens') or 0 for m in r.get('model_metrics',[])),
@@ -150,6 +155,7 @@ def main():
     imp=commands.add_parser('import-a1'); imp.add_argument('--a1-directory',type=Path,required=True); imp.add_argument('--csv',type=Path,required=True)
     pilot=commands.add_parser('pilot'); pilot.add_argument('--dataset-id',required=True); pilot.add_argument('--snapshot-id',required=True)
     pilot.add_argument('--row-ids',nargs='*'); pilot.add_argument('--entry-budget',type=int,default=300); pilot.add_argument('--confirmed-staging',action='store_true')
+    review=commands.add_parser('review');review.add_argument('--run-ids',nargs='+',required=True)
     args=p.parse_args()
     if args.owner_id<0: p.error('owner-id must be nonnegative')
     try: return asyncio.run(run(args))

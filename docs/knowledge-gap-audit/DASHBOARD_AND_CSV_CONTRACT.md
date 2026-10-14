@@ -329,12 +329,14 @@ A2 must create its distinct coverage schema and preserve complete row accounting
 
 ## Implemented A2 pilot contract
 
-Implemented A2.1 versions `coverage-page-2`, `coverage-csv-2`,
-`coverage-export-manifest-2`, rubric `coverage-rubric-4`. This section specifies
+Implemented A2.2 versions `coverage-page-2`, `coverage-csv-3`,
+`coverage-export-manifest-3`, rubric `coverage-rubric-4`. This section specifies
 the shipped pilot where it is narrower/different from the future v1 proposal
 above. See [A2_END_TO_END_PILOT_REPORT.md](A2_END_TO_END_PILOT_REPORT.md) and
 [A2_RUBRIC_AND_SCHEMAS.md](A2_RUBRIC_AND_SCHEMAS.md) and
 [A2_1_CORRECTION_REPORT.md](A2_1_CORRECTION_REPORT.md) for executed evidence/rules.
+The bounded reliability follow-up is in
+[A2_2_MODEL_RELIABILITY_REPORT.md](A2_2_MODEL_RELIABILITY_REPORT.md).
 No recommendations, DB input implementation, factual-answer generation or
 full-dataset model run is included.
 
@@ -414,6 +416,7 @@ input queries although only five are selected for model evaluation.
 | `run_identity_id`, `export_revision_id` | Immutable pre-evaluation configuration/serving identity and frozen permission-specific CSV/manifest revision. Manifest contains the authoritative identity map and capture time. |
 | `review_codes`, `review_codes_by_phase`, `evidence_phases` | Scoped uncertainty and production/initial/broader provenance. Evidence views do not reuse a joint full verdict for subsets. |
 | `validation_diagnostics`, `output_recovery_count`, `recovery_policy` | Content-free schema diagnostics and separately counted bounded JSON-syntax recovery. No raw outputs or validation input values. |
+| `failure_diagnostics` | JSON array of fixed failure categories, boundary/evaluation phase, attempt, dispatch-attempt flag, safe timings/token counts, obtainable opaque request reference/numeric HTTP status and server-completion state. Also available in restricted exports; no evidence text/exception values. |
 
 Results-only exports keep query/status/lineage but omit evidence arrays, grounded
 explanations and protected reasons unless evidence-view + `kb_read` are present.
@@ -456,7 +459,7 @@ bracketing and actual transactional content. Retrieval checks signatures and raw
 candidate content hashes against that snapshot. Request-local depths are
 150/150/150 (initial top 50) and 300/300/300 (unresolved broader check), with full
 pool question/category/subcategory reranking and maximum 300 distinct evaluated
-entries including baseline. Full Q/A batches are at most five entries, dynamically
+entries including baseline. A2.2 caps full Q/A batches at **two** entries, dynamically
 budgeted by the served chat-template tokenizer plus reserved output/margin.
 Bounded complementary bundles receive actual source evidence/conditions; every
 proposed full proof is verified. Budget/search exhaustion implies only possible
@@ -477,6 +480,31 @@ reranking serving identities are included. Changed code/settings/serving prevent
 mixing completed checkpoints with new work and marks the run incompatible;
 original identity values are never overwritten. Legacy runs with retained work
 and no pre-evaluation identity cannot resume through changed code.
+
+A2.2 `audit-failures-1` distinguishes admission, outer deadline, typed model
+read/connect/write/pool timeout, unknown timeout, connection/service failure,
+HTTP/protocol rejection, output length, schema/citation/semantic validation and
+cancellation. Exception causes are inspected only in memory. Diagnostics exclude
+messages, bodies, headers, traceback locals and source text. Unreturned completion
+attempts retain unknown served usage/completion state; local cancellation does not
+prove server cancellation. No network retries are added. The existing single
+fresh syntax-response policy remains separate and bounded.
+
+`full-entries-two-1` reduces only the audit batch cap from five to two after bounded
+paired output-budget checks. Full Q/A, conditions, sentence references and remaining
+entries are retained; this does not promise that every two-entry response fits.
+Production clients/timeouts, retrieval defaults and all strict proof checks remain
+unchanged. Audit tokenization precedes its existing 50-second admission/completion
+deadline; it has its own HTTP timeout. Background run duration is independent of
+the dashboard request, which returns before model execution. These are not a
+50-second total-run or total-attempt guarantee.
+
+The trusted local `knowledge_coverage_pilot.py review --run-ids ...` command creates
+a protected, offline JSON/escaped-HTML review package for the same five selected
+rows, with redacted intent, full numbered cited/production evidence, conditions,
+verdict provenance and blank reviewer fields. It neither assigns human labels nor
+exposes a new web endpoint. All prior CSV/manifest revisions remain byte-identical;
+new version-3 revisions add diagnostics without rewriting old revisions.
 
 Qdrant and model weights are not frozen. Observed source/index/serving/code drift
 invalidates the run, but bracketing cannot detect every transient/ABA change or

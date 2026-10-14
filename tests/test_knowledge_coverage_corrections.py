@@ -196,7 +196,7 @@ def test_verified_full_stops_before_remaining_candidates_are_evaluated():
     entries={str(i):'Synthetic fact.' for i in range(1,11)}
     snap=snapshot(entries)
     row=evaluate(snap,LabeledModel(snap,{'1':['a1','a2']}),Retrieval(list(entries),list(entries)))[0]
-    assert row['coverage_status']=='full' and row['evaluated_entry_count']==5
+    assert row['coverage_status']=='full' and row['evaluated_entry_count']==2
     assert row['phase_assessments']['production']['candidates_exhausted'] is False
     assert row['stopping_reason']=='verified_full'
 

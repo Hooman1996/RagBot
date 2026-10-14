@@ -99,6 +99,14 @@ only the same five query IDs in new protected runs; all 918 export rows remain.
 Historical pilot artifacts are preserved. This stage does not authorize A3,
 recommendations, a full-dataset audit, deployment or production changes.
 
+The user subsequently authorized **A2.2 bounded model-call reliability diagnosis**.
+[A2_2_MODEL_RELIABILITY_REPORT.md](A2_2_MODEL_RELIABILITY_REPORT.md) records the
+12-dispatch transport/output-policy diagnosis, safe failure taxonomy, a two-entry
+audit batch cap, one new same-five-query pilot and a protected blank human-review
+package. Production client settings, serving flags and infrastructure remain
+unchanged. This stage does not authorize A3 or full-dataset evaluation; model
+observations still require independent human review and reliability acceptance.
+
 No naturally occurring unlabeled queries can supply a measured answer-quality error rate.
 Choose tolerances and label sets before experiments, rather than after results.
 
