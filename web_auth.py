@@ -15,7 +15,7 @@ from urllib.parse import urlsplit
 
 from fastapi import Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
-from web_permissions import permissions_for, landing_for, route_permission
+from web_permissions import permissions_for, permissions_for_user, landing_for, route_permission
 from starlette.concurrency import run_in_threadpool
 
 SESSION_COOKIE = "ragbot_web_session"
@@ -81,7 +81,7 @@ def _mac(purpose: bytes, value: bytes) -> bytes:
 def safe_user(row: dict) -> dict:
     return {"id": row["id"], "username": row["username"],
             "display_name": row.get("full_name", row.get("display_name")), "role": row.get("role"),
-            "permissions": sorted(permissions_for(row.get("role"))),
+            "permissions": sorted(permissions_for_user(row.get("role"), row["id"])),
             "landing_path": landing_for(row.get("role"))}
 
 
@@ -207,7 +207,7 @@ async def web_auth_middleware(request: Request, call_next, db):
         ("GET", "/access-denied"),
     }:
         permission = route_permission(request.method, path)
-        if permission is None or permission not in permissions_for(row.get("role")):
+        if permission is None or permission not in permissions_for_user(row.get("role"), row["id"]):
             if not path.startswith("/api/") and not path.startswith("/knowledge-base/api/"):
                 return forbidden_page()
             return JSONResponse(

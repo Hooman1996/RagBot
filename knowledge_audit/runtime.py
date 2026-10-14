@@ -38,6 +38,9 @@ def code_identity() -> dict:
                 "new_architecture/app/services/history/rewriting.py", "utils/RagSystem.py",
                 "utils/persian_hybrid_search.py", "utils/persian_normalization.py", "utils/log_sanitizer.py",
                 "utils/retrieval_query_canonicalizer.py", "utils/tei_embedding_client.py", "scripts/kb_signature.py")]]
+    pilot_script = ROOT / "scripts/knowledge_coverage_pilot.py"
+    if pilot_script.exists():
+        paths.append(pilot_script)
     head = subprocess.run(["git", "rev-parse", "HEAD"], cwd=ROOT, capture_output=True, check=True, text=True).stdout.strip()
     return {"git_head": head, "file_sha256": {str(p.relative_to(ROOT)): hashlib.sha256(p.read_bytes()).hexdigest() for p in paths}}
 

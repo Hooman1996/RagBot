@@ -1,0 +1,265 @@
+/* Main-dashboard audit UI. Text-only DOM rendering; no private browser storage. */
+(function (global) {
+    'use strict';
+    const CONTRACT = 'coverage-page-1';
+    const LABELS = {
+        prepared: 'Prepared', pending_model: 'Pending model', needs_context: 'Needs context / review',
+        uncertain_preparation: 'Preparation needs review', invalid_input: 'Invalid input', failed: 'Error',
+        covered_reachable: 'Covered and reachable', covered_not_reachable: 'Covered but not reachable',
+        possible_partial_gap: 'Possible partial KB gap', possible_gap: 'Possible KB gap',
+        excluded: 'Excluded', pending: 'Pending / not evaluated', error: 'Error',
+        full: 'Verified full', partial: 'Partial support', unsupported: 'Unsupported in evaluated scope',
+        uncertain: 'Uncertain', not_evaluated: 'Not evaluated', unavailable: 'No preceding history', user_only: 'User-only history'
+    };
+    function label(value) { return LABELS[value] || String(value || 'Not evaluated').replaceAll('_', ' '); }
+    function headersFromCsv(text, delimiter) {
+        text = text.replace(/^\uFEFF/, '');
+        const cells = []; let cell = ''; let quoted = false;
+        for (let i = 0; i < text.length; i++) {
+            const c = text[i];
+            if (c === '"') {
+                if (quoted && text[i + 1] === '"') { cell += '"'; i++; }
+                else quoted = !quoted;
+            } else if (!quoted && c === delimiter) { cells.push(cell); cell = ''; }
+            else if (!quoted && (c === '\n' || c === '\r')) { cells.push(cell); return cells; }
+            else cell += c;
+        }
+        if (quoted) throw new Error('The CSV header has an unclosed quote.');
+        cells.push(cell); return cells;
+    }
+    function node(document, tag, text, className) {
+        const n = document.createElement(tag);
+        if (text !== undefined) n.textContent = String(text);
+        if (className) n.className = className;
+        return n;
+    }
+    function boot(document) {
+        const root = document.getElementById('coverageRoot'); if (!root) return;
+        const $ = id => document.getElementById('coverage' + id);
+        if (root.dataset.contract !== CONTRACT) { $('Status').textContent = 'Workspace version mismatch. Reload this page.'; return; }
+        const canStart = root.dataset.canStart === 'true', canEvidence = root.dataset.canEvidence === 'true';
+        let datasets = [], snapshots = [], currentDataset = '', currentRun = '', offset = 0, total = 0;
+        let selected = new Set(), fileBytes = null, lastEvidenceButton = null, poll = null, loading = false, querySequence = 0;
+        const status = message => { $('Status').textContent = message; };
+        const fail = error => { $('Error').hidden = false; $('Error').textContent = error.message || 'The operation could not complete. Try again.'; };
+        const clearError = () => { $('Error').hidden = true; $('Error').textContent = ''; };
+        async function api(path, options) {
+            const response = await global.fetch('/api/knowledge-coverage/' + path, options);
+            const body = await response.json();
+            if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Check the import mapping and selected settings.');
+            return body;
+        }
+        function options(select, values, selectedValue, empty) {
+            select.replaceChildren(node(document, 'option', empty)); select.firstChild.value = '';
+            values.forEach(item => { const option = node(document, 'option', item.label); option.value = item.value; select.appendChild(option); });
+            select.value = selectedValue;
+        }
+        function counts(value) { return Object.entries(value || {}).map(([key, count]) => label(key) + ': ' + count).join(' · '); }
+        function selection() {
+            $('SelectionCount').textContent = selected.size + ' of 5 selected';
+            $('Start').disabled = selected.size < 1 || !currentDataset || !$('Snapshot').value;
+        }
+        async function refreshDatasets() {
+            datasets = await api('datasets');
+            if (canStart) {
+                options($('Dataset'), datasets.map(d => ({value:d.dataset_id,label:d.structure.selected_row_count + ' questions · ' + d.dataset_id.slice(-8)})), currentDataset, 'Choose an imported dataset');
+                const d = datasets.find(x => x.dataset_id === currentDataset);
+                if (d) $('DatasetSummary').textContent = d.structure.selected_row_count + ' selected queries of ' + d.structure.source_row_count + ' source records · ' + counts(d.preparation_counts) + (d.structure.timestamp_status_counts ? ' · Timestamps: ' + counts(d.structure.timestamp_status_counts) : '') + (d.preparation_status !== 'ready' ? ' · Preparing input…' : '');
+            }
+        }
+        function documents() {
+            const snapshot = snapshots.find(s => s.snapshot_id === $('Snapshot').value);
+            $('Documents').replaceChildren();
+            (snapshot ? snapshot.documents : []).forEach(title => {
+                const item = node(document, 'label'); const checkbox = node(document, 'input'); checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.value = title;
+                item.append(checkbox, node(document, 'span', title)); $('Documents').append(item);
+            }); selection();
+        }
+        async function refreshSnapshots() {
+            if (!canStart) return;
+            snapshots = await api('snapshots');
+            options($('Snapshot'), snapshots.map(s => ({value:s.snapshot_id,label:s.record_count + ' entries · ' + s.snapshot_id.slice(0,8)})), $('Snapshot').value, 'Choose a knowledge revision');
+            documents();
+        }
+        async function refreshRuns() {
+            const runs = await api('runs');
+            options($('Runs'), runs.map(r => ({value:r.run_id,label:label(r.state) + ' · ' + r.selected_row_ids.length + ' questions · ' + r.run_id.slice(-8)})), currentRun, 'Select a previous run');
+        }
+        function badge(text, value) {
+            const b = node(document, 'span', text, 'coverage-badge');
+            b.dataset.tone = value === 'covered_reachable' ? 'good' : ['possible_gap','possible_partial_gap','needs_context'].includes(value) ? 'review' : value === 'error' ? 'error' : 'neutral';
+            return b;
+        }
+        function renderRows(rows) {
+            $('Rows').replaceChildren();
+            if (!rows.length) {
+                const tr = node(document, 'tr'); const td = node(document, 'td', currentDataset || currentRun ? 'No matching rows. Change the filter or wait for input preparation.' : 'Import questions to begin. No coverage results have been assessed.', 'coverage-empty'); td.colSpan = 6; tr.append(td); $('Rows').append(tr);
+            }
+            rows.forEach(row => {
+                const tr = node(document, 'tr');
+                const first = node(document, 'td');
+                if (canStart && !currentRun) {
+                    const checkbox = node(document, 'input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(row.source_row_id);
+                    checkbox.setAttribute('aria-label', 'Select source row ' + row.source_record_ordinal);
+                    checkbox.addEventListener('change', () => {
+                        if (checkbox.checked && selected.size >= 5) { checkbox.checked = false; fail(new Error('Choose at most five questions for this pilot.')); return; }
+                        if (checkbox.checked) selected.add(row.source_row_id); else selected.delete(row.source_row_id);
+                        selection();
+                    }); first.append(checkbox, document.createTextNode(' '));
+                }
+                first.append(node(document, 'bdi', '#' + row.source_record_ordinal)); tr.append(first);
+                const query = node(document, 'td', row.input_query_redacted, 'coverage-query'); query.dir = 'auto'; tr.append(query);
+                const prep = node(document, 'td'); prep.append(badge(label(row.preparation_status), row.preparation_status));
+                if (row.history_status) prep.append(node(document, 'p', label(row.history_status))); tr.append(prep);
+                const outcome = row.outcome || (row.preparation_status === 'needs_context' ? 'needs_context' : 'pending');
+                const result = node(document, 'td'); result.append(badge(label(outcome), outcome)); tr.append(result);
+                tr.append(node(document, 'td', row.evaluated_entry_count || 0));
+                const evidence = node(document, 'td');
+                if (currentRun && canEvidence) {
+                    const button = node(document, 'button', 'Review', 'coverage-link'); button.type = 'button'; button.id = 'coverage-review-' + row.source_row_id; button.setAttribute('aria-label', 'Review evidence for row ' + row.source_record_ordinal);
+                    button.addEventListener('click', () => openEvidence(row.source_row_id, button)); evidence.append(button);
+                } else evidence.textContent = currentRun ? 'Restricted' : 'Not assessed';
+                tr.append(evidence); $('Rows').append(tr);
+            });
+            $('Previous').disabled = offset === 0; $('Next').disabled = offset + 25 >= total;
+            $('PageLabel').textContent = 'Page ' + (Math.floor(offset / 25) + 1);
+            $('ResultCount').textContent = total + ' matching rows' + (currentRun ? ' · download always includes the full dataset' : ' · select an explicit pilot');
+        }
+        async function refreshRows() {
+            const sequence = ++querySequence;
+            if (!currentRun && !currentDataset) { total = 0; renderRows([]); return; }
+            const path = currentRun ? 'runs/' + encodeURIComponent(currentRun) + '/results?offset=' + offset + '&limit=25&outcome=' + encodeURIComponent($('Filter').value) + '&search=' + encodeURIComponent($('Search').value) : 'datasets/' + encodeURIComponent(currentDataset) + '/rows?offset=' + offset + '&limit=25';
+            const data = await api(path);
+            if (sequence !== querySequence) return;
+            total = data.total; renderRows(data.rows);
+        }
+        async function progress() {
+            if (!currentRun) return;
+            const run = await api('runs/' + encodeURIComponent(currentRun));
+            $('Progress').max = run.selected_row_ids.length; $('Progress').value = run.completed_pilot_rows;
+            $('ProgressText').textContent = label(run.state) + ' · ' + run.completed_pilot_rows + ' of ' + run.selected_row_ids.length + ' pilot questions processed · ' + run.input_row_count + ' rows retained' + (run.stage ? ' · ' + label(run.stage) : '');
+            $('Cancel').hidden = !canStart || !['queued','running'].includes(run.state);
+            $('Resume').hidden = !canStart || (!['failed','interrupted','cancelled'].includes(run.state) && !(run.state === 'completed' && run.retryable_rows > 0));
+            $('Export').hidden = root.dataset.canExport !== 'true'; $('Manifest').hidden = $('Export').hidden;
+            $('Export').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(currentRun) + '/export';
+            $('Manifest').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(currentRun) + '/export-manifest';
+            status(run.state === 'incompatible' ? 'Knowledge or serving revision changed. This pilot requires review; start a new compatible run.' : 'Pilot selection: ' + run.selected_row_ids.length + ' questions. Unselected rows remain pending / not evaluated.');
+            if (!['queued','running'].includes(run.state) && poll) { global.clearInterval(poll); poll = null; }
+            await refreshRows();
+        }
+        function startPoll() {
+            if (poll) global.clearInterval(poll);
+            poll = global.setInterval(() => progress().catch(fail), 2000);
+        }
+        function appendText(container, title, text, dir) {
+            container.append(node(document, 'h3', title));
+            const p = node(document, 'p', text || 'Unavailable'); if (dir) p.dir = dir; container.append(p);
+        }
+        async function openEvidence(rowId, button) {
+            lastEvidenceButton = button; const panel = $('EvidenceContent'); panel.replaceChildren(node(document, 'p', 'Loading evidence…'));
+            $('Evidence').focus();
+            if ($('Evidence').scrollIntoView) $('Evidence').scrollIntoView({block:'start',behavior:'auto'});
+            try {
+                const data = await api('runs/' + encodeURIComponent(currentRun) + '/rows/' + encodeURIComponent(rowId));
+                panel.replaceChildren();
+                if (data.evidence_visibility === 'snapshot_mismatch') { panel.append(node(document, 'p', 'This run is incompatible with its recorded knowledge revision. Evidence is withheld.')); return; }
+                const row = data.result;
+                appendText(panel, 'Intended question', row.standalone_query_redacted || row.normalized_query_redacted || row.input_query_redacted, 'auto');
+                appendText(panel, 'Assessment', label(row.outcome) + ' · ' + label(row.coverage_status));
+                appendText(panel, 'Why', row.explanation || (row.scope_decision || {}).explanation || 'This row has not been evaluated.', 'auto');
+                (row.requested_aspects || []).forEach(aspect => {
+                    const item = node(document, 'div', undefined, 'coverage-aspect'); item.append(node(document, 'span', aspect.aspect_id, 'coverage-aspect-id'));
+                    const description = node(document, 'p', aspect.description); description.dir = 'auto'; item.append(description);
+                    if (aspect.conditions.length) { const p = node(document, 'p', 'Conditions: ' + aspect.conditions.join(' · ')); p.dir = 'auto'; item.append(p); }
+                    const assessment = row.audit_assessment || {};
+                    const witnesses = (assessment.witness && assessment.witness.length ? assessment.witness : assessment.supports || []).filter(s => s.aspect_id === aspect.aspect_id);
+                    witnesses.forEach(support => {
+                        const p = node(document, 'p', support.applicability + (support.conditions.length ? ' · ' + support.conditions.join(' · ') : '')); p.dir = 'auto'; item.append(p);
+                        support.citations.forEach(ref => {
+                            const link = node(document, 'a', 'FAQ ' + ref.faq_entry_id + ' · sentence ' + ref.sentence_number, 'coverage-link');
+                            link.href = '#coverage-source-' + ref.chunk_id + '-' + ref.sentence_number; item.append(link);
+                        });
+                    });
+                    panel.append(item);
+                });
+                const cited = new Set((row.supporting_sentence_refs || []).map(r => r.chunk_id + ':' + r.sentence_number));
+                data.evidence.forEach(entry => {
+                    const source = node(document, 'section', undefined, 'coverage-citation');
+                    const h = node(document, 'h3', 'FAQ ' + entry.faq_entry_id + ' · ' + [entry.main_category,entry.sub_category].filter(Boolean).join(' / ')); source.append(h);
+                    const title = node(document, 'p', entry.question); title.dir = 'auto'; source.append(title);
+                    entry.sentences.forEach(sentence => {
+                        const line = node(document, 'div', undefined, 'coverage-sentence' + (cited.has(entry.chunk_id + ':' + sentence.sentence_number) ? ' coverage-highlight' : ''));
+                        line.id = 'coverage-source-' + entry.chunk_id + '-' + sentence.sentence_number;
+                        line.append(node(document, 'bdi', sentence.sentence_number, 'coverage-sentence-number'));
+                        const text = node(document, 'p', sentence.text); text.dir = 'auto'; line.append(text); source.append(line);
+                    }); panel.append(source);
+                });
+                appendText(panel, 'Production context', label(row.production_context_sufficiency));
+                appendText(panel, 'Stopping reason', label(row.stopping_reason));
+                appendText(panel, 'Verification', label(row.verification_result));
+                const details = node(document, 'details'); details.append(node(document, 'summary', 'Query forms and audit scope'));
+                appendText(details, 'Original query · redacted', row.input_query_redacted, 'auto');
+                appendText(details, 'Retrieval wording', row.canonical_retrieval_query_redacted, 'auto');
+                appendText(details, 'History', label(row.history_status));
+                appendText(details, 'Snapshot', row.kb_snapshot_id);
+                appendText(details, 'Entries checked', row.evaluated_entry_count);
+                appendText(details, 'Review codes', (row.review_codes || []).join(' · ')); panel.append(details);
+            } catch (error) { fail(error); panel.replaceChildren(node(document, 'p', 'Evidence could not load. Select this row again to retry.')); }
+        }
+        function closeEvidence() { $('EvidenceContent').replaceChildren(node(document, 'p', 'Open an assessed query to inspect its evidence.')); const target=lastEvidenceButton && document.getElementById(lastEvidenceButton.id); if(target) target.focus(); else $('Search').focus(); }
+        $('CloseEvidence').addEventListener('click', closeEvidence);
+        $('Evidence').addEventListener('keydown', event => { if (event.key === 'Escape') closeEvidence(); });
+        $('Previous').addEventListener('click', () => { offset = Math.max(0,offset - 25); refreshRows().catch(fail); });
+        $('Next').addEventListener('click', () => { offset += 25; refreshRows().catch(fail); });
+        let searchTimer;
+        $('Search').addEventListener('input', () => { global.clearTimeout(searchTimer); searchTimer = global.setTimeout(() => { offset = 0; refreshRows().catch(fail); },250); });
+        $('Filter').addEventListener('change', () => { offset = 0; refreshRows().catch(fail); });
+        $('Runs').addEventListener('change', async () => { currentRun = $('Runs').value; offset = 0; clearError(); if (currentRun) { startPoll(); await progress().catch(fail); } else { if (poll) global.clearInterval(poll); await refreshRows().catch(fail); } });
+        $('Cancel').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/cancel',{method:'POST'}); status('Cancellation requested. Completed rows remain available.'); await progress(); } catch(e) { fail(e); } });
+        $('Resume').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/retry',{method:'POST'}); startPoll(); await progress(); } catch(e) { fail(e); } });
+        if (canStart) {
+            function mapHeaders() {
+                if (!fileBytes) return;
+                const headers = headersFromCsv(new TextDecoder('utf-8',{fatal:true}).decode(fileBytes), $('Delimiter').value);
+                if (new Set(headers).size !== headers.length || headers.some(h => !h)) throw new Error('CSV column names must be unique and nonempty.');
+                [['QueryColumn','query','Choose the question column'],['SessionColumn','session_id','Independent rows'],['RoleColumn','role','All rows are user questions'],['TimestampColumn','timestamp','No combined timestamp'],['DateColumn','date','No separate date'],['TimeColumn','time','No separate time']].forEach(([id,guess,empty]) => options($(id),headers.map(h=>({value:h,label:h})),headers.includes(guess)?guess:'',empty));
+            }
+            $('File').addEventListener('change', async () => { clearError(); try { const file = $('File').files[0]; if (!file) return; if (file.size > Number(root.dataset.uploadLimit)) throw new Error('This CSV exceeds the upload limit.'); fileBytes = new Uint8Array(await file.arrayBuffer()); mapHeaders(); } catch(e) { fileBytes = null; fail(e); } });
+            $('Delimiter').addEventListener('change', () => { try { mapHeaders(); } catch(e) { fail(e); } });
+            $('ImportForm').addEventListener('submit', async event => {
+                event.preventDefault(); if (loading || !fileBytes) return; clearError(); loading = true; $('Upload').disabled = true;
+                try {
+                    const mapping = {query:$('QueryColumn').value,session:$('SessionColumn').value||null,role:$('RoleColumn').value||null,
+                        timestamp:$('TimestampColumn').value||null,date:$('DateColumn').value||null,time:$('TimeColumn').value||null};
+                    let binary = ''; for (let i=0;i<fileBytes.length;i++) binary += String.fromCharCode(fileBytes[i]);
+                    status('Importing and validating mapped records…');
+                    const data = await api('datasets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:global.btoa(binary),mapping,
+                        calendar:$('Calendar').value,source_timezone:$('Timezone').value||null,authoritative_source_order:$('TrustedOrder').checked,delimiter:$('Delimiter').value})});
+                    currentDataset = data.dataset_id; currentRun = ''; selected.clear(); offset = 0;
+                    await refreshDatasets(); selection(); await refreshRows();
+                    const timer = global.setInterval(async () => { try { await refreshDatasets(); await refreshRows(); if (datasets.find(d=>d.dataset_id===currentDataset)?.preparation_status === 'ready') { global.clearInterval(timer); status('Input ready. Select up to five rows for a pilot; all rows will remain in the export.'); } } catch(e) { global.clearInterval(timer); fail(e); } },2000);
+                } catch(e) { fail(e); } finally { loading = false; $('Upload').disabled = false; }
+            });
+            $('Dataset').addEventListener('change', async () => { currentDataset = $('Dataset').value; currentRun=''; selected.clear(); offset=0; $('Runs').value=''; if(poll) global.clearInterval(poll); await refreshDatasets().catch(fail); selection(); await refreshRows().catch(fail); });
+            $('Snapshot').addEventListener('change', documents);
+            $('Capture').addEventListener('click', async () => { $('Capture').disabled = true; clearError(); status('Capturing a consistent knowledge revision…'); try { const s=await api('snapshots',{method:'POST'}); await refreshSnapshots(); $('Snapshot').value=s.snapshot_id; documents(); status('Knowledge revision captured. Select questions and start a pilot.'); } catch(e) { fail(e); } finally { $('Capture').disabled=false; } });
+            $('ClearSelection').addEventListener('click', () => { selected.clear(); selection(); refreshRows().catch(fail); });
+            $('Start').addEventListener('click', async () => {
+                $('Start').disabled=true; clearError(); try {
+                    const docs=Array.from($('Documents').querySelectorAll('input:checked')).map(n=>n.value);
+                    const run=await api('runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset_id:currentDataset,snapshot_id:$('Snapshot').value,row_ids:Array.from(selected),entry_budget:Number($('Budget').value),documents:docs})});
+                    currentRun=run.run_id; offset=0; await refreshRuns(); startPoll(); await progress();
+                } catch(e) { fail(e); } finally { selection(); }
+            });
+        }
+        if (global.localStorage.getItem('theme')==='light') document.body.classList.add('light-mode');
+        $('Theme').addEventListener('click',()=> { const light=document.body.classList.toggle('light-mode'); global.localStorage.setItem('theme',light?'light':'dark'); });
+        $('Language').addEventListener('click',()=> { const rtl=document.documentElement.dir!=='rtl'; document.documentElement.dir=rtl?'rtl':'ltr'; document.documentElement.lang=rtl?'fa':'en'; });
+        Promise.all([refreshDatasets(),refreshSnapshots(),refreshRuns()]).then(()=>status('Choose an imported dataset or upload questions to begin.')).catch(fail);
+        return {refreshRows,progress,openEvidence};
+    }
+    const api = {contractVersion:CONTRACT,headersFromCsv,label,boot};
+    if (typeof module !== 'undefined' && module.exports) module.exports=api;
+    global.KnowledgeCoverage=api;
+    if (global.document) { if(global.document.readyState==='loading') global.document.addEventListener('DOMContentLoaded',()=>boot(global.document)); else boot(global.document); }
+})(typeof window !== 'undefined' ? window : globalThis);

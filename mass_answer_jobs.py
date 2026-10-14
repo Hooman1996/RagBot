@@ -28,17 +28,18 @@ class MassAnswerJobManager:
     def start(
         self, job_id: str, operation: Callable[[], Awaitable[None]],
         *, parent_request_id: str | None = None,
+        operation_type: str = "mass_answer",
     ) -> None:
         if self._closed:
             raise RuntimeError("mass-answer job manager is closed")
         if job_id in self._tasks:
             raise ValueError("job is already active")
-        OperationContext(job_id, parent_request_id, "mass_answer")
+        OperationContext(job_id, parent_request_id, operation_type)
 
         async def detached() -> None:
             with background_operation_context(
                 operation_id=job_id, parent_request_id=parent_request_id,
-                operation_type="mass_answer",
+                operation_type=operation_type,
             ):
                 await operation()
 

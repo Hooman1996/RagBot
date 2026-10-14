@@ -344,6 +344,21 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="50", minimum=1,
             component="TEI reranker client", restart="FastAPI",
         ),
+        "KNOWLEDGE_COVERAGE_ARTIFACT_DIR": VariableSpec(
+            kind="path", default="/root/projects/faq-private/knowledge-coverage", component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_ACCESS_GRANTS": VariableSpec(
+            default="{}", component="Knowledge coverage permissions", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES": VariableSpec(
+            kind="int", default="5242880", minimum=1024, maximum=20971520, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS": VariableSpec(
+            kind="int", default="1200", minimum=256, maximum=4096, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_TOKEN_MARGIN": VariableSpec(
+            kind="int", default="128", minimum=32, maximum=1024, component="Knowledge coverage", restart="FastAPI",
+        ),
         "VLLM_HTTP_MAX_CONNECTIONS": VariableSpec(
             kind="int", default="32", minimum=1, component="vLLM client", restart="FastAPI"
         ),

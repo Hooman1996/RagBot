@@ -59,7 +59,7 @@ class QueryPreparer:
                    service.history_rewriting_service, service.intent_classifier)
 
     async def prepare(self, event: InputEvent, history: AuditHistoryProvider,
-                      redactor: Redactor, *, model_prepare: bool) -> dict:
+                      redactor: Redactor, *, model_prepare: bool, context_reviewed: bool = False) -> dict:
         result = {"source_row_id": event.source_row_id, "source_record_ordinal": event.ordinal,
                   "source_query_id": event.source_query_ref, "safe_session_ref": event.safe_session_ref,
                   "timestamp": event.timestamp.isoformat() if event.timestamp else "",
@@ -88,7 +88,7 @@ class QueryPreparer:
             if original != event.content:
                 result["uncertainty_codes"].append("redaction_changed_query")
             dependent = context_dependent(normalized)
-            if dependent and (not context.messages or context.provenance["prior_order_ambiguous"]):
+            if dependent and not context_reviewed and (not context.messages or context.provenance["prior_order_ambiguous"]):
                 result.update(preparation_status="needs_context", rewrite_status="insufficient_context")
                 result["uncertainty_codes"].append("unresolved_context")
                 return result
@@ -124,12 +124,14 @@ class QueryPreparer:
             # General is not proof of bank/KB scope. No extra scope logic in A1.
             if intent == "chitchat":
                 result["scope_status"] = "chitchat"
-            if dependent and (observer.fallback or rewritten == normalized or
+            if dependent and not context_reviewed and (observer.fallback or rewritten == normalized or
                               context_dependent(rewritten) or not grounded_rewrite(rewritten, context.messages[-6:])):
                 result.update(preparation_status="needs_context", rewrite_status="unverified_context")
                 result["uncertainty_codes"].append("unresolved_context")
             elif observer.fallback or context.provenance["prior_order_ambiguous"]:
                 result["preparation_status"] = "uncertain_preparation"
+            if context_reviewed:
+                result["uncertainty_codes"].append("context_guard_reviewed")
             if any(code.startswith("redaction_changed") for code in result["uncertainty_codes"]) and result["preparation_status"] == "prepared":
                 result["preparation_status"] = "uncertain_preparation"
         except Exception as exc:

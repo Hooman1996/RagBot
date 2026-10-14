@@ -326,3 +326,129 @@ transformation. Manifest includes file hash, counts/mapping/time policy, runtime
 configuration, code/artifact hashes, snapshot and obtainable serving identities.
 No arbitrary source columns or coverage/recommendation fields are projected.
 A2 must create its distinct coverage schema and preserve complete row accounting.
+
+## Implemented A2 pilot contract
+
+Implemented versions `coverage-page-1`, `coverage-csv-1`,
+`coverage-export-manifest-1`, rubric `coverage-rubric-2`. This section specifies
+the shipped pilot where it is narrower/different from the future v1 proposal
+above. See [A2_END_TO_END_PILOT_REPORT.md](A2_END_TO_END_PILOT_REPORT.md) and
+[A2_RUBRIC_AND_SCHEMAS.md](A2_RUBRIC_AND_SCHEMAS.md) for executed evidence/rules.
+No recommendations, DB input implementation, factual-answer generation or
+full-dataset model run is included.
+
+### Page, permissions and routes
+
+`/knowledge-coverage` is part of the main FastAPI/Jinja dashboard with local
+styles/scripts/fonts, existing sidebar/themes and capability-gated navigation.
+It supports explicit CSV mapping, calendar/timezone/order assumptions, dataset
+summary/preparation counts, up-to-five explicit pilot row selection, document
+scope and 1–300 entry budget, snapshot capture, progress/cancel/retry, result
+filters/pagination, numbered evidence/conditions and full-row downloads.
+RTL/LTR direction and Persian text rendering are supported; interface labels
+remain English. Actual painted browser/keyboard/Excel validation is outstanding.
+
+Existing roles, including admin, acquire no audit privileges by default.
+`KNOWLEDGE_COVERAGE_ACCESS_GRANTS={}` denies all new access. Explicit positive
+web-user-ID grants use the four agreed capabilities. Authentication, active
+user, CSRF, same-origin and owner checks apply; unknown routes remain denied.
+The operator namespace 0 does not represent a web account. Identical validated
+snapshots can be explicitly registered for multiple owners by trusted operator/
+capture code; datasets and runs remain single-owner.
+
+| Method / route (prefix `/api/knowledge-coverage`) | Required access |
+|---|---|
+| GET `/knowledge-coverage` (page, without API prefix) | results-view |
+| POST `/datasets` | run-start |
+| GET `/datasets`, GET `/datasets/{dataset_id}/rows` | results-view, owned dataset |
+| GET/POST `/snapshots` | run-start + existing `kb_read`; owned catalog / read-only capture |
+| POST `/runs` | run-start + `kb_read`, owned input/snapshot, explicit row IDs/scope |
+| GET `/runs`, GET `/runs/{run_id}`, GET `/runs/{run_id}/results` | results-view, owned run |
+| POST `/runs/{run_id}/cancel`, POST `/runs/{run_id}/retry` | run-start, owned run |
+| GET `/runs/{run_id}/rows/{row_id}` | evidence-view + results-view + `kb_read`, owned run/row |
+| GET `/runs/{run_id}/export`, GET `/runs/{run_id}/export-manifest` | export-download + results-view, owned run; evidence entitlement controls projection |
+
+Names above abbreviate `coverage_run_start`, `coverage_results_view`,
+`coverage_evidence_view`, `coverage_export_download`. Fifteen routes are
+registered, including the page. Upload transport is bounded streamed JSON with
+base64 CSV bytes and explicit mapped column names; accepted bytes stay in memory
+until mapped/redacted. There is no multipart spool, raw upload download, arbitrary
+server-path read or browser snapshot-grant interface. Operational logs never
+contain audit bodies or caller-supplied resource path text. Responses/downloads
+use no-store, safe attachment filenames and ordinary owner/permission checks.
+
+### Row preservation and implemented dimensions
+
+The shared A1 exporter supplies UTF-8 BOM, commas, quoted CRLF records,
+multiline/Persian round-trip, JSON cells, effective-leading-character formula
+protection and exact row/export identity checks. Source query/session references
+remain opaque; original arbitrary source columns are not projected.
+One row per selected input user record appears in original order, including
+duplicates/invalid/excluded/errors/pending. Explicit assistant/system messages
+are history-only; unknown roles retain invalid selected records. Filtering and
+pagination never reduce the CSV. Full imported pilot exports retain all 918
+input queries although only five are selected for model evaluation.
+
+| Field / group | Implemented meaning |
+|---|---|
+| A1 identity/query/history/preparation columns | Preserved mapped source lineage, distinct original/normalized/resolved/retrieval query forms, timestamps and cutoff provenance; preparation status and actual model-prepared flag. `model_selected` refers to this A2 pilot; immutable A1 selection is retained in its archive. |
+| `processing_status` | `pending`, `running`, `completed`, `invalid_input`, `excluded`, `needs_context`, `needs_review`, `failed`, `interrupted`, `cancelled`. Run state also has `queued`, `incompatible`. |
+| `scope_status` | `kb_question`, `chitchat`, `out_of_scope`, `private_account`, `needs_context`, `uncertain`; inherited unevaluated preparation may carry `unknown`. First-person procedure is not automatically private-account. |
+| `coverage_status` | `full`, `partial`, `unsupported`, `uncertain`; unevaluated `not_evaluated`, excluded coverage unset. Batch model label `none` becomes question-level `unsupported`. |
+| `outcome` | `covered_reachable`, `covered_not_reachable`, `possible_partial_gap`, `possible_gap`, `needs_context`, `excluded`, `pending`, `error`. Needs-context/review and pending never become gaps. |
+| `support_arrangement` | `single_entry`, `within_batch_combination`, `cross_batch_combination`, `none`, `unknown`. Arrangement describes evidence locations, not proof of compatible conditions. |
+| `production_context_sufficiency`, `production_reachability` | Independently evaluated baseline coverage; reachable `sufficient`, `insufficient`, `uncertain`, `unknown`. Equivalent source facts may use other IDs than the audit witness. |
+| `requested_aspects`, `supported_aspects`, `unresolved_aspects` | JSON aspect objects with stable IDs, descriptions/conditions; supported objects include structured supports/applicability/dependencies and numbered citations. Evidence is retained for partial results too. |
+| `supporting_faq_ids`, `supporting_chunk_ids`, `supporting_sentence_refs` | Snapshot/FAQ/chunk/sentence-number references, resolved against frozen redacted full answers. Aspect-to-source mapping is in supported aspect objects; references are not quote identifiers. |
+| `verifications`, `verification_result` | Structured origin/bundle/verdict/explanation records; full requires `accepted`; rejection/uncertainty requires review. No model chain-of-thought. |
+| `production_candidate_ids`, `production_context_ids`, `production_baseline_version` | Actual separate baseline selection, version `production-selection-1`; not merely audit-witness reachability. |
+| `evaluated_entry_ids`, `evaluated_entry_count`, `retrieved_candidate_count` | Distinct successfully validated entry identities/count (baseline included) versus sum of audit retrieval candidate counts across rounds. Count can include repeated retrieval candidates, not repeated expansion evaluation. Malformed batch content cannot establish valid evidence. |
+| `evaluation_scope`, `stopping_reason` | Actual initial/broader depths, distinct-entry budget, snapshot reference, explicit `whole_kb_absence_proven=false`; stops include `verified_full`, `candidate_exhausted`, `evaluation_limit`, `needs_context`, `scope_excluded`, `processing_error`, `snapshot_mismatch`, `pending`, interruption/cancellation. |
+| `recommendations`, `recommendation_status` and aligned proposal/taxonomy cells | `[]`, `unassessed`; no suggestions or factual new answers. |
+| Snapshot/input/config/code/rubric/model/prompt/tokenizer fields | Safe identities with exact file/template/schema hashes and obtainable serving version/context limit in manifest. Immutable weights/tokenizer revision is explicitly unverified. Unknown scalar aliases/classifier/normalization version projections may be empty; authoritative code/config identities remain in the manifest. |
+| `input_scope`, counts | `pilot_subset_full_input_export`; selected-input count is the export denominator, source-input count includes history-only records, model-selection IDs separately list the at-most-five pilot. |
+
+Results-only exports keep query/status/lineage but omit evidence arrays, grounded
+explanations and protected reasons unless evidence-view + `kb_read` are present.
+Manifest matches that projection's export ID and file hash. Unknown fields are
+empty/`[]`/`{}`; recommendation fields remain explicitly unassessed. Evidence
+detail may show partial supports with full source sentences; incompatible runs
+withhold content and mark snapshot mismatch. Export identity includes projection,
+so restricted and evidence-visible exports can have different IDs.
+
+### Protected execution and reproducibility
+
+Durable configured artifact root is outside Git/static and `/tmp`, 0700/0600,
+owner-only/no symlink traversal. Archive hashes preserve A1 identities; mapped
+redacted datasets, full versioned KB snapshots, run settings/ownership/progress
+and one checkpoint per row are persisted. Existing in-process job manager plus
+OS run/global leases keeps calls sequential without new infrastructure.
+Recovery skips completed/excluded/review/context/invalid rows; unfinished or failed
+attempts replace the same source identity. Completed runs with failed rows offer
+retry. Stale running workers are detected through lease ownership. Recovery is
+explicit and row-level; repeated partial remote inference after interruption is
+possible, and a queued-before-crash run may need trusted operator retry.
+
+Preparation reuses A1's cutoff and actual production normalization/rewrite/intent/
+eligible-alias path. User-only context can resolve a subject. Genuine missing
+subject stays needs-context; conservative A1 ellipsis guards may be reviewed only
+when the original explicitly supplies a subject and scope certifies it.
+
+Snapshot content capture is read-only REPEATABLE READ plus verified source/index
+bracketing and actual transactional content. Retrieval checks signatures and raw
+candidate content hashes against that snapshot. Request-local depths are
+150/150/150 (initial top 50) and 300/300/300 (unresolved broader check), with full
+pool question/category/subcategory reranking and maximum 300 distinct evaluated
+entries including baseline. Full Q/A batches are at most five entries, dynamically
+budgeted by the served chat-template tokenizer plus reserved output/margin.
+Bounded complementary bundles receive actual source evidence/conditions; every
+proposed full proof is verified. Budget/search exhaustion implies only possible
+gaps within that scope, not whole-KB absence.
+
+Qdrant and model weights are not frozen. Observed source/index/serving/code drift
+invalidates the run, but bracketing cannot detect every transient/ABA change or
+immutable weight revision behind an unchanged alias. Historical pilot manifests
+explicitly distinguish post-pilot configuration observations from configuration
+captured before execution; saved-evidence export corrections retain original
+pilot files and exact inference-code hashes. Later full-run/retention/visual and
+human-review acceptance remain separate planner gates.

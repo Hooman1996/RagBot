@@ -31,8 +31,11 @@ def _redact(value, redactor, key=""):
         # to hash digits would corrupt row conservation and snapshot references.
         reference_keys = {"source_row_id", "source_query_id", "safe_session_ref", "cutoff_row_id",
                           "history_row_ids", "excluded_equal_timestamp_ids", "history_digest",
-                          "input_id", "kb_snapshot_id", "configuration_id", "preparation_code_id"}
-        if key in reference_keys and re.fullmatch(r"(?:row|query|session)_[0-9a-f]{32}|[0-9a-f]{64}", value):
+                          "input_id", "kb_snapshot_id", "configuration_id", "preparation_code_id",
+                          "snapshot_id", "bundle_id", "content_sha256", "source_content_sha256"}
+        if (key in reference_keys or key.endswith("_sha256")) and re.fullmatch(r"(?:row|query|session)_[0-9a-f]{32}|[0-9a-f]{64}", value):
+            return value
+        if key in {"chunk_id", "faq_entry_id", "support_id", "entry_id", "supporting_chunk_ids", "supporting_faq_ids", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids"} and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
             return value
         return redactor.text(value)
     if isinstance(value, list):
@@ -40,6 +43,25 @@ def _redact(value, redactor, key=""):
     if isinstance(value, dict):
         return {k: _redact(v, redactor, k) for k, v in value.items()}
     return value
+
+
+def encode_csv(rows, fields, expected_ids):
+    """Shared A1/A2 byte exporter. Exact source order/IDs and formula-safe views."""
+    if [r["source_row_id"] for r in rows] != expected_ids or len(set(expected_ids)) != len(expected_ids):
+        raise AuditError("export_row_accounting_mismatch")
+    export_id = canonical_sha256(rows)
+    rows = [{**row, "export_id": export_id} for row in rows]
+    buffer = io.StringIO(newline="")
+    writer = csv.DictWriter(buffer, fieldnames=fields, lineterminator="\r\n", quoting=csv.QUOTE_ALL)
+    writer.writeheader()
+    for row in rows:
+        writer.writerow({k: formula_safe(canonical_json(v) if isinstance(v, (dict, list)) else
+            "true" if v is True else "false" if v is False else str(v)) for k, v in row.items()})
+    data = buffer.getvalue().encode("utf-8-sig")
+    parsed = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline="")))
+    if [r["source_row_id"] for r in parsed] != expected_ids or any(r["export_id"] != export_id for r in parsed):
+        raise AuditError("export_serialization_mismatch")
+    return data, export_id
 
 
 def export_preparation(directory: Path, dataset, results: list[dict], *, run_id: str,
@@ -59,20 +81,7 @@ def export_preparation(directory: Path, dataset, results: list[dict], *, run_id:
             input_scope="full_input_preparation_bounded_model_sample",
             selected_input_row_count=len(expected_ids), source_input_row_count=len(dataset.events))
         rows.append(_redact(row, redactor))
-    export_id = canonical_sha256(rows)
-    for row in rows:
-        row["export_id"] = export_id
-    buffer = io.StringIO(newline="")
-    writer = csv.DictWriter(buffer, fieldnames=FIELDS, lineterminator="\r\n", quoting=csv.QUOTE_ALL)
-    writer.writeheader()
-    for row in rows:
-        writer.writerow({k: formula_safe(canonical_json(v) if isinstance(v, (dict, list)) else
-                                       "true" if v is True else "false" if v is False else str(v)) for k, v in row.items()})
-    data = buffer.getvalue().encode("utf-8-sig")
-    # An independent parse validates identity/count/order after serialization.
-    parsed = list(csv.DictReader(io.StringIO(data.decode("utf-8-sig"), newline="")))
-    if [r["source_row_id"] for r in parsed] != expected_ids or any(r["export_id"] != export_id for r in parsed):
-        raise AuditError("export_serialization_mismatch")
+    data, export_id = encode_csv(rows, FIELDS, expected_ids)
     private_write(directory / "preparation.csv", data)
     manifest = {"schema_version": "a1-preparation-manifest-1", "run_id": run_id, "export_id": export_id,
                 "csv_file": "preparation.csv", "csv_sha256": hashlib.sha256(data).hexdigest(),
@@ -91,3 +100,51 @@ def export_preparation(directory: Path, dataset, results: list[dict], *, run_id:
                 "input_scope": "full_input_preparation_bounded_model_sample"}
     private_json(directory / "preparation-manifest.json", manifest)
     return manifest
+
+
+COVERAGE_FIELDS = FIELDS + ("outcome", "support_arrangement", "production_context_sufficiency", "production_reachability",
+    "requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
+    "supporting_sentence_refs", "explanation", "verification_result", "verification_reason", "verifications",
+    "production_candidate_ids", "production_context_ids", "production_baseline_version", "evaluated_entry_ids",
+    "evaluated_entry_count", "retrieved_candidate_count", "stopping_reason", "evaluation_scope", "evidence_visibility",
+    "error_code", "error_reason", "attempt_count", "recommendations", "recommendation_status", "proposed_question",
+    "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "related_existing_faq_ids",
+    "equivalent_existing_faq_ids", "rubric_version", "model_versions", "prompt_versions", "tokenizer_versions",
+    "normalization_version", "alias_version", "classifier_version", "run_settings_version", "review_codes")
+ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
+    "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
+    "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory",
+    "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "preparation_errors", "uncertainty_codes"}
+MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions"}
+RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes"}
+
+
+def coverage_export(meta, results, redactor, *, evidence_visible):
+    rows = []
+    for source in results:
+        row = {k: source.get(k, [] if k in ARRAY_FIELDS else {} if k in MAP_FIELDS else "") for k in COVERAGE_FIELDS}
+        row.update(schema_version="coverage-csv-1", run_id=meta["run_id"], export_id="",
+            kb_snapshot_id=meta["snapshot_id"], configuration_id=meta["configuration_id"], input_id=meta["input_id"],
+            input_scope="pilot_subset_full_input_export", selected_input_row_count=len(meta["row_ids"]),
+            source_input_row_count=meta.get("source_input_row_count", len(meta["row_ids"])), rubric_version=meta["versions"]["prompts"]["rubric_version"],
+            model_versions=meta["versions"].get("serving", {}), prompt_versions=meta["versions"]["prompts"],
+            tokenizer_versions={"method": "served_tokenize", "immutable_revision": "unverified"},
+            recommendations=[], recommendation_status="unassessed", run_settings_version=meta["configuration_id"],
+            preparation_code_id=meta["versions"].get("code_id", ""), production_baseline_version="production-selection-1")
+        row["retrieved_candidate_count"] = sum(m["candidate_count"] for m in source.get("retrieval_metrics", []) if m["purpose"] != "production_baseline")
+        row["evidence_visibility"] = "snapshot_mismatch" if meta["state"] == "incompatible" else "visible" if evidence_visible else "restricted"
+        if not evidence_visible:
+            for key in RESTRICTED_FIELDS:
+                row[key] = []
+            for key in ("explanation", "verification_reason", "error_reason"):
+                row[key] = ""
+        rows.append(_redact(row, redactor))
+    data, export_id = encode_csv(rows, COVERAGE_FIELDS, meta["row_ids"])
+    manifest = {"schema_version": "coverage-export-manifest-1", "run_id": meta["run_id"], "export_id": export_id,
+                "csv_sha256": hashlib.sha256(data).hexdigest(), "row_ids": meta["row_ids"],
+                "row_count": len(rows), "pilot_selected_row_ids": meta["selected_row_ids"],
+                "input_id": meta["input_id"], "snapshot_id": meta["snapshot_id"],
+                "configuration_id": meta["configuration_id"], "settings": meta["settings"], "versions": meta["versions"],
+                "state": meta["state"], "evidence_visible": evidence_visible,
+                "outcome_counts": dict(Counter(r["outcome"] for r in rows))}
+    return data, manifest

@@ -887,6 +887,51 @@ this repository. Qdrant is the opposite: active code uses `QDRANT_HOST`,
 does not mean the host machine or another container. A Docker service name is
 needed for another container on the same Compose network.
 
+## A2 knowledge-coverage pilot settings (2026-10-14)
+
+These optional settings affect the separate audit page/runner, not production
+answering defaults. `knowledge_audit.settings.load_coverage_settings` validates
+the complete configuration. Invalid audit settings deny new access or prevent
+audit runtime creation; they do not grant new legacy role privileges. Runtime
+manifests include effective limits and a grant-map hash, not authentication data.
+
+| Variable | Default | Type and validation |
+|---|---|---|
+| `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Absolute durable directory outside repository/static and `/tmp`; no symlink traversal; owner-only directories 0700/files 0600. Provision appropriate ownership before running under another service account. |
+| `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` | `{}` | JSON object: canonical positive web-user-ID strings to arrays of explicitly allowed audit capabilities. Unknown capabilities/roles/invalid IDs fail closed. No automatic admin grant. |
+| `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Integer 1024–20971520; decoded CSV bytes, with an additional bounded JSON/base64 transport envelope. |
+| `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Integer 256–4096; reserved structured-output tokens for each audit completion. Complete input plus this reserve/margin must fit the served context limit. |
+| `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
+
+Allowed capabilities are `coverage_run_start`, `coverage_results_view`,
+`coverage_evidence_view`, `coverage_export_download`. An entirely synthetic
+example grants all four to imaginary account 123:
+
+```dotenv
+KNOWLEDGE_COVERAGE_ACCESS_GRANTS={"123":["coverage_run_start","coverage_results_view","coverage_evidence_view","coverage_export_download"]}
+```
+
+Existing `kb_read` is additionally required for snapshot capture/run start/source
+evidence. Evidence/export require results access too. Explicit capability grants
+do not transfer another user's dataset or run. Trusted CLI `--owner-id` assigns
+ownership when importing; default 0 is the isolated operator namespace. Identical
+validated snapshots can be explicitly registered for another owner without
+sharing datasets/runs. No browser path-read or snapshot-grant endpoint exists.
+
+Constants in the versioned run manifest: five pilot queries, sequential model
+calls, five entries per batch, initial depths 150/150/150 and 50 initial entries,
+broader depths 300/300/300, maximum 300 distinct evaluated entries. The per-run
+budget is validated 1–300. These are current A2 limits, not unused env knobs.
+Existing performance/history/classifier settings are reused where semantics match.
+
+All five names/defaults appear in `env.example`, `Production_ENV`,
+`.env.example.generated` and `scripts/validate_environment.py`. The generated-named
+template is source-authored; no automatic generator was found. Existing private
+`.env`/`.env_latest` were extended with missing keys only; no private values were
+committed or overwritten and the deleted staging template was not recreated.
+No running service was restarted. A future approved runtime loads these values
+through the existing dotenv/startup mechanism.
+
 ## Settings not present
 
 No repository environment consumers or startup manifests were found for

@@ -16,7 +16,7 @@ import psycopg2
 import psycopg2.extras
 from parsivar import Normalizer
 from frontend_paths import TEMPLATE_DIR
-from web_permissions import permissions_for
+from web_permissions import permissions_for, permissions_for_user
 from utils.structured_logging import log_event
 from utils.faq_content import FaqContentError, clean_taxonomy, compose_faq, parse_faq_content
 from new_architecture.knowledge_update import (
@@ -238,7 +238,7 @@ def extract_qa_components(content: str) -> dict:
 @router.get("/", response_class=HTMLResponse)
 async def serve_kb_page(request: Request):
     return templates.TemplateResponse("kb_manager.html", {"request": request,
-                                                          "permissions": permissions_for(request.state.web_user.role)},
+                                                          "permissions": permissions_for_user(request.state.web_user.role, request.state.web_user.id)},
                                       headers={"Cache-Control": "no-store"})
 
 

@@ -27,6 +27,19 @@ def permissions_for(role: str | None) -> frozenset[str]:
     return ROLE_PERMISSIONS.get(role or "", frozenset())
 
 
+def permissions_for_user(role: str | None, user_id: int) -> frozenset[str]:
+    """Explicit per-user audit grants; existing role privileges stay unchanged."""
+    if role not in ROLE_PERMISSIONS:
+        return frozenset()
+    from knowledge_audit.settings import grants_for
+    from knowledge_audit.privacy import AuditError
+    try:
+        audit = grants_for(user_id)
+    except AuditError:
+        audit = frozenset()
+    return permissions_for(role) | audit
+
+
 def landing_for(role: str | None) -> str:
     permissions = permissions_for(role)
     for permission, path in (("chat", "/app"), ("analytics", "/analytics"),
@@ -39,6 +52,21 @@ def landing_for(role: str | None) -> str:
 # Each entry is (HTTP method, full path regex, permission). Unknown routes
 # remain unclassified and are denied by the browser middleware.
 ROUTES = (
+    ("GET", r"/knowledge-coverage", "coverage_results_view"),
+    ("POST", r"/api/knowledge-coverage/datasets", "coverage_run_start"),
+    ("GET", r"/api/knowledge-coverage/datasets", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/datasets/[^/]+/rows", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/snapshots", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/snapshots", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/runs", "coverage_run_start"),
+    ("GET", r"/api/knowledge-coverage/runs", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/results", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+", "coverage_evidence_view"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/export", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/export-manifest", "coverage_export_download"),
+    ("POST", r"/api/knowledge-coverage/runs/[^/]+/cancel", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/runs/[^/]+/retry", "coverage_run_start"),
     ("GET", r"/app", "chat"),
     ("POST", r"/api/query", "chat"),
     ("GET", r"/api/sessions", "sessions"),

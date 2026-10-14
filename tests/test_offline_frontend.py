@@ -34,6 +34,7 @@ TEMPLATE_PATHS = {
     "analytics.html": "/analytics",
     "kb_manager.html": "/knowledge-base/",
     "access_denied.html": "/access-denied",
+    "knowledge_coverage.html": "/knowledge-coverage",
 }
 CSS_URL = re.compile(r"url\(\s*(['\"]?)(.*?)\1\s*\)", re.I)
 CSS_IMPORT = re.compile(r"@import\s+(?:url\(\s*)?(['\"]?)([^'\"\s;)]+)\1", re.I)
