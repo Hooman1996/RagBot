@@ -22,7 +22,10 @@ class CoverageSettings:
         from utils.read_only_audit import canonical_sha256
         return {"artifact_dir": str(self.artifact_dir), "access_grants_sha256": canonical_sha256(self.access_grants),
                 "upload_max_bytes": self.upload_max_bytes, "model_max_tokens": self.model_max_tokens,
-                "token_margin": self.token_margin, "schema": "coverage-settings-1",
+                "token_margin": self.token_margin, "schema": "coverage-settings-2",
+                "structured_output_mode": "json_schema_strict_1", "proof_reuse_version": "question-ledger-1",
+                "run_identity_version": "run-identity-1", "export_revision_version": "immutable-export-1",
+                "json_syntax_recovery_attempts": 1, "recovery_policy": "json-invalid-stop-one-fresh-response-1",
                 "initial_depths": [150, 150, 150], "expanded_depths": [300, 300, 300],
                 "initial_entries": 50, "maximum_distinct_entries": 300, "batch_entries": 5,
                 "pilot_query_limit": 5, "model_concurrency": 1}

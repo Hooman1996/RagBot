@@ -32,8 +32,9 @@ def _redact(value, redactor, key=""):
         reference_keys = {"source_row_id", "source_query_id", "safe_session_ref", "cutoff_row_id",
                           "history_row_ids", "excluded_equal_timestamp_ids", "history_digest",
                           "input_id", "kb_snapshot_id", "configuration_id", "preparation_code_id",
-                          "snapshot_id", "bundle_id", "content_sha256", "source_content_sha256"}
-        if (key in reference_keys or key.endswith("_sha256")) and re.fullmatch(r"(?:row|query|session)_[0-9a-f]{32}|[0-9a-f]{64}", value):
+                          "snapshot_id", "bundle_id", "content_sha256", "source_content_sha256",
+                          "run_identity_id", "export_revision_id", "run_id"}
+        if (key in reference_keys or key.endswith("_sha256")) and re.fullmatch(r"(?:row|query|session|r|rev)_[0-9a-f]{32}|[0-9a-f]{64}", value):
             return value
         if key in {"chunk_id", "faq_entry_id", "support_id", "entry_id", "supporting_chunk_ids", "supporting_faq_ids", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids"} and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
             return value
@@ -110,12 +111,14 @@ COVERAGE_FIELDS = FIELDS + ("outcome", "support_arrangement", "production_contex
     "error_code", "error_reason", "attempt_count", "recommendations", "recommendation_status", "proposed_question",
     "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "related_existing_faq_ids",
     "equivalent_existing_faq_ids", "rubric_version", "model_versions", "prompt_versions", "tokenizer_versions",
-    "normalization_version", "alias_version", "classifier_version", "run_settings_version", "review_codes")
+    "normalization_version", "alias_version", "classifier_version", "run_settings_version", "review_codes",
+    "run_identity_id", "export_revision_id", "review_codes_by_phase", "evidence_phases", "validation_diagnostics",
+    "output_recovery_count", "recovery_policy")
 ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
     "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
     "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory",
-    "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "preparation_errors", "uncertainty_codes"}
-MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions"}
+    "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "preparation_errors", "uncertainty_codes", "validation_diagnostics"}
+MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions", "review_codes_by_phase", "evidence_phases"}
 RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes"}
 
 
@@ -123,7 +126,8 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
     rows = []
     for source in results:
         row = {k: source.get(k, [] if k in ARRAY_FIELDS else {} if k in MAP_FIELDS else "") for k in COVERAGE_FIELDS}
-        row.update(schema_version="coverage-csv-1", run_id=meta["run_id"], export_id="",
+        row.update(schema_version="coverage-csv-2", run_id=meta["run_id"], export_id="",
+            run_identity_id=meta.get("run_identity_id", ""), export_revision_id=meta.get("export_revision_id", ""),
             kb_snapshot_id=meta["snapshot_id"], configuration_id=meta["configuration_id"], input_id=meta["input_id"],
             input_scope="pilot_subset_full_input_export", selected_input_row_count=len(meta["row_ids"]),
             source_input_row_count=meta.get("source_input_row_count", len(meta["row_ids"])), rubric_version=meta["versions"]["prompts"]["rubric_version"],
@@ -132,6 +136,8 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
             recommendations=[], recommendation_status="unassessed", run_settings_version=meta["configuration_id"],
             preparation_code_id=meta["versions"].get("code_id", ""), production_baseline_version="production-selection-1")
         row["retrieved_candidate_count"] = sum(m["candidate_count"] for m in source.get("retrieval_metrics", []) if m["purpose"] != "production_baseline")
+        row["review_codes_by_phase"] = {phase: a.get("review_codes", []) for phase, a in source.get("phase_assessments", {}).items()}
+        row["evidence_phases"] = source.get("question_evidence", {}).get("entry_phases", {}) if evidence_visible else {}
         row["evidence_visibility"] = "snapshot_mismatch" if meta["state"] == "incompatible" else "visible" if evidence_visible else "restricted"
         if not evidence_visible:
             for key in RESTRICTED_FIELDS:
@@ -140,7 +146,11 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
                 row[key] = ""
         rows.append(_redact(row, redactor))
     data, export_id = encode_csv(rows, COVERAGE_FIELDS, meta["row_ids"])
-    manifest = {"schema_version": "coverage-export-manifest-1", "run_id": meta["run_id"], "export_id": export_id,
+    manifest = {"schema_version": "coverage-export-manifest-2", "run_id": meta["run_id"], "export_id": export_id,
+                "export_revision_id": meta.get("export_revision_id", ""), "export_captured_at": meta.get("export_captured_at", ""),
+                "run_identity_id": meta.get("run_identity_id", ""), "run_identities": meta.get("run_identities", {}),
+                "run_identity_captured_at": meta.get("run_identity_captured_at", ""),
+                "identity_status": "pinned_before_evaluation" if meta.get("run_identities") else "not_pinned",
                 "csv_sha256": hashlib.sha256(data).hexdigest(), "row_ids": meta["row_ids"],
                 "row_count": len(rows), "pilot_selected_row_ids": meta["selected_row_ids"],
                 "input_id": meta["input_id"], "snapshot_id": meta["snapshot_id"],

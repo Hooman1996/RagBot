@@ -68,6 +68,7 @@ test('upload → explicit selection → progress → evidence → complete expor
         else if(path==='runs') value=[{run_id:rid,state:'completed',selected_row_ids:[rowId]}];
         else if(path.includes('/results?')) value={total:918,source_total:918,rows:[assessed]};
         else if(path.includes('/rows/')) value={result:assessed,evidence:[{chunk_id:'1',faq_entry_id:'1',question:'سؤال آزمایشی',main_category:'Synthetic',sub_category:'Test',sentences:[{sentence_number:1,text:'دو روز کاری.'}]}]};
+        else if(path.includes('/export-revisions')) value={export_revision_id:'rev_'+ 'e'.repeat(32),export_captured_at:'2026-01-01T00:00:00Z',state:'completed',row_count:918};
         else value={run_id:rid,state:'completed',selected_row_ids:[rowId],completed_pilot_rows:1,input_row_count:918,stage:'finished'};
         return {ok:true,json:async()=>value};
     };
@@ -82,8 +83,11 @@ test('upload → explicit selection → progress → evidence → complete expor
         assert.equal($('SelectionCount').textContent,'1 of 5 selected');
         await $('Start').dispatch('click'); await flush();
         assert.equal($('Progress').value,1); assert.match($('ProgressText').textContent,/918 rows retained/);
-        assert.equal($('Export').href,'/api/knowledge-coverage/runs/'+rid+'/export');
-        assert.equal($('Manifest').href,'/api/knowledge-coverage/runs/'+rid+'/export-manifest');
+        await $('PrepareExport').dispatch('click');
+        const revision='?revision_id=rev_'+ 'e'.repeat(32);
+        assert.equal($('Export').href,'/api/knowledge-coverage/runs/'+rid+'/export'+revision);
+        assert.equal($('Manifest').href,'/api/knowledge-coverage/runs/'+rid+'/export-manifest'+revision);
+        assert.match($('ExportState').textContent,/918 rows/);
         const review=buttons($('Rows')).find(n=>n.textContent==='Review'); await review.dispatch('click'); await flush();
         assert.equal(document.activeElement,$('Evidence')); assert.match(text($('EvidenceContent')),/مدت زمان/);
         assert.match(text($('EvidenceContent')),/دو روز کاری/); assert.match(text($('EvidenceContent')),/sentence 1/);

@@ -95,7 +95,7 @@ async def page(request: Request, user: WebUser):
     settings = load_coverage_settings()
     return templates.TemplateResponse(request=request, name="knowledge_coverage.html", context={
         "permissions": permissions_for_user(user.role, user.id), "upload_max_bytes": settings.upload_max_bytes,
-        "contract_version": "coverage-page-1"}, headers={"Cache-Control": "no-store"})
+        "contract_version": "coverage-page-2"}, headers={"Cache-Control": "no-store"})
 
 
 @router.post("/api/knowledge-coverage/datasets", status_code=201)
@@ -252,26 +252,31 @@ async def evidence(run_id: str, row_id: str, request: Request, user: WebUser):
     return {"result": row, "evidence": [index.entry(cid) for cid in ids]}
 
 
-async def exported(run_id, request, user):
+async def exported(run_id, request, user, revision_id=None, *, create=False):
     require(user, "coverage_export_download", "coverage_results_view")
     _, store, _ = runtime(request)
-    meta = await safe_call(store.owned, "runs", run_id, user.id)
-    rows = await safe_call(store.rows, run_id, user.id)
-    _, redactor = await safe_call(store.dataset, meta["dataset_id"], user.id)
+    await safe_call(store.owned, "runs", run_id, user.id)
     visible = {"coverage_evidence_view", "kb_read"} <= permissions_for_user(user.role, user.id)
-    return await safe_call(coverage_export, meta, rows, redactor, evidence_visible=visible)
+    return await safe_call(store.export_revision, run_id, user.id, visible, revision_id, create=create)
+
+
+@router.post("/api/knowledge-coverage/runs/{run_id}/export-revisions", status_code=201)
+async def create_export_revision(run_id: str, request: Request, user: WebUser):
+    _, manifest = await exported(run_id, request, user, create=True)
+    return {k: manifest[k] for k in ("export_revision_id", "export_id", "csv_sha256", "export_captured_at", "state", "row_count")}
 
 
 @router.get("/api/knowledge-coverage/runs/{run_id}/export")
-async def download(run_id: str, request: Request, user: WebUser):
-    data, manifest = await exported(run_id, request, user)
+async def download(run_id: str, request: Request, user: WebUser, revision_id: str | None = None):
+    data, manifest = await exported(run_id, request, user, revision_id)
     return Response(data, media_type="text/csv; charset=utf-8", headers={"Cache-Control": "no-store",
-        "Content-Disposition": f'attachment; filename="coverage-{run_id}.csv"', "X-Coverage-Export-ID": manifest["export_id"]})
+        "Content-Disposition": f'attachment; filename="coverage-{run_id}.csv"', "X-Coverage-Export-ID": manifest["export_id"],
+        "X-Coverage-Revision-ID": manifest["export_revision_id"]})
 
 
 @router.get("/api/knowledge-coverage/runs/{run_id}/export-manifest")
-async def export_manifest(run_id: str, request: Request, user: WebUser):
-    _, manifest = await exported(run_id, request, user)
+async def export_manifest(run_id: str, request: Request, user: WebUser, revision_id: str | None = None):
+    _, manifest = await exported(run_id, request, user, revision_id)
     return manifest
 
 

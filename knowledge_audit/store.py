@@ -5,6 +5,7 @@ processing the same run; recovery is explicit and completed rows are immutable.
 """
 from __future__ import annotations
 from collections import Counter
+from contextlib import contextmanager
 from dataclasses import asdict
 from datetime import datetime, timezone
 import fcntl
@@ -266,10 +267,11 @@ class CoverageStore:
         return self.read(self._path("runs", rid) / "rows" / (row_id + ".json"))
 
     def save_row(self, rid, row, owner):
-        meta = self.owned("runs", rid, owner)
-        if row["source_row_id"] not in meta["selected_row_ids"]:
-            raise AuditError("invalid_result_identity")
-        self.write(self._path("runs", rid) / "rows" / (row["source_row_id"] + ".json"), row)
+        with self.run_lock(rid):
+            meta = self.owned("runs", rid, owner)
+            if row["source_row_id"] not in meta["selected_row_ids"]:
+                raise AuditError("invalid_result_identity")
+            self.write(self._path("runs", rid) / "rows" / (row["source_row_id"] + ".json"), row)
 
     def rows(self, rid, owner):
         meta = self.owned("runs", rid, owner)
@@ -291,11 +293,19 @@ class CoverageStore:
             raise AuditError("run_already_owned") from None
         return descriptor
 
-    def update_run(self, rid, owner, updates, preserve_cancel=True):
+    @contextmanager
+    def run_lock(self, rid):
         path = self._path("runs", rid)
         fd = os.open(path / "metadata.lock", os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
         try:
             fcntl.flock(fd, fcntl.LOCK_EX)
+            yield
+        finally:
+            os.close(fd)
+
+    def update_run(self, rid, owner, updates, preserve_cancel=True):
+        with self.run_lock(rid):
+            path = self._path("runs", rid)
             meta = self.owned("runs", rid, owner)
             cancelled = meta.get("cancel_requested", False)
             meta.update(updates)
@@ -303,5 +313,44 @@ class CoverageStore:
                 meta["cancel_requested"] = True
             self.write(path / "meta.json", meta)
             return meta
-        finally:
-            os.close(fd)
+
+    def export_revision(self, rid, owner, evidence_visible, revision_id=None, *, create=False):
+        """Frozen, permission-specific CSV/manifest pair; never regenerate a pair.
+
+        Unqualified legacy GETs keep their latest explicitly created revision.
+        The dashboard pins both download URLs to a specific revision. Row and
+        metadata updates share the short export-capture lock.
+        """
+        from knowledge_audit.export import coverage_export
+        self.owned("runs", rid, owner)
+        with self.run_lock(rid):
+            meta = self.owned("runs", rid, owner)
+            directory = private_directory(self._path("runs", rid) / "exports")
+            projection = private_directory(directory / ("evidence" if evidence_visible else "restricted"))
+            pointer = projection / "latest.json"
+            if revision_id is not None and not re.fullmatch(r"rev_[0-9a-f]{32}", revision_id):
+                raise AuditError("invalid_artifact_id")
+            if revision_id is None and pointer.exists() and not create:
+                revision_id = self.read(pointer)["export_revision_id"]
+            if revision_id is None:
+                revision_id = "rev_" + secrets.token_hex(16)
+                revision = private_directory(projection / revision_id)
+                frozen = {**meta, "export_revision_id": revision_id, "export_captured_at": now()}
+                _, redactor = self.dataset(meta["dataset_id"], owner)
+                data, manifest = coverage_export(frozen, self.rows(rid, owner), redactor,
+                                                 evidence_visible=evidence_visible)
+                private_write(revision / "coverage.csv", data)
+                private_json(revision / "manifest.json", manifest)
+                self.write(pointer, {"export_revision_id": revision_id})
+            revision = projection / revision_id
+            try:
+                manifest = self.read(revision / "manifest.json")
+                bodypath = revision / "coverage.csv"
+                if bodypath.is_symlink() or bodypath.stat().st_uid != os.getuid() or bodypath.stat().st_mode & 0o077:
+                    raise AuditError("artifact_file_permissions")
+                data = bodypath.read_bytes()
+            except OSError:
+                raise AuditError("artifact_not_found") from None
+            if hashlib.sha256(data).hexdigest() != manifest["csv_sha256"] or manifest["evidence_visible"] != evidence_visible:
+                raise AuditError("export_identity_mismatch")
+            return data, manifest

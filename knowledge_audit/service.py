@@ -2,6 +2,7 @@
 from __future__ import annotations
 import asyncio
 import os
+import re
 
 from knowledge_audit.model import AuditModel
 from knowledge_audit.preparation import QueryPreparer
@@ -23,6 +24,9 @@ class AdmittedPreparer:
 async def build_engine(store, meta, settings, *, answering, runner, limiter):
     import httpx
     from scripts.kb_signature import create_signature
+    if any(meta["settings"].get(k) != v for k, v in settings.manifest().items()):
+        from knowledge_audit.privacy import AuditError
+        raise AuditError("audit_runtime_identity_drift")
     confirm_staging(confirmed=True, model=True, snapshot=True)
     # Confirm the reranker too; it was not needed by A1's preparation guard.
     from dotenv import dotenv_values
@@ -42,14 +46,41 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
         model.metrics_path = store._path("runs", meta["run_id"]) / "model-metrics.jsonl"
         retrieval = AuditRetrieval(rag, snapshot, runner, create_signature, limiter=limiter)
         await retrieval.check()
+        capability = await model.check_schema_support()
+        # Schema checks are bounded synthetic work, not customer evaluation.
+        # Recheck identity after the probes and pin it before any selected row.
+        before_serving = dict(model.serving)
+        await model.discover()
+        if model.serving != before_serving:
+            from knowledge_audit.privacy import AuditError
+            raise AuditError("audit_serving_drift")
         preparer = AdmittedPreparer(QueryPreparer.from_answering_service(answering), limiter)
         engine = CoverageEvaluator(snapshot=snapshot, model=model, retrieval=retrieval, preparer=preparer,
             redactor=redactor, dataset=dataset, entry_budget=meta["settings"]["entry_budget"],
             documents=meta["settings"].get("documents"))
         from knowledge_audit.runtime import configuration_identity
-        preparation_config = configuration_identity(dataset.timestamp_policy, len(meta["selected_row_ids"]), redactor)
-        preparation_config["model_sample_rule"] = meta["settings"].get("selection_method", "explicit_source_row_ids")
-        engine.runtime_configuration = preparation_config
+        async def observe():
+            preparation_config = configuration_identity(dataset.timestamp_policy, len(meta["selected_row_ids"]), redactor)
+            preparation_config["model_sample_rule"] = meta["settings"].get("selection_method", "explicit_source_row_ids")
+            preparation_config["audit_runtime_settings"] = settings.manifest()
+            preparation_config["preparation_behavior"] = "a1-cutoff-production-components-context-review-1"
+            preparation_config["structured_output_capability"] = capability
+            services = {}
+            for name, key in (("embedding", "TEI_EMBED_URL"), ("reranker", "TEI_RERANK_URL")):
+                response = await http.get(os.environ[key].rstrip("/") + "/info")
+                response.raise_for_status()
+                body = response.json()
+                services[name] = {"model_id": redactor.opaque("model", str(body.get("model_id", "unknown"))),
+                    "serving_version": redactor.text(str(body.get("version", "unknown"))),
+                    "model_sha": body.get("model_sha") if isinstance(body.get("model_sha"), str) and re.fullmatch(r"[0-9a-f]{40,64}", body["model_sha"]) else "unverified",
+                    **{k: body[k] for k in ("max_input_length", "max_client_batch_size", "auto_truncate") if type(body.get(k)) in {int, bool}},
+                    "immutable_weights_tokenizer": "unverified"}
+            preparation_config["retrieval_serving"] = services
+            return {"serving": dict(model.serving), "runtime_configuration": preparation_config,
+                    "audit_settings": meta["settings"]}
+        initial_identities = await observe()
+        engine.runtime_configuration = initial_identities["runtime_configuration"]
+        engine.observe_identities = observe
         engine.aclose = http.aclose
         return engine
     except BaseException:

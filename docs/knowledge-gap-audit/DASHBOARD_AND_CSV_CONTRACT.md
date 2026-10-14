@@ -329,11 +329,12 @@ A2 must create its distinct coverage schema and preserve complete row accounting
 
 ## Implemented A2 pilot contract
 
-Implemented versions `coverage-page-1`, `coverage-csv-1`,
-`coverage-export-manifest-1`, rubric `coverage-rubric-2`. This section specifies
+Implemented A2.1 versions `coverage-page-2`, `coverage-csv-2`,
+`coverage-export-manifest-2`, rubric `coverage-rubric-4`. This section specifies
 the shipped pilot where it is narrower/different from the future v1 proposal
 above. See [A2_END_TO_END_PILOT_REPORT.md](A2_END_TO_END_PILOT_REPORT.md) and
-[A2_RUBRIC_AND_SCHEMAS.md](A2_RUBRIC_AND_SCHEMAS.md) for executed evidence/rules.
+[A2_RUBRIC_AND_SCHEMAS.md](A2_RUBRIC_AND_SCHEMAS.md) and
+[A2_1_CORRECTION_REPORT.md](A2_1_CORRECTION_REPORT.md) for executed evidence/rules.
 No recommendations, DB input implementation, factual-answer generation or
 full-dataset model run is included.
 
@@ -346,7 +347,9 @@ summary/preparation counts, up-to-five explicit pilot row selection, document
 scope and 1–300 entry budget, snapshot capture, progress/cancel/retry, result
 filters/pagination, numbered evidence/conditions and full-row downloads.
 RTL/LTR direction and Persian text rendering are supported; interface labels
-remain English. Actual painted browser/keyboard/Excel validation is outstanding.
+remain English. A2.1 includes actual synthetic Chromium visual/keyboard/RTL,
+theme, responsive and download checks. Excel application validation remains
+unperformed; automated BOM/quoting/formula tests passed.
 
 Existing roles, including admin, acquire no audit privileges by default.
 `KNOWLEDGE_COVERAGE_ACCESS_GRANTS={}` denies all new access. Explicit positive
@@ -367,9 +370,10 @@ capture code; datasets and runs remain single-owner.
 | POST `/runs/{run_id}/cancel`, POST `/runs/{run_id}/retry` | run-start, owned run |
 | GET `/runs/{run_id}/rows/{row_id}` | evidence-view + results-view + `kb_read`, owned run/row |
 | GET `/runs/{run_id}/export`, GET `/runs/{run_id}/export-manifest` | export-download + results-view, owned run; evidence entitlement controls projection |
+| POST `/runs/{run_id}/export-revisions` | export-download + results-view, CSRF, owned run; capture a new immutable permission-specific pair |
 
 Names above abbreviate `coverage_run_start`, `coverage_results_view`,
-`coverage_evidence_view`, `coverage_export_download`. Fifteen routes are
+`coverage_evidence_view`, `coverage_export_download`. Sixteen routes are
 registered, including the page. Upload transport is bounded streamed JSON with
 base64 CSV bytes and explicit mapped column names; accepted bytes stay in memory
 until mapped/redacted. There is no multipart spool, raw upload download, arbitrary
@@ -395,18 +399,21 @@ input queries although only five are selected for model evaluation.
 | `processing_status` | `pending`, `running`, `completed`, `invalid_input`, `excluded`, `needs_context`, `needs_review`, `failed`, `interrupted`, `cancelled`. Run state also has `queued`, `incompatible`. |
 | `scope_status` | `kb_question`, `chitchat`, `out_of_scope`, `private_account`, `needs_context`, `uncertain`; inherited unevaluated preparation may carry `unknown`. First-person procedure is not automatically private-account. |
 | `coverage_status` | `full`, `partial`, `unsupported`, `uncertain`; unevaluated `not_evaluated`, excluded coverage unset. Batch model label `none` becomes question-level `unsupported`. |
-| `outcome` | `covered_reachable`, `covered_not_reachable`, `possible_partial_gap`, `possible_gap`, `needs_context`, `excluded`, `pending`, `error`. Needs-context/review and pending never become gaps. |
+| `outcome` | `covered_reachable`, `covered_not_reachable`, `possible_partial_gap`, `possible_gap`, `needs_context`, `needs_review`, `excluded`, `pending`, `error`. Missing preceding subject/history uses needs-context; scope uncertainty, conflicts, verification/runtime problems use needs-review. Neither becomes a gap. |
 | `support_arrangement` | `single_entry`, `within_batch_combination`, `cross_batch_combination`, `none`, `unknown`. Arrangement describes evidence locations, not proof of compatible conditions. |
 | `production_context_sufficiency`, `production_reachability` | Independently evaluated baseline coverage; reachable `sufficient`, `insufficient`, `uncertain`, `unknown`. Equivalent source facts may use other IDs than the audit witness. |
 | `requested_aspects`, `supported_aspects`, `unresolved_aspects` | JSON aspect objects with stable IDs, descriptions/conditions; supported objects include structured supports/applicability/dependencies and numbered citations. Evidence is retained for partial results too. |
 | `supporting_faq_ids`, `supporting_chunk_ids`, `supporting_sentence_refs` | Snapshot/FAQ/chunk/sentence-number references, resolved against frozen redacted full answers. Aspect-to-source mapping is in supported aspect objects; references are not quote identifiers. |
 | `verifications`, `verification_result` | Structured origin/bundle/verdict/explanation records; full requires `accepted`; rejection/uncertainty requires review. No model chain-of-thought. |
 | `production_candidate_ids`, `production_context_ids`, `production_baseline_version` | Actual separate baseline selection, version `production-selection-1`; not merely audit-witness reachability. |
-| `evaluated_entry_ids`, `evaluated_entry_count`, `retrieved_candidate_count` | Distinct successfully validated entry identities/count (baseline included) versus sum of audit retrieval candidate counts across rounds. Count can include repeated retrieval candidates, not repeated expansion evaluation. Malformed batch content cannot establish valid evidence. |
+| `evaluated_entry_ids`, `evaluated_entry_count`, `retrieved_candidate_count` | Distinct entries actually submitted to evaluation (baseline included, malformed attempts included) versus sum of audit retrieval candidate counts across rounds. Entry status separately distinguishes validated output from failed requests. Repeated retrieval/evaluation recovery never spends the same entry twice. Malformed output cannot establish evidence. |
 | `evaluation_scope`, `stopping_reason` | Actual initial/broader depths, distinct-entry budget, snapshot reference, explicit `whole_kb_absence_proven=false`; stops include `verified_full`, `candidate_exhausted`, `evaluation_limit`, `needs_context`, `scope_excluded`, `processing_error`, `snapshot_mismatch`, `pending`, interruption/cancellation. |
 | `recommendations`, `recommendation_status` and aligned proposal/taxonomy cells | `[]`, `unassessed`; no suggestions or factual new answers. |
 | Snapshot/input/config/code/rubric/model/prompt/tokenizer fields | Safe identities with exact file/template/schema hashes and obtainable serving version/context limit in manifest. Immutable weights/tokenizer revision is explicitly unverified. Unknown scalar aliases/classifier/normalization version projections may be empty; authoritative code/config identities remain in the manifest. |
 | `input_scope`, counts | `pilot_subset_full_input_export`; selected-input count is the export denominator, source-input count includes history-only records, model-selection IDs separately list the at-most-five pilot. |
+| `run_identity_id`, `export_revision_id` | Immutable pre-evaluation configuration/serving identity and frozen permission-specific CSV/manifest revision. Manifest contains the authoritative identity map and capture time. |
+| `review_codes`, `review_codes_by_phase`, `evidence_phases` | Scoped uncertainty and production/initial/broader provenance. Evidence views do not reuse a joint full verdict for subsets. |
+| `validation_diagnostics`, `output_recovery_count`, `recovery_policy` | Content-free schema diagnostics and separately counted bounded JSON-syntax recovery. No raw outputs or validation input values. |
 
 Results-only exports keep query/status/lineage but omit evidence arrays, grounded
 explanations and protected reasons unless evidence-view + `kb_read` are present.
@@ -415,6 +422,16 @@ empty/`[]`/`{}`; recommendation fields remain explicitly unassessed. Evidence
 detail may show partial supports with full source sentences; incompatible runs
 withhold content and mark snapshot mismatch. Export identity includes projection,
 so restricted and evidence-visible exports can have different IDs.
+
+“Prepare download” captures one immutable revision under the same short lock used
+for row/meta updates. Both download links use its `revision_id`; the CSV header
+and manifest agree on revision/export identity and CSV hash. Progress cannot
+change those bytes. Prepare again to capture newer progress. Unqualified legacy
+GETs reuse their projection's latest explicitly created revision (creating one
+only if none exists); clients coordinating concurrent explicit refreshes must
+pin `revision_id` from the creation response. A revoked evidence entitlement
+cannot access the earlier evidence projection. Incomplete captures report their
+actual run state and pilot scope, never completed full-dataset evaluation.
 
 ### Protected execution and reproducibility
 
@@ -444,6 +461,22 @@ budgeted by the served chat-template tokenizer plus reserved output/margin.
 Bounded complementary bundles receive actual source evidence/conditions; every
 proposed full proof is verified. Budget/search exhaustion implies only possible
 gaps within that scope, not whole-KB absence.
+
+Production, initial and broader phases share validated entry evidence, conditions
+and proof identities. Verified production full coverage cannot be weakened by
+audit results. Cross-phase evidence can establish KB coverage but cannot make
+production context sufficient. An independent audit proof with unresolved
+production assessment has full KB coverage and review-needed reachability.
+Apparent complete aspect support without a compatible verified proof remains
+review-needed; bounded greedy bundle search is explicitly non-exhaustive.
+
+Run configuration/serving identities are captured before selected-row evaluation
+and compared on resume and after rows. Effective production/audit settings,
+aliases/classifier/preparation identities and observed generation/embedding/
+reranking serving identities are included. Changed code/settings/serving prevents
+mixing completed checkpoints with new work and marks the run incompatible;
+original identity values are never overwritten. Legacy runs with retained work
+and no pre-evaluation identity cannot resume through changed code.
 
 Qdrant and model weights are not frozen. Observed source/index/serving/code drift
 invalidates the run, but bracketing cannot detect every transient/ABA change or

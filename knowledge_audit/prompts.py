@@ -14,6 +14,9 @@ A referral can answer HOW to submit a ticket; it cannot answer a missing fee,
 duration, eligibility condition or other substantive fact. Uncertainty requires review.
 Only cite the supplied immutable snapshot IDs, chunk/FAQ IDs and sentence numbers.
 Never use copied quotations or fabricated IDs as citation identifiers.
+Evidence may originate in production, initial or broader retrieval. Judge facts
+and compatible conditions, not their retrieval phase. Apparent support for all
+aspect IDs without a verified compatible proof requires review, not a gap.
 """
 TASKS = {
     "scope": """Decide banking KB scope from intended question and available preceding
@@ -45,7 +48,8 @@ Check whether complementary supports can jointly answer all required aspects for
 same intended conditions. Versions, mutually exclusive cases, dependencies or contradictory
 clauses cannot be combined merely because aspect IDs match. Choose only supplied support_ids.
 Full requires compatible complete support, not a union of batch labels. If a bounded
-bundle is insufficient, retain partial/uncertain and unresolved aspect IDs.""",
+bundle is insufficient, retain uncertain when all aspects have apparent support
+but compatibility is unproved. Do not invent missing facts from a search heuristic.""",
     "verification": """Independently verify this proposed full-coverage evidence bundle.
 Use cited numbered sentences AND their complete supplied answers for surrounding conditions
 and exceptions. Reject invalid/unsupported references, subject changes, incompatible cases,

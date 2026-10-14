@@ -89,6 +89,16 @@ All 918 rows remain represented; five distinct queries were live-piloted.
 Strict model-output errors and pending/context rows are retained. Browser,
 human-label/calibration and full-run/release acceptance remain outstanding.
 
+The user subsequently authorized **A2.1 planner corrections and bounded paired
+revalidation**. Shared question-level evidence, immutable run identities and
+export revisions, safe structured-output diagnostics and bounded syntax recovery
+are implemented in [A2_1_CORRECTION_REPORT.md](A2_1_CORRECTION_REPORT.md).
+Actual synthetic authenticated Chromium checks now cover the main-dashboard
+flow, evidence, downloads, keyboard, RTL and themes. The live revalidation uses
+only the same five query IDs in new protected runs; all 918 export rows remain.
+Historical pilot artifacts are preserved. This stage does not authorize A3,
+recommendations, a full-dataset audit, deployment or production changes.
+
 No naturally occurring unlabeled queries can supply a measured answer-quality error rate.
 Choose tolerances and label sets before experiments, rather than after results.
 

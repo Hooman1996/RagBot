@@ -1,6 +1,7 @@
 """Tracked background pilot with protected row checkpoints and explicit recovery."""
 from __future__ import annotations
 import asyncio
+import copy
 import os
 
 from mass_answer_jobs import MassAnswerJobManager
@@ -50,13 +51,27 @@ class CoverageJobs:
                         raise asyncio.CancelledError()
                     await self.runner.run(self.store.update_run, rid, owner, {"stage": stage})
                 engine.model.progress_callback = progress
-                meta["versions"]["serving"] = engine.model.serving
-                await self.save_meta(meta)
-                expected_serving = dict(engine.model.serving)
-                dataset = engine.dataset
-                if hasattr(engine, "runtime_configuration"):
-                    meta["versions"]["runtime_configuration"] = engine.runtime_configuration
+                observed = {"serving": copy.deepcopy(engine.model.serving),
+                    "runtime_configuration": copy.deepcopy(getattr(engine, "runtime_configuration", {"status": "unavailable"})),
+                    "audit_settings": copy.deepcopy(meta["settings"])}
+                pinned = meta.get("run_identities")
+                if pinned is None:
+                    retained = await self.runner.run(self.store.rows, rid, owner)
+                    if meta["attempt"] != 1 and any(r["source_row_id"] in meta["selected_row_ids"] and
+                            r["processing_status"] not in {"pending", "invalid_input"} for r in retained):
+                        raise AuditError("audit_identity_unpinned")
+                    meta["run_identities"] = observed
+                    meta["run_identity_id"] = canonical_sha256(observed)
+                    from knowledge_audit.store import now
+                    meta["run_identity_captured_at"] = now()
+                    meta["configuration_id"] = canonical_sha256({"audit_settings": observed["audit_settings"],
+                        "runtime_configuration": observed["runtime_configuration"]})
+                    meta["versions"]["serving"] = observed["serving"]
+                    meta["versions"]["runtime_configuration"] = observed["runtime_configuration"]
                     await self.save_meta(meta)
+                elif pinned != observed:
+                    raise AuditError("audit_runtime_identity_drift")
+                dataset = engine.dataset
                 events = {e.source_row_id: e for e in dataset.selected}
                 # Each retry checks persisted terminal rows. Completed rows do
                 # not invoke models again; interrupted attempts replace one row.
@@ -72,12 +87,17 @@ class CoverageJobs:
                     await self.save_meta(meta)
                     result = await engine.evaluate(events[row_id], row)
                     result["attempt_count"] = row["attempt_count"]
+                    result["run_identity_id"] = meta["run_identity_id"]
                     await self.runner.run(self.store.save_row, rid, result, owner)
                     if result.get("stopping_reason") == "snapshot_mismatch":
                         raise AuditError("source_or_index_drift")
                     await engine.model.discover()
-                    if engine.model.serving != expected_serving:
+                    if engine.model.serving != meta["run_identities"]["serving"]:
                         raise AuditError("audit_serving_drift")
+                    if hasattr(engine, "observe_identities"):
+                        current = await engine.observe_identities()
+                        if current != meta["run_identities"]:
+                            raise AuditError("audit_runtime_identity_drift")
                     all_rows = await self.runner.run(self.store.rows, rid, owner)
                     meta["completed_pilot_rows"] = sum(r["source_row_id"] in meta["selected_row_ids"] and r["processing_status"] in TERMINAL | {"failed"} for r in all_rows)
                     await self.save_meta(meta)
@@ -90,7 +110,7 @@ class CoverageJobs:
                 raise
             except AuditError as exc:
                 if lease is not None:
-                    if str(exc) in {"source_or_index_drift", "audit_serving_drift", "audit_version_drift"}:
+                    if str(exc) in {"source_or_index_drift", "audit_serving_drift", "audit_version_drift", "audit_runtime_identity_drift", "audit_identity_unpinned"}:
                         await self.invalidate(rid, owner, str(exc))
                     else:
                         await self.interrupt(rid, owner, active, "failed")
@@ -125,7 +145,7 @@ class CoverageJobs:
         rows = await self.runner.run(self.store.rows, rid, owner)
         for row in rows:
             if row["source_row_id"] in meta["selected_row_ids"] and row["processing_status"] != "pending":
-                row.update(processing_status="needs_review", coverage_status="uncertain", outcome="needs_context",
+                row.update(processing_status="needs_review", coverage_status="uncertain", outcome="needs_review",
                            stopping_reason="snapshot_mismatch", evidence_visibility="snapshot_mismatch")
                 await self.runner.run(self.store.save_row, rid, row, owner)
         meta.update(state="incompatible", error_code=code, active_row_id="", stage="review")

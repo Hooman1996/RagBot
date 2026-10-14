@@ -59,7 +59,7 @@ def configuration_identity(policy, model_limit: int, redactor) -> dict:
                 "expected_sha256": config.expected_sha256,
                 "actual_sha256": hashlib.sha256(checkpoint.read_bytes()).hexdigest() if checkpoint.is_file() else None},
             "service_target_identities": {k: redactor.opaque("endpoint", os.environ.get(k, "")) for k in
-                ("TEI_EMBED_URL", "VLLM_URL", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "QDRANT_HOST", "QDRANT_PORT", "QDRANT_COLLECTION")}}
+                ("TEI_EMBED_URL", "TEI_RERANK_URL", "VLLM_URL", "POSTGRES_HOST", "POSTGRES_PORT", "POSTGRES_DB", "QDRANT_HOST", "QDRANT_PORT", "QDRANT_COLLECTION")}}
 
 
 async def serving_identity(http, redactor) -> dict:

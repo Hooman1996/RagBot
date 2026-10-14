@@ -2,7 +2,7 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-VERSION = "coverage-rubric-2"
+VERSION = "coverage-rubric-4"
 
 
 class StrictModel(BaseModel):

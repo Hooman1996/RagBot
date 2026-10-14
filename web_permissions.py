@@ -64,6 +64,7 @@ ROUTES = (
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/results", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+", "coverage_evidence_view"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/export", "coverage_export_download"),
+    ("POST", r"/api/knowledge-coverage/runs/[^/]+/export-revisions", "coverage_export_download"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/export-manifest", "coverage_export_download"),
     ("POST", r"/api/knowledge-coverage/runs/[^/]+/cancel", "coverage_run_start"),
     ("POST", r"/api/knowledge-coverage/runs/[^/]+/retry", "coverage_run_start"),

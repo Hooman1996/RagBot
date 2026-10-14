@@ -115,11 +115,12 @@ async def run(args):
         await runner.aclose()
     meta=store.owned('runs',meta['run_id'],args.owner_id)
     rows=store.rows(meta['run_id'],args.owner_id)
-    data,manifest=coverage_export(meta,rows,redactor,evidence_visible=True)
+    data,manifest=store.export_revision(meta['run_id'],args.owner_id,True,create=True)
     directory=store._path('runs',meta['run_id'])
     private_write(directory/'coverage.csv',data)
     private_json(directory/'export-manifest.json',manifest)
     summary={'run_id':meta['run_id'],'state':meta['state'],'export_id':manifest['export_id'],
+        'export_revision_id':manifest['export_revision_id'],'run_identity_id':meta.get('run_identity_id',''),
         'csv_sha256':manifest['csv_sha256'],'snapshot_id':meta['snapshot_id'],'configuration_id':meta['configuration_id'],
         'source_row_count':len(rows),'selected_ids':selected,'outcome_counts':dict(Counter(r['outcome'] for r in rows)),
         'live_calls':dict(calls),'all_completion_usage':{'prompt_tokens':sum(m['prompt_tokens'] for m in completion_usage),
@@ -127,6 +128,10 @@ async def run(args):
         'selected_rows':[{'source_row_id':r['source_row_id'],
             'outcome':r['outcome'],'processing_status':r['processing_status'],'coverage':r['coverage_status'],
             'evaluated_entry_count':r['evaluated_entry_count'],'verification_result':r.get('verification_result','not_run'),
+            'supported_chunk_ids':r.get('supporting_chunk_ids',[]),
+            'missing_aspect_ids':[a['aspect_id'] for a in r.get('unresolved_aspects',[])],
+            'review_codes':r.get('review_codes',[]),
+            'validation_categories':r.get('validation_diagnostics',[]),
             'verification_counts':dict(Counter(v['verdict'] for v in r.get('verifications',[]))),
             'model_calls':len(r.get('model_metrics',[])),
             'prompt_tokens':sum(m.get('prompt_tokens') or 0 for m in r.get('model_metrics',[])),

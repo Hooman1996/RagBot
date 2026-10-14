@@ -82,14 +82,16 @@
                 <progress id="coverageProgress" max="5" value="0" aria-label="Selected pilot rows processed"></progress>
                 <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel pilot</button>
                     <button id="coverageResume" class="coverage-secondary" type="button" hidden>Resume remaining rows</button>
+                    <button id="coveragePrepareExport" class="coverage-secondary" type="button" hidden>Prepare download</button>
                     <a id="coverageExport" class="coverage-primary" hidden>Download all rows · CSV</a>
-                    <a id="coverageManifest" class="coverage-link" hidden>Export manifest</a></div>
+                    <a id="coverageManifest" class="coverage-link" download="coverage-manifest.json" hidden>Export manifest</a></div>
+                <p id="coverageExportState" class="coverage-summary" aria-live="polite">No download revision prepared.</p>
             </section>
             <div class="coverage-workbench">
                 <section class="coverage-card coverage-results" aria-labelledby="coverageResultsTitle">
                     <div class="coverage-section-heading"><div><h2 id="coverageResultsTitle">Query results</h2><p id="coverageResultCount">No input loaded</p></div></div>
                     <div class="coverage-filters"><label>Find a question<input id="coverageSearch" type="search" placeholder="Search redacted questions" maxlength="200"></label>
-                        <label>Outcome<select id="coverageFilter"><option value="">All outcomes</option><option value="covered_reachable">Covered and reachable</option><option value="covered_not_reachable">Covered but not reachable</option><option value="possible_partial_gap">Possible partial KB gap</option><option value="possible_gap">Possible KB gap</option><option value="needs_context">Needs context / review</option><option value="excluded">Excluded</option><option value="pending">Pending</option><option value="error">Error</option></select></label></div>
+                        <label>Outcome<select id="coverageFilter"><option value="">All outcomes</option><option value="covered_reachable">Covered and reachable</option><option value="covered_not_reachable">Covered but not reachable</option><option value="possible_partial_gap">Possible partial KB gap</option><option value="possible_gap">Possible KB gap</option><option value="needs_context">Needs preceding context</option><option value="needs_review">Needs review</option><option value="excluded">Excluded</option><option value="pending">Pending</option><option value="error">Error</option></select></label></div>
                     <div class="coverage-table-scroll" tabindex="0" aria-label="Scrollable question results">
                         <table id="coverageTable"><thead><tr><th scope="col">Select / row</th><th scope="col">Question</th><th scope="col">Preparation</th><th scope="col">Outcome</th><th scope="col">Entries checked</th><th scope="col">Evidence</th></tr></thead>
                             <tbody id="coverageRows"><tr><td colspan="6" class="coverage-empty">Import questions to begin. No coverage results have been assessed.</td></tr></tbody></table>

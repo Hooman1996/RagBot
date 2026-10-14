@@ -155,7 +155,7 @@ def test_exact_and_paraphrase_verified_and_reachable(question):
     assert row['coverage_status']=='full' and row['outcome']=='covered_reachable'
     assert row['support_arrangement']=='single_entry'
     assert row['verification_result']=='accepted'
-    assert len([c for c in model.calls if c[0]=='verification'])==2  # independent production and audit full claims
+    assert len([c for c in model.calls if c[0]=='verification'])==1  # one immutable production proof, no duplicate verification
     assert not any(m['purpose']=='broader_audit' for m in row['retrieval_metrics'])
 
 
@@ -189,7 +189,7 @@ def test_conflicting_conditions_cannot_be_combined_into_full():
     entries={str(i):('VIP only.' if i==1 else 'Standard only.' if i==6 else 'Unrelated.') for i in range(1,7)}
     snap=snapshot(entries); model=LabeledModel(snap,{'1':['a1'],'6':['a2']},conflicts=True)
     row=evaluate(snap,model,Retrieval([],list(entries)))[0]
-    assert row['coverage_status']=='uncertain' and row['outcome']=='needs_context'
+    assert row['coverage_status']=='uncertain' and row['outcome']=='needs_review'
     assert 'incompatible_conditions' in row['review_codes']
     assert row['verification_result']!='accepted'
 
@@ -198,7 +198,7 @@ def test_equivalent_production_evidence_uses_different_ids():
     snap=snapshot({'1':'Two working days, cutoff 18:00.','2':'Two working days, cutoff 18:00.'})
     model=LabeledModel(snap,{'1':['a1','a2'],'2':['a1','a2']})
     row=evaluate(snap,model,Retrieval(['2'],['1']))[0]
-    assert row['supporting_chunk_ids']==['1'] and row['production_context_ids']==['2']
+    assert row['supporting_chunk_ids']==['2'] and row['production_context_ids']==['2']
     assert row['production_context_sufficiency']=='full' and row['outcome']=='covered_reachable'
 
 
@@ -218,7 +218,7 @@ def test_scope_exclusions_context_and_duplicates(scope):
     data=input_dataset(('Question?','Question?'))
     rows=evaluate(snap,model,Retrieval([],['1']),dataset=data)
     assert len(rows)==2 and rows[0]['source_row_id']!=rows[1]['source_row_id']
-    assert all(r['outcome']==('excluded' if scope in {'chitchat','out_of_scope','private_account'} else 'needs_context') for r in rows)
+    assert all(r['outcome']==('excluded' if scope in {'chitchat','out_of_scope','private_account'} else 'needs_review' if scope=='uncertain' else 'needs_context') for r in rows)
     assert all(r['evaluated_entry_count']==0 for r in rows)
 
 
@@ -235,7 +235,7 @@ def test_false_full_rejected_and_unresolved_never_becomes_gap():
     snap=snapshot({'1':'Incomplete synthetic fact.'})
     model=LabeledModel(snap,{'1':['a1','a2']},verification='rejected')
     row=evaluate(snap,model,Retrieval([],['1']))[0]
-    assert row['coverage_status']!='full' and row['outcome']=='needs_context'
+    assert row['coverage_status']!='full' and row['outcome']=='needs_review'
     assert row['verification_result']=='rejected'
     assert any(m['purpose']=='broader_audit' for m in row['retrieval_metrics'])
 
@@ -253,10 +253,11 @@ def test_token_overflow_and_drift_do_not_prove_absence():
     snap=snapshot({'1':'Large entry.'})
     model=LabeledModel(snap,{},overflow_ids=['1'])
     row=evaluate(snap,model,Retrieval([],['1']))[0]
-    assert row['outcome']=='needs_context' and row['evaluated_entry_count']==0
+    assert row['outcome']=='needs_review' and row['evaluated_entry_count']==0
     assert 'entry_too_long' in row['review_codes']
     row=evaluate(snap,LabeledModel(snap,{}),Retrieval([],['1'],drift=True))[0]
     assert row['stopping_reason']=='snapshot_mismatch' and row['coverage_status']=='uncertain'
+    assert row['outcome']=='needs_review'
 
 
 def test_distinct_budget_and_sentence_roundtrip():

@@ -1,11 +1,15 @@
 # A2 rubric and structured responsibilities
 
-Implemented rubric: `coverage-rubric-2`. Canonical strict schemas are in
+Implemented rubric: `coverage-rubric-4` (A2.1). Canonical strict schemas are in
 `knowledge_audit/schemas.py`; prompt templates are in `knowledge_audit/prompts.py`.
 Each run records the rubric, individual schema versions and SHA-256 hashes of
 templates and schemas. Filled prompts are never saved. Pydantic strict validation
-forbids unknown fields and coercion. Server JSON-object mode does not replace
-local validation. Invalid, incomplete or unsupported outputs remain errors/review.
+forbids unknown fields and coercion. Generation requests the actual strict JSON
+schema through `response_format.json_schema`; local schema, redaction, citation,
+membership and semantic checks still apply. Invalid, incomplete or unsupported
+outputs remain errors/review. Responsibility schema shapes/versions below are
+unchanged; rubric 3 introduced shared evidence and rubric 4 records bounded
+syntax recovery. Historical rubric-2 pilot artifacts are preserved.
 
 | Responsibility | Version | Decision rules |
 |---|---|---|
@@ -77,3 +81,50 @@ Reconciliation tries at most eight complementary seed bundles per invocation;
 this bounded strategy is not exhaustive evidence-combination search. Uncertainty
 and rejected full proofs remain review-needed. The same model family performs
 evaluation and verification; acceptance is not calibrated accuracy or human review.
+
+## A2.1 question-level evidence and uncertainty
+
+`question-ledger-1` records validated entry supports and their production,
+initial-audit and broader-audit provenance. Phase views filter actual entry
+evidence; a joint batch's full label cannot establish a subset's full coverage.
+Verified production coverage establishes both KB coverage and reachability even
+if audit retrieval misses its witness. Compatible complementary evidence across
+phases can establish KB coverage through reconciliation and verification;
+production sufficiency still uses production-selected entries only. An identical
+proof has one verification result, including rejected/uncertain results; caches
+never turn a different evidence subset into that proof.
+
+Uncertain batches, failed/oversized entries, unresolved verification and conflicts
+remain review codes until explicitly resolved by valid evidence. Production-only
+failure does not destroy an independent audit proof; it leaves reachability
+uncertain. Apparent support for every aspect without a verified compatible
+combination is `needs_review`, with compatibility/bounded-search reasons, never a
+partial gap with zero missing aspects. Possible gaps require identifiable missing
+aspects and no evaluation uncertainty that invalidates that conclusion. Entries
+actually sent to evaluation count once against 300, including malformed outputs;
+output validation is a separate entry status.
+
+## Structured output and bounded recovery
+
+Five sequential synthetic responsibility probes check staging's schema support
+before selected-query evaluation. Successful probes demonstrate observed support,
+not guaranteed correctness of every subsequent response. Safe diagnostics record
+responsibility/schema version, validation stage, allowlisted field path and error
+type, token counts and finish reason. They exclude validation values, raw outputs,
+filled prompts and exception messages. JSON syntax diagnostics contain only a
+static category, numeric position, and object/start/end flags.
+
+`json-invalid-stop-one-fresh-response-1` permits **one** fresh request only when
+local JSON parsing fails before redaction with finish reason `stop`. The request
+uses the identical original input, schema and generation settings; no content is
+repaired or coerced. Both attempts are separately counted and retain the first
+failure diagnostic. Length, redaction, field/type, citation, semantic, network and
+token-budget failures do not receive this recovery. Capability probes use the same
+bounded policy. This fixed policy is recorded in runtime manifests, not a new env
+setting. A second syntax failure remains an error.
+
+vLLM documents the JSON-schema request mechanism in its
+[structured-output reference](https://docs.vllm.ai/en/latest/features/structured_outputs/).
+The A2.1 report distinguishes actual capability checks, non-reproduced transient
+syntax failures, and remaining output-length failures; it does not claim a serving
+root cause or a guaranteed repair.

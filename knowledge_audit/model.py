@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import time
 import os
+import json
 
 from pydantic import ValidationError
 from knowledge_audit.privacy import AuditError, Redactor
@@ -11,6 +12,45 @@ from knowledge_audit.schemas import SCHEMAS
 from pipeline_observer import bind_pipeline_observer
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
+
+DIAGNOSTIC_TYPES = frozenset({"json_invalid", "missing", "literal_error", "extra_forbidden", "string_type",
+    "string_pattern_mismatch", "string_too_short", "string_too_long", "int_type", "int_parsing",
+    "greater_than_equal", "less_than_equal", "list_type", "too_short", "too_long", "bool_type",
+    "dict_type", "value_error", "model_type", "none_required"})
+
+
+def schema_version(role):
+    return SCHEMAS[role].model_fields["version"].annotation.__args__[0]
+
+
+def validation_diagnostics(error, role, stage, metric):
+    """Never include values, messages, contexts, URLs or arbitrary field names."""
+    schema = SCHEMAS[role].model_json_schema()
+    fields = set(schema.get("properties", {}))
+    for definition in schema.get("$defs", {}).values():
+        fields.update(definition.get("properties", {}))
+    return [{"responsibility": role, "schema_version": schema_version(role), "stage": stage,
+             "field_path": [part if isinstance(part, str) and part in fields else "*" for part in item["loc"]],
+             "error_type": item["type"] if item["type"] in DIAGNOSTIC_TYPES else "validation_error",
+             "prompt_tokens": metric["prompt_tokens"], "completion_tokens": metric["completion_tokens"],
+             "finish_reason": metric.get("finish_reason", "unknown")}
+            for item in error.errors(include_url=False, include_context=False, include_input=False)[:20]]
+
+
+def json_syntax_summary(value):
+    """Content-free parser position/category; never retain error messages."""
+    if not isinstance(value, str):
+        return {"category": "not_text"}
+    try:
+        json.loads(value)
+        return {"category": "valid_json"}
+    except json.JSONDecodeError as error:
+        categories = {"Expecting value": "expected_value", "Expecting ',' delimiter": "missing_comma",
+                      "Expecting property name enclosed in double quotes": "unquoted_property",
+                      "Extra data": "trailing_content", "Invalid \\escape": "invalid_escape",
+                      "Invalid control character at": "invalid_control"}
+        return {"category": categories.get(error.msg, "json_syntax"), "position": error.pos,
+                "at_end": error.pos >= len(value.rstrip()), "starts_object": value.lstrip().startswith("{")}
 
 
 class AuditModel:
@@ -22,6 +62,7 @@ class AuditModel:
         self.metrics = []
         self.progress_callback = None
         self.metrics_path = None
+        self.call_sequence = 0
 
     async def discover(self):
         models = await self.http.get(self.origin + "/v1/models")
@@ -35,7 +76,8 @@ class AuditModel:
         self.serving = {"served_model_id": self.redactor.opaque("model", self.rag.model_id),
                         "max_model_len": self.context_limit, "serving_version": self.redactor.text(version.json()["version"]),
                         "token_count_method": "served_tokenize_messages_chat_template",
-                        "weights_tokenizer_revision": "unverified"}
+                        "weights_tokenizer_revision": "unverified",
+                        "structured_output_mode": "json_schema_strict_1"}
 
     async def count(self, role, data):
         if self.context_limit is None:
@@ -53,11 +95,30 @@ class AuditModel:
         tokens, _ = await self.count(role, data)
         return tokens + self.settings.model_max_tokens + self.settings.token_margin <= self.context_limit
 
-    async def call(self, role, data):
+    async def call(self, role, data, *, purpose="evaluation"):
+        self.call_sequence += 1
+        call_id = self.call_sequence
+        for attempt in (1, 2):
+            try:
+                return await self._call_once(role, data, purpose=purpose, call_id=call_id, attempt=attempt)
+            except AuditError as error:
+                last = self.metrics[-1]
+                recoverable = str(error) == "invalid_model_schema" and last.get("finish_reason") == "stop" and any(
+                    d["stage"] == "before_redaction" and d["error_type"] == "json_invalid" for d in last["validation_diagnostics"])
+                if attempt == 2 or not recoverable:
+                    raise
+                # One fresh, identically constrained request; no repair/coercion,
+                # no semantic/citation/redaction/length/network retry.
+
+    async def _call_once(self, role, data, *, purpose, call_id, attempt):
         if self.progress_callback:
             await self.progress_callback(role)
         started = time.perf_counter()
-        metric = {"role": role, "status": "error", "prompt_tokens": None,
+        metric = {"role": role, "responsibility": role, "schema_version": schema_version(role),
+                  "call_id": call_id, "attempt": attempt, "maximum_attempts": 2,
+                  "recovery_policy": "json-invalid-stop-one-fresh-response-1",
+                  "purpose": purpose, "status": "error", "prompt_tokens": None, "finish_reason": "not_returned",
+                  "validation_diagnostics": [],
                   "reserved_output_tokens": self.settings.model_max_tokens,
                   "context_limit": self.context_limit, "completion_tokens": None}
         try:
@@ -70,25 +131,33 @@ class AuditModel:
                 with bind_pipeline_observer(None):
                     return await self.rag._completion(model=self.rag.model_id, messages=msg,
                         max_tokens=self.settings.model_max_tokens, temperature=0, top_p=1, seed=42,
-                        response_format={"type": "json_object"})
+                        response_format={"type": "json_schema", "json_schema": {"name": role + "_" + schema_version(role).replace("-", "_"),
+                            "strict": True, "schema": SCHEMAS[role].model_json_schema()}})
             response = await asyncio.wait_for(run_with_limit(self.limiter, operation,
                 acquire_timeout=PERFORMANCE_SETTINGS.request_admission_timeout_seconds) if self.limiter else operation(),
                 PERFORMANCE_SETTINGS.application_request_timeout_seconds)
             choice = response.choices[0]
             metric["completion_tokens"] = response.usage.completion_tokens
             metric["server_prompt_tokens"] = response.usage.prompt_tokens
+            metric["finish_reason"] = choice.finish_reason if choice.finish_reason in {"stop", "length", "content_filter", "tool_calls", "function_call"} else "unknown"
             if response.usage.prompt_tokens != tokens:
                 raise AuditError("token_count_serving_mismatch")
             if choice.finish_reason != "stop":
                 raise AuditError("incomplete_structured_output")
             # Strict local JSON/schema checks remain mandatory even with server
-            # JSON grammar. No parser repair, retries or free-text fallback.
+            # JSON grammar. No parser repair or free-text fallback. The wrapper
+            # permits only the versioned, single JSON-syntax recovery attempt.
+            stage = "before_redaction"
             result = SCHEMAS[role].model_validate_json(choice.message.content)
+            stage = "after_redaction"
             safe = self._safe(result.model_dump())
             result = SCHEMAS[role].model_validate(safe)
             metric["status"] = "validated"
             return result.model_dump()
-        except ValidationError:
+        except ValidationError as error:
+            metric["validation_diagnostics"] = validation_diagnostics(error, role, stage, metric)
+            if stage == "before_redaction":
+                metric["json_syntax"] = json_syntax_summary(choice.message.content)
             raise AuditError("invalid_model_schema") from None
         finally:
             metric["duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
@@ -100,6 +169,32 @@ class AuditModel:
                     stream.write(canonical_json(metric) + "\n")
                     stream.flush()
                     os.fsync(stream.fileno())
+
+    async def check_schema_support(self):
+        """Five sequential synthetic probes; bounded syntax recovery is counted."""
+        from knowledge_audit.evidence import EvidenceIndex
+        from utils.read_only_audit import canonical_sha256
+        records = [{"chunk_id": "synthetic-1", "faq_entry_id": "synthetic-1", "question": "Imaginary approval duration?",
+                    "answer": "Approval takes two days.", "document_title": "Synthetic_FAQ", "main_category": "Synthetic",
+                    "sub_category": "Synthetic", "redaction_changed": False}]
+        records[0]["content_sha256"] = canonical_sha256(records[0])
+        snap = {"snapshot_id": canonical_sha256(records), "records": records}
+        entry = EvidenceIndex(snap).entry("synthetic-1")
+        aspects = [{"aspect_id": "a1", "description": "Approval duration", "conditions": []}]
+        support = {"aspect_id": "a1", "entry_id": "synthetic-1", "support_id": "synthetic_support",
+            "citations": [{"snapshot_id": snap["snapshot_id"], "faq_entry_id": "synthetic-1", "chunk_id": "synthetic-1", "sentence_number": 1}],
+            "applicability": "applicable", "conditions": [], "dependencies": [], "explanation": "Synthetic duration sentence."}
+        proof = {"question": "Imaginary approval duration?", "aspects": aspects, "supports": [support],
+                 "source_evidence": [entry], "observed_conflicts": []}
+        probes = {"scope": {"question": "How can I replace a card?", "preceding_history": []},
+                  "aspects": {"question": "Imaginary approval duration?"},
+                  "batch": {"question": "Imaginary approval duration?", "aspects": aspects, "entries": [entry]},
+                  "reconciliation": proof, "verification": proof}
+        result = {"version": "schema-capability-1", "mode": "json_schema_strict_1", "roles": {}}
+        for role, data in probes.items():
+            await self.call(role, data, purpose="schema_capability")
+            result["roles"][role] = {"schema_version": schema_version(role), "status": "validated"}
+        return result
 
     def _safe(self, value, key=""):
         if isinstance(value, dict):

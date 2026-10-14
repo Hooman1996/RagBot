@@ -1,9 +1,9 @@
 /* Main-dashboard audit UI. Text-only DOM rendering; no private browser storage. */
 (function (global) {
     'use strict';
-    const CONTRACT = 'coverage-page-1';
+    const CONTRACT = 'coverage-page-2';
     const LABELS = {
-        prepared: 'Prepared', pending_model: 'Pending model', needs_context: 'Needs context / review',
+        prepared: 'Prepared', pending_model: 'Pending model', needs_context: 'Needs preceding context', needs_review: 'Needs review',
         uncertain_preparation: 'Preparation needs review', invalid_input: 'Invalid input', failed: 'Error',
         covered_reachable: 'Covered and reachable', covered_not_reachable: 'Covered but not reachable',
         possible_partial_gap: 'Possible partial KB gap', possible_gap: 'Possible KB gap',
@@ -40,6 +40,7 @@
         const canStart = root.dataset.canStart === 'true', canEvidence = root.dataset.canEvidence === 'true';
         let datasets = [], snapshots = [], currentDataset = '', currentRun = '', offset = 0, total = 0;
         let selected = new Set(), fileBytes = null, lastEvidenceButton = null, poll = null, loading = false, querySequence = 0;
+        let exportRevisionRun = '';
         const status = message => { $('Status').textContent = message; };
         const fail = error => { $('Error').hidden = false; $('Error').textContent = error.message || 'The operation could not complete. Try again.'; };
         const clearError = () => { $('Error').hidden = true; $('Error').textContent = ''; };
@@ -87,7 +88,7 @@
         }
         function badge(text, value) {
             const b = node(document, 'span', text, 'coverage-badge');
-            b.dataset.tone = value === 'covered_reachable' ? 'good' : ['possible_gap','possible_partial_gap','needs_context'].includes(value) ? 'review' : value === 'error' ? 'error' : 'neutral';
+            b.dataset.tone = value === 'covered_reachable' ? 'good' : ['possible_gap','possible_partial_gap','needs_context','needs_review'].includes(value) ? 'review' : value === 'error' ? 'error' : 'neutral';
             return b;
         }
         function renderRows(rows) {
@@ -136,13 +137,15 @@
         async function progress() {
             if (!currentRun) return;
             const run = await api('runs/' + encodeURIComponent(currentRun));
+            const activeOption = Array.from($('Runs').children).find(option => option.value === currentRun);
+            if (activeOption) activeOption.textContent = label(run.state) + ' · ' + run.selected_row_ids.length + ' questions · ' + currentRun.slice(-8);
             $('Progress').max = run.selected_row_ids.length; $('Progress').value = run.completed_pilot_rows;
             $('ProgressText').textContent = label(run.state) + ' · ' + run.completed_pilot_rows + ' of ' + run.selected_row_ids.length + ' pilot questions processed · ' + run.input_row_count + ' rows retained' + (run.stage ? ' · ' + label(run.stage) : '');
             $('Cancel').hidden = !canStart || !['queued','running'].includes(run.state);
             $('Resume').hidden = !canStart || (!['failed','interrupted','cancelled'].includes(run.state) && !(run.state === 'completed' && run.retryable_rows > 0));
-            $('Export').hidden = root.dataset.canExport !== 'true'; $('Manifest').hidden = $('Export').hidden;
-            $('Export').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(currentRun) + '/export';
-            $('Manifest').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(currentRun) + '/export-manifest';
+            $('PrepareExport').hidden = root.dataset.canExport !== 'true';
+            $('Export').hidden = root.dataset.canExport !== 'true' || exportRevisionRun !== currentRun; $('Manifest').hidden = $('Export').hidden;
+            if (exportRevisionRun !== currentRun) $('ExportState').textContent = 'Prepare a frozen CSV and matching manifest from current progress.';
             status(run.state === 'incompatible' ? 'Knowledge or serving revision changed. This pilot requires review; start a new compatible run.' : 'Pilot selection: ' + run.selected_row_ids.length + ' questions. Unselected rows remain pending / not evaluated.');
             if (!['queued','running'].includes(run.state) && poll) { global.clearInterval(poll); poll = null; }
             await refreshRows();
@@ -164,14 +167,23 @@
                 panel.replaceChildren();
                 if (data.evidence_visibility === 'snapshot_mismatch') { panel.append(node(document, 'p', 'This run is incompatible with its recorded knowledge revision. Evidence is withheld.')); return; }
                 const row = data.result;
+                panel.className = '';
                 appendText(panel, 'Intended question', row.standalone_query_redacted || row.normalized_query_redacted || row.input_query_redacted, 'auto');
                 appendText(panel, 'Assessment', label(row.outcome) + ' · ' + label(row.coverage_status));
                 appendText(panel, 'Why', row.explanation || (row.scope_decision || {}).explanation || 'This row has not been evaluated.', 'auto');
+                if (row.error_code) appendText(panel, 'Error code', row.error_code);
+                if ((row.review_codes || []).length) appendText(panel, 'Review required', row.review_codes.map(label).join(' · '));
                 (row.requested_aspects || []).forEach(aspect => {
                     const item = node(document, 'div', undefined, 'coverage-aspect'); item.append(node(document, 'span', aspect.aspect_id, 'coverage-aspect-id'));
                     const description = node(document, 'p', aspect.description); description.dir = 'auto'; item.append(description);
                     if (aspect.conditions.length) { const p = node(document, 'p', 'Conditions: ' + aspect.conditions.join(' · ')); p.dir = 'auto'; item.append(p); }
                     const assessment = row.audit_assessment || {};
+                    const supported = (row.supported_aspects || []).some(a => (typeof a === 'string' ? a : a.aspect_id) === aspect.aspect_id);
+                    const missing = (row.unresolved_aspects || []).some(a => (typeof a === 'string' ? a : a.aspect_id) === aspect.aspect_id);
+                    const state = row.coverage_status === 'full' && supported ? 'Supported · verified' :
+                        supported ? 'Apparent support · inspect conditions' : missing && ['possible_gap','possible_partial_gap'].includes(row.outcome) ?
+                            'Missing in evaluated evidence' : 'Unresolved · needs review';
+                    item.append(node(document, 'strong', state, 'coverage-aspect-state'));
                     const witnesses = (assessment.witness && assessment.witness.length ? assessment.witness : assessment.supports || []).filter(s => s.aspect_id === aspect.aspect_id);
                     witnesses.forEach(support => {
                         const p = node(document, 'p', support.applicability + (support.conditions.length ? ' · ' + support.conditions.join(' · ') : '')); p.dir = 'auto'; item.append(p);
@@ -197,6 +209,13 @@
                 appendText(panel, 'Production context', label(row.production_context_sufficiency));
                 appendText(panel, 'Stopping reason', label(row.stopping_reason));
                 appendText(panel, 'Verification', label(row.verification_result));
+                (row.verifications || []).forEach(v => appendText(panel, 'Verification · ' + label(v.verdict), v.explanation, 'auto'));
+                if (row.verification_reason) appendText(panel, 'Verification reason', row.verification_reason, 'auto');
+                const search = (row.evaluation_scope || {}).bundle_search;
+                if (search && row.coverage_status !== 'full') appendText(panel, 'Compatibility search',
+                    'Bounded search · at most ' + search.seed_limit + ' seeds · ' + search.bundles_considered + ' bundles considered. A missing compatible proof is not proof of a missing fact.');
+                (row.validation_diagnostics || []).forEach(d => appendText(panel, 'Output validation',
+                    d.responsibility + ' · ' + d.schema_version + ' · ' + d.stage + ' · ' + (d.field_path || []).join('.') + ' · ' + d.error_type));
                 const details = node(document, 'details'); details.append(node(document, 'summary', 'Query forms and audit scope'));
                 appendText(details, 'Original query · redacted', row.input_query_redacted, 'auto');
                 appendText(details, 'Retrieval wording', row.canonical_retrieval_query_redacted, 'auto');
@@ -204,9 +223,10 @@
                 appendText(details, 'Snapshot', row.kb_snapshot_id);
                 appendText(details, 'Entries checked', row.evaluated_entry_count);
                 appendText(details, 'Review codes', (row.review_codes || []).join(' · ')); panel.append(details);
+                if (row.output_recovery_count) appendText(details, 'Fresh output recovery attempts', row.output_recovery_count + ' · ' + row.recovery_policy);
             } catch (error) { fail(error); panel.replaceChildren(node(document, 'p', 'Evidence could not load. Select this row again to retry.')); }
         }
-        function closeEvidence() { $('EvidenceContent').replaceChildren(node(document, 'p', 'Open an assessed query to inspect its evidence.')); const target=lastEvidenceButton && document.getElementById(lastEvidenceButton.id); if(target) target.focus(); else $('Search').focus(); }
+        function closeEvidence() { $('EvidenceContent').className = 'coverage-empty'; $('EvidenceContent').replaceChildren(node(document, 'p', 'Open an assessed query to inspect its evidence.')); const target=lastEvidenceButton && document.getElementById(lastEvidenceButton.id); if(target) target.focus(); else $('Search').focus(); }
         $('CloseEvidence').addEventListener('click', closeEvidence);
         $('Evidence').addEventListener('keydown', event => { if (event.key === 'Escape') closeEvidence(); });
         $('Previous').addEventListener('click', () => { offset = Math.max(0,offset - 25); refreshRows().catch(fail); });
@@ -217,6 +237,18 @@
         $('Runs').addEventListener('change', async () => { currentRun = $('Runs').value; offset = 0; clearError(); if (currentRun) { startPoll(); await progress().catch(fail); } else { if (poll) global.clearInterval(poll); await refreshRows().catch(fail); } });
         $('Cancel').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/cancel',{method:'POST'}); status('Cancellation requested. Completed rows remain available.'); await progress(); } catch(e) { fail(e); } });
         $('Resume').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/retry',{method:'POST'}); startPoll(); await progress(); } catch(e) { fail(e); } });
+        $('PrepareExport').addEventListener('click', async () => {
+            const run = currentRun; $('PrepareExport').disabled = true; clearError();
+            try {
+                const revision = await api('runs/' + encodeURIComponent(run) + '/export-revisions', {method:'POST'});
+                if (run !== currentRun) return;
+                const suffix = '?revision_id=' + encodeURIComponent(revision.export_revision_id);
+                $('Export').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(run) + '/export' + suffix;
+                $('Manifest').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(run) + '/export-manifest' + suffix;
+                exportRevisionRun = run; $('Export').hidden = false; $('Manifest').hidden = false;
+                $('ExportState').textContent = 'Frozen ' + revision.export_captured_at + ' · ' + label(revision.state) + ' pilot · ' + revision.row_count + ' rows. Prepare again to include newer progress.';
+            } catch(e) { fail(e); } finally { $('PrepareExport').disabled = false; }
+        });
         if (canStart) {
             function mapHeaders() {
                 if (!fileBytes) return;

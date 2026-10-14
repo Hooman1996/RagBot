@@ -26,6 +26,7 @@ EXPECTED = {
     ('GET', '/api/knowledge-coverage/runs/{run_id}/results'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/runs/{run_id}/rows/{row_id}'): 'coverage_evidence_view',
     ('GET', '/api/knowledge-coverage/runs/{run_id}/export'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/export-revisions'): 'coverage_export_download',
     ('GET', '/api/knowledge-coverage/runs/{run_id}/export-manifest'): 'coverage_export_download',
     ('POST', '/api/knowledge-coverage/runs/{run_id}/cancel'): 'coverage_run_start',
     ('POST', '/api/knowledge-coverage/runs/{run_id}/retry'): 'coverage_run_start',
