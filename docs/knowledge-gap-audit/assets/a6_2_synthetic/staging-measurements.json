@@ -1,0 +1,267 @@
+{
+  "audit_model_metrics": [
+    {
+      "attempt": 1,
+      "completion_tokens": 349,
+      "duration_ms": 12390.289,
+      "failure_category": "none",
+      "finish_reason": "stop",
+      "phase_timings_ms": {
+        "admission": 501.173,
+        "completion": 11851.786,
+        "progress": 0.182,
+        "tokenization": 35.791,
+        "validation": 1.305
+      },
+      "prompt_tokens": 1404,
+      "role": "batch",
+      "status": "validated"
+    },
+    {
+      "attempt": 1,
+      "completion_tokens": 341,
+      "duration_ms": 12042.91,
+      "failure_category": "none",
+      "finish_reason": "stop",
+      "phase_timings_ms": {
+        "admission": 501.257,
+        "completion": 11511.85,
+        "progress": 0.251,
+        "tokenization": 28.797,
+        "validation": 0.705
+      },
+      "prompt_tokens": 1404,
+      "role": "batch",
+      "status": "validated"
+    },
+    {
+      "attempt": 1,
+      "completion_tokens": 341,
+      "duration_ms": 11925.024,
+      "failure_category": "none",
+      "finish_reason": "stop",
+      "phase_timings_ms": {
+        "admission": 501.209,
+        "completion": 11377.758,
+        "progress": 0.175,
+        "tokenization": 44.604,
+        "validation": 1.207
+      },
+      "prompt_tokens": 1404,
+      "role": "batch",
+      "status": "validated"
+    },
+    {
+      "attempt": 1,
+      "completion_tokens": 341,
+      "duration_ms": 11979.913,
+      "failure_category": "none",
+      "finish_reason": "stop",
+      "phase_timings_ms": {
+        "admission": 501.042,
+        "completion": 11429.088,
+        "progress": 0.228,
+        "tokenization": 48.339,
+        "validation": 1.159
+      },
+      "prompt_tokens": 1404,
+      "role": "batch",
+      "status": "validated"
+    }
+  ],
+  "client_policy": {
+    "connect": 3.0,
+    "pool": 5.0,
+    "read": 40.0,
+    "sdk_retries": 0,
+    "write": 5.0
+  },
+  "completion_metrics": [
+    {
+      "completion_tokens": 38,
+      "duration_ms": 1722.678,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1745,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 38,
+      "duration_ms": 1343.755,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1745,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 349,
+      "duration_ms": 11847.941,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1404,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 341,
+      "duration_ms": 11508.39,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1404,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 38,
+      "duration_ms": 1356.633,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1745,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 341,
+      "duration_ms": 11373.626,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1404,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 38,
+      "duration_ms": 1367.689,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1745,
+      "status": "returned"
+    },
+    {
+      "completion_tokens": 341,
+      "duration_ms": 11426.602,
+      "error_category": "none",
+      "finish_reason": "stop",
+      "known_usage": true,
+      "prompt_tokens": 1404,
+      "status": "returned"
+    }
+  ],
+  "controlled_candidates": [
+    {
+      "candidate_count": 150,
+      "depth": 150,
+      "duration_ms": 254.172,
+      "selected_count": 150,
+      "status": "returned"
+    },
+    {
+      "candidate_count": 300,
+      "depth": 300,
+      "duration_ms": 325.423,
+      "selected_count": 300,
+      "status": "returned"
+    }
+  ],
+  "generation_limit": 24,
+  "generation_posts": 8,
+  "gpu_after": {
+    "status": "unavailable"
+  },
+  "gpu_before": {
+    "status": "unavailable"
+  },
+  "metadata_requests": 13,
+  "observations": [
+    {
+      "case_id": "reference_alone_1",
+      "duration_ms": 1723.271,
+      "status": "returned"
+    },
+    {
+      "case_id": "reference_alone_2",
+      "duration_ms": 1344.058,
+      "status": "returned"
+    },
+    {
+      "case_id": "audit_alone_1",
+      "duration_ms": 12393.672,
+      "status": "returned"
+    },
+    {
+      "case_id": "audit_alone_2",
+      "duration_ms": 12047.928,
+      "status": "returned"
+    },
+    {
+      "case_id": "reference_with_audit_1",
+      "duration_ms": 1356.961,
+      "status": "returned"
+    },
+    {
+      "case_id": "audit_with_reference_1",
+      "duration_ms": 11929.62,
+      "status": "returned"
+    },
+    {
+      "case_id": "reference_with_audit_2",
+      "duration_ms": 1368.016,
+      "status": "returned"
+    },
+    {
+      "case_id": "audit_with_reference_2",
+      "duration_ms": 11984.408,
+      "status": "returned"
+    }
+  ],
+  "operator_code_sha256": "ac04447107a034037c6f74e3998a96f3a336d9650937b9b76dc5462a5c0ecfb6",
+  "review_scope": "operational_resource_observations_not_quality_accuracy_or_production_capacity",
+  "scope": "synthetic_context_and_controlled_candidates_no_live_hybrid_retrieval",
+  "serving_identity_unchanged": true,
+  "state": "finished",
+  "summary": {
+    "audit_alone": {
+      "median_ms": 12220.8,
+      "range_ms": [
+        12047.928,
+        12393.672
+      ],
+      "returned": 2
+    },
+    "audit_with_reference": {
+      "median_ms": 11957.014,
+      "range_ms": [
+        11929.62,
+        11984.408
+      ],
+      "returned": 2
+    },
+    "reference_alone": {
+      "median_ms": 1533.6644999999999,
+      "range_ms": [
+        1344.058,
+        1723.271
+      ],
+      "returned": 2
+    },
+    "reference_with_audit": {
+      "median_ms": 1362.4885,
+      "range_ms": [
+        1356.961,
+        1368.016
+      ],
+      "returned": 2
+    }
+  },
+  "tei_post_limit": 80,
+  "tei_posts": 11,
+  "unknown_remote_completion": false,
+  "usage": {
+    "completion_tokens": 1524,
+    "prompt_tokens": 12596
+  },
+  "version": "a62-resources-1"
+}

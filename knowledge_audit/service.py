@@ -11,6 +11,8 @@ from knowledge_audit.retrieval import AuditRetrieval
 from knowledge_audit.runtime import confirm_staging
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
+from utils.audit_dispatch import audit_dispatch
+from knowledge_audit.operations import AuditAdmission,Limits
 
 
 class AdmittedPreparer:
@@ -24,7 +26,7 @@ class AdmittedPreparer:
 async def build_engine(store, meta, settings, *, answering, runner, limiter):
     import httpx
     from scripts.kb_signature import create_signature
-    if any(meta["settings"].get(k) != v for k, v in settings.manifest().items()):
+    if any(meta["settings"].get(k) != v for k, v in settings.manifest().items() if k!="operational_limits"):
         from knowledge_audit.privacy import AuditError
         raise AuditError("audit_runtime_identity_drift")
     confirm_staging(confirmed=True, model=True, snapshot=True)
@@ -38,6 +40,7 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
         raise AuditError("unconfirmed_service_target")
     dataset, redactor = await runner.run(store.dataset, meta["dataset_id"], meta["owner_id"])
     snapshot = await runner.run(store.snapshot, meta["snapshot_id"], meta["owner_id"])
+    limiter=AuditAdmission(limiter,Limits.from_settings(meta["settings"]).pace_ms) if limiter else None
     rag = answering.agent_service.rag_system
     http = httpx.AsyncClient(timeout=PERFORMANCE_SETTINGS.vllm_http_read_timeout_seconds)
     try:
@@ -70,7 +73,7 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
             preparation_config["structured_output_capability"] = capability
             services = {}
             for name, key in (("embedding", "TEI_EMBED_URL"), ("reranker", "TEI_RERANK_URL")):
-                response = await http.get(os.environ[key].rstrip("/") + "/info")
+                response = await audit_dispatch('metadata',lambda:http.get(os.environ[key].rstrip('/')+'/info'))
                 response.raise_for_status()
                 body = response.json()
                 services[name] = {"model_id": redactor.opaque("model", str(body.get("model_id", "unknown"))),

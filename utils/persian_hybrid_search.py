@@ -794,7 +794,8 @@ class PersianHybridSearch:
                 start = time.perf_counter()
                 metrics["capability_request_count"] += 1
                 try:
-                    response = await self._http.get(f"{self.tei_rerank_url}/info")
+                    from utils.audit_dispatch import audit_dispatch
+                    response = await audit_dispatch('metadata',lambda:self._http.get(f"{self.tei_rerank_url}/info"))
                     response.raise_for_status()
                     try:
                         info = response.json()
@@ -842,7 +843,8 @@ class PersianHybridSearch:
                 start = time.perf_counter()
                 try:
                     async with trace_span("reranker"):
-                        response = await self._http.post(f"{self.tei_rerank_url}/rerank", json=payload)
+                        from utils.audit_dispatch import audit_dispatch
+                        response = await audit_dispatch('reranking',lambda:self._http.post(f"{self.tei_rerank_url}/rerank", json=payload))
                         response.raise_for_status()
                     try:
                         rankings = response.json()

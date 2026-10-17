@@ -10,6 +10,7 @@ from pipeline_observer import bind_pipeline_observer
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.read_only_audit import text_sha256
+from utils.audit_dispatch import audit_dispatch
 
 
 class AuditRetrieval:
@@ -21,7 +22,7 @@ class AuditRetrieval:
         self.metrics = []
 
     async def check(self):
-        current = await self.runner.run(self.signature_provider, "a2-drift-check")
+        current = await audit_dispatch('source_check',lambda:self.runner.run(self.signature_provider, 'a2-drift-check'))
         assert_compatible(self.snapshot["source_signature"], current)
 
     async def fetch(self, query, *, production=False, depth=150, documents=None):

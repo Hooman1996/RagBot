@@ -29,7 +29,7 @@
             <button id="coverageTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode">Theme</button>
             {% set logout_label = 'Log out' %}{% include "_logout_button.html" %}
         </div></header>
-        <div id="coverageRoot" class="coverage-page" data-contract="{{ contract_version }}" data-upload-limit="{{ upload_max_bytes }}" data-max-run-rows="{{ max_run_rows }}" data-batch-max="{{ batch_max_entries }}"
+        <div id="coverageRoot" class="coverage-page" data-contract="{{ contract_version }}" data-upload-limit="{{ upload_max_bytes }}" data-max-run-rows="{{ max_run_rows }}" data-batch-max="{{ batch_max_entries }}" data-operational-limits='{{ operational_limits|tojson }}'
              data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}"
              data-can-evidence="{{ 'true' if 'coverage_evidence_view' in permissions and 'kb_read' in permissions else 'false' }}"
              data-can-export="{{ 'true' if 'coverage_export_download' in permissions else 'false' }}"
@@ -78,6 +78,16 @@
                     <option value="subset">Explicit larger subset</option>
                     <option value="full_input">All user-query rows in this dataset</option>
                 </select></label>
+                <details class="coverage-summary"><summary>Finite execution limits</summary>
+                    <p>These are stop limits, not estimates of capacity. A larger input may pause before all rows are evaluated. Consumed allowance survives recovery; exhausted allowance requires a new run.</p>
+                    <div class="coverage-form-grid">
+                    {% for key,label in [('completion_attempts','Completion attempts'),('token_allowance','Reserved/used tokens'),('execution_seconds','Execution seconds'),('consecutive_failures','Consecutive failures'),('min_free_bytes','Minimum free storage bytes'),('pace_ms','Audit pacing milliseconds')] %}
+                    <label>{{ label }}<input id="coverageLimit_{{ key }}" type="number" value="{{ operational_limits[key] }}" min="{{ operational_limits[key] if key in ['min_free_bytes','pace_ms'] else 1 }}" max="{{ operational_limits[key] if key not in ['min_free_bytes','pace_ms'] else (1099511627776 if key == 'min_free_bytes' else 60000) }}"></label>
+                    {% endfor %}
+                    </div>
+                    <label><input id="coverageBudgetAck" type="checkbox"> I confirm these finite limits for full-input execution; unfinished rows remain pending if a limit is reached.</label>
+                </details>
+                <p class="coverage-summary">Retention: manual operator cleanup only; automatic deletion is disabled. Default age threshold: {{ retention_days }} days. Holds, active work and referenced dependencies are protected. Age alone does not revoke access.</p>
                 <p id="coverageStartSummary" class="coverage-summary" aria-live="polite">Select a dataset and snapshot. Processing is sequential; larger runs may take a long time.</p>
                 <div class="coverage-selection-bar"><strong id="coverageSelectionCount">0 selected</strong><button id="coverageClearSelection" class="coverage-link" type="button">Clear selection</button>
                     <button id="coverageStart" class="coverage-primary" type="button" disabled>Start selected pilot</button></div>
@@ -88,6 +98,7 @@
                     <label>Previous runs<select id="coverageRuns"><option value="">Select a run</option></select></label></div>
                 <progress id="coverageProgress" max="5" value="0" aria-label="Selected rows processed"></progress>
                 <div id="coverageRunCounts" class="coverage-run-counts" aria-live="polite"></div>
+                <p id="coverageBudgetProgress" class="coverage-summary" role="status" aria-live="polite"></p>
                 <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel run</button>
                     <button id="coverageResume" class="coverage-secondary" type="button" hidden>Resume remaining rows</button>
                 </div>

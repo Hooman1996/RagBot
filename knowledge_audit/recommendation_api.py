@@ -57,7 +57,7 @@ def services(request):
 def public_meta(meta):
     return {k:meta[k] for k in ('recommendation_revision_id','source_run_id','source_export_id','source_export_revision_id',
         'snapshot_id','created_at','finished_at','state','phase','error_code','selected_row_ids','versions','serving_identity',
-        'human_gap_review_status','calibration_status') if k in meta}
+        'human_gap_review_status','calibration_status','operational_settings','pause_reason') if k in meta}
 
 
 def evidence_access(user,*extra):
@@ -72,7 +72,12 @@ async def availability(run_id: str,row_id: str,request: Request,user: WebUser):
     row=await safe_call(store.store.row,run_id,row_id,user.id)
     observations=await safe_call(store.observations,meta,row,user.id)
     revisions=await safe_call(store.list_for_row,run_id,row_id,user.id)
-    return {'eligibility':eligibility(row,meta,observations),'revisions':[public_meta(r) for r in revisions]}
+    from dataclasses import asdict
+    from knowledge_audit.settings import load_coverage_settings
+    from knowledge_audit.operations import Limits
+    limits=Limits.from_settings(load_coverage_settings().manifest(),recommendation=True)
+    return {'eligibility':eligibility(row,meta,observations),'revisions':[public_meta(r) for r in revisions],
+        'operational_limits':asdict(limits),'allowance_scope':'separate_per_recommendation_revision_no_usage_reset'}
 
 
 @router.post('/api/knowledge-coverage/runs/{run_id}/recommendations',status_code=202)
@@ -91,7 +96,12 @@ async def detail(revision_id: str,request: Request,user: WebUser):
     meta=await safe_call(store.owned,revision_id,user.id)
     result=await safe_call(store.effective_results,revision_id,user.id)
     review=await safe_call(store.review,revision_id,user.id)
-    return {'revision':public_meta(meta),'results':result,'review':review}
+    budget={}
+    if meta.get('operational_policy'):
+        from knowledge_audit.operations import Budget,Limits
+        resource=await safe_call(Budget,store.store,store.path(revision_id),user.id,Limits.from_settings(meta['operational_settings'],recommendation=True))
+        budget=await safe_call(resource.summary)
+    return {'revision':public_meta(meta),'results':result,'review':review,'operational_budget':budget}
 
 
 @router.post('/api/knowledge-coverage/recommendations/{revision_id}/cancel')

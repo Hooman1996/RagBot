@@ -10,6 +10,7 @@ import secrets
 
 from knowledge_audit.privacy import AuditError,private_directory,private_json,private_write,formula_safe
 from knowledge_audit.store import now
+from knowledge_audit.retention import protected_method
 from knowledge_audit.export import encode_csv,ARRAY_FIELDS,MAP_FIELDS,STRUCTURED_DEFAULTS,_redact
 from knowledge_audit.recommendations import eligibility,normalized,MetadataIndex,LOOKUP_VERSION
 from knowledge_audit.recommendation_prompts import prompt_identity
@@ -61,6 +62,7 @@ class RecommendationStore:
             fcntl.flock(fd,fcntl.LOCK_EX);yield
         finally:os.close(fd)
 
+    @protected_method
     def source(self,rid,owner):
         meta=self.owned(rid,owner);source=self.store.read(self.path(rid)/'source.json')
         if canonical_sha256(source)!=meta['source_sha256']:raise AuditError('recommendation_source_drift')
@@ -90,6 +92,7 @@ class RecommendationStore:
                 'comparison_rule':'same_input_row_snapshot_normalized_resolved_intent','human_ground_truth':False})
         return found
 
+    @protected_method
     def create(self,run_id,owner,export_revision_id,row_ids):
         if not row_ids or len(row_ids)>5 or len(set(row_ids))!=len(row_ids):raise AuditError('invalid_pilot_selection')
         meta=self.store.owned('runs',run_id,owner)
@@ -117,9 +120,16 @@ class RecommendationStore:
             'selected_row_ids':row_ids,'source_row_ids':manifest['row_ids'],'source_row_hashes':{r['source_row_id']:canonical_sha256(r) for r in rows},
             'metadata_index_id':index.identity,'state':'queued','phase':'queued','versions':recommendation_versions(),
             'human_gap_review_status':'not_reviewed','calibration_status':'real_query_calibration_pending','cancel_requested':False}
+        from knowledge_audit.operations import Budget,Limits
+        from knowledge_audit.settings import load_coverage_settings
+        settings=load_coverage_settings().manifest()
+        out['operational_settings']=settings
+        out['operational_policy']='audit-operations-1'
+        Budget(self.store,path,owner,Limits.from_settings(settings,recommendation=True))
         private_json(path/'results.json',_redact(results,redactor));private_json(path/'meta.json',out)
         return out
 
+    @protected_method
     def results(self,rid,owner):
         self.owned(rid,owner)
         path=self.path(rid)
@@ -151,12 +161,14 @@ class RecommendationStore:
             if value['recommendation_status']=='drafted' and not value['approval_allowed']:value['recommendation_status']='needs_review'
         return results
 
+    @protected_method
     def save_progress(self,rid,owner,meta,results):
         self.owned(rid,owner)
         with self.lock(rid):
             self.store.write(self.path(rid)/'results.json',results)
             self.store.write(self.path(rid)/'meta.json',meta)
 
+    @protected_method
     def finish(self,rid,owner,meta,results):
         self.owned(rid,owner)
         with self.lock(rid):
@@ -184,6 +196,7 @@ class RecommendationStore:
         if canonical_sha256({k:v for k,v in value.items() if k!='review_sha256'})!=value['review_sha256']:raise AuditError('recommendation_review_mismatch')
         return value
 
+    @protected_method
     def decide(self,rid,owner,row_id,question_id,decision,note):
         meta=self.owned(rid,owner)
         with self.lock(rid):
@@ -211,6 +224,7 @@ class RecommendationStore:
         if not rows:raise AuditError('artifact_not_found')
         return {'snapshot_id':index['snapshot_id'],'faq_entry_id':faq_id,'metadata':rows,'coverage_claim':'not_established_by_title'}
 
+    @protected_method
     def compose(self,rid,owner,visible,review_revision_id=None):
         meta=self.owned(rid,owner)
         with self.lock(rid):
@@ -236,11 +250,15 @@ class RecommendationStore:
                 'review_revision_id':review['review_revision_id'],'review_sha256':review.get('review_sha256',''),
                 'coverage_source_manifest':source['manifest'],'source_sha256':meta['source_sha256'],
                 'evidence_visible':visible,'human_gap_review_status':'not_reviewed','calibration_status':'real_query_calibration_pending'}
+            if meta.get('operational_policy'):
+                from knowledge_audit.operations import Budget,Limits
+                manifest['recommendation_budget']=Budget(self.store,self.path(rid),owner,Limits.from_settings(meta['operational_settings'],recommendation=True)).summary()
             manifest['approval_scope']='question_taxonomy_proposal_only_no_answer_or_kb_write'
             directory=private_directory(private_directory(private_directory(self.path(rid)/'exports')/('evidence' if visible else 'restricted'))/revision_id)
             private_write(directory/'coverage.csv',body);private_json(directory/'manifest.json',manifest)
             return manifest
 
+    @protected_method
     def download(self,rid,owner,visible,revision_id):
         self.owned(rid,owner)
         if not re.fullmatch(r'rex_[0-9a-f]{32}',revision_id):raise AuditError('invalid_artifact_id')

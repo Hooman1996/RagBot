@@ -359,6 +359,30 @@ def _specs() -> dict[str, VariableSpec]:
         "KNOWLEDGE_COVERAGE_TOKEN_MARGIN": VariableSpec(
             kind="int", default="128", minimum=32, maximum=1024, component="Knowledge coverage", restart="FastAPI",
         ),
+        "KNOWLEDGE_COVERAGE_MAX_COMPLETIONS": VariableSpec(
+            kind="int", default="200", minimum=1, maximum=100000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_TOKENS": VariableSpec(
+            kind="int", default="1000000", minimum=1, maximum=1000000000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS": VariableSpec(
+            kind="int", default="3600", minimum=1, maximum=604800, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES": VariableSpec(
+            kind="int", default="3", minimum=1, maximum=100, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MIN_FREE_BYTES": VariableSpec(
+            kind="int", default="1073741824", minimum=0, maximum=1099511627776, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_PACE_MS": VariableSpec(
+            kind="int", default="500", minimum=0, maximum=60000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS": VariableSpec(
+            kind="int", default="20", minimum=1, maximum=10000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_RETENTION_DAYS": VariableSpec(
+            kind="int", default="30", minimum=1, maximum=3650, component="Knowledge coverage", restart="FastAPI",
+        ),
         "KNOWLEDGE_COVERAGE_MAX_RUN_ROWS": VariableSpec(
             kind="int", default="10000", minimum=5, maximum=100000, component="Knowledge coverage", restart="FastAPI",
         ),

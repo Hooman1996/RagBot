@@ -286,7 +286,7 @@ def test_full_mode_api_idempotency_csrf_owner_and_revoked_grant(audit_runtime,se
     setup.users[1]['role']=setup.users[2]['role']='admin'
     monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}))
     monkeypatch.setattr(jobs,'start',lambda *a:None)
-    payload={'dataset_id':d['dataset_id'],'snapshot_id':s['snapshot_id'],'execution_mode':'full_input',
+    payload={'dataset_id':d['dataset_id'],'snapshot_id':s['snapshot_id'],'execution_mode':'full_input','budget_acknowledged':True,
              'idempotency_key':'synthetic_api_idempotency','documents':['Synthetic_FAQ']}
     with TestClient(main.app,raise_server_exceptions=False) as client:
         login(client,'alice')

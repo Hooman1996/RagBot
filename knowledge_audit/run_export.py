@@ -9,6 +9,7 @@ import re
 import secrets
 
 from knowledge_audit.export import csv_display_escapes, encode_csv
+from knowledge_audit.retention import protected_method
 from knowledge_audit.privacy import AuditError, private_directory, private_json, private_write
 from knowledge_audit.recommendation_store import RecommendationStore, decode_coverage, recommendation_row
 from knowledge_audit.recommendations import LOOKUP_VERSION
@@ -70,6 +71,7 @@ class RunExportStore:
                 values.append(meta)
         return sorted(values, key=lambda m: (m['created_at'], m['recommendation_revision_id']), reverse=True)
 
+    @protected_method
     def options(self, run_id, owner, source_revision_id=''):
         self.store.owned('runs', run_id, owner)
         sources = []
@@ -138,6 +140,9 @@ class RunExportStore:
                                   'recommendation_results_sha256': meta['results_sha256'],
                                   'review_sha256': review.get('review_sha256', ''), 'versions': meta['versions'],
                                   'serving_identity': meta.get('serving_identity', {})}
+                if meta.get('operational_policy'):
+                    from knowledge_audit.operations import Budget,Limits
+                    pinned[row_id]['operational_budget']=Budget(self.store,self.recommendations.path(rid),owner,Limits.from_settings(meta['operational_settings'],recommendation=True)).summary()
             states = Counter()
             for original in rows:
                 row_id = original['source_row_id']
@@ -174,6 +179,7 @@ class RunExportStore:
                 'selection_map': {k: {f: v[f] for f in ('recommendation_revision_id', 'review_revision_id')} for k, v in pinned.items()},
                 'summary': summary, 'evidence_visible': visible}
 
+    @protected_method
     def create(self, run_id, owner, source_revision_id, selections, visible):
         rows, source, pinned, summary = self._capture(run_id, owner, source_revision_id, selections, visible)
         revision_id = 'runex_' + secrets.token_hex(16)
@@ -200,6 +206,7 @@ class RunExportStore:
         root = private_directory(self.store._path('runs', run_id) / 'combined-exports')
         return private_directory(root / ('evidence' if visible else 'restricted'))
 
+    @protected_method
     def download(self, run_id, owner, visible, revision_id):
         self.store.owned('runs', run_id, owner)
         if not re.fullmatch(r'runex_[0-9a-f]{32}', revision_id):

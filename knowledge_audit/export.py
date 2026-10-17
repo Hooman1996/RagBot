@@ -130,18 +130,19 @@ ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", 
     "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
     "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "failure_diagnostics", "request_journal",
     "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "preparation_errors", "uncertainty_codes", "validation_diagnostics"}
-MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions", "review_codes_by_phase", "evidence_phases"}
+MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions", "review_codes_by_phase", "evidence_phases", "operational_budget", "retention_policy"}
 RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes", "failure_diagnostics", "request_journal"}
 
 
 def coverage_export(meta, results, redactor, *, evidence_visible):
     new_execution = bool(meta.get("execution_version"))
     fields = COVERAGE_FIELDS + (("execution_mode", "selected_for_execution", "execution_selected_row_count", "checkpoint_reuse_count", "unknown_completion_count", "validated_checkpoint_count", "request_journal", "model_evaluated", "entry_model_dispatched") if new_execution else ())
+    if meta.get('operational_policy'):fields+=('operational_budget','retention_policy','pause_reason')
     scope = ("full_input" if meta.get("execution_mode") == "full_input" else "explicit_subset_full_input_export" if meta.get("execution_mode") == "subset" else "pilot_subset_full_input_export")
     rows = []
     for source in results:
         row = {k: source.get(k, [] if k in ARRAY_FIELDS else {} if k in MAP_FIELDS else "") for k in fields}
-        row.update(schema_version="coverage-csv-5" if new_execution else "coverage-csv-4", run_id=meta["run_id"], export_id="",
+        row.update(schema_version="coverage-csv-6" if meta.get("operational_policy") else "coverage-csv-5" if new_execution else "coverage-csv-4", run_id=meta["run_id"], export_id="",
             batch_max_entries=meta["settings"].get("batch_max_entries",meta["settings"].get("batch_entries",2)),
             run_identity_id=meta.get("run_identity_id", ""), export_revision_id=meta.get("export_revision_id", ""),
             kb_snapshot_id=meta["snapshot_id"], configuration_id=meta["configuration_id"], input_id=meta["input_id"],
@@ -151,6 +152,8 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
             tokenizer_versions={"method": "served_tokenize", "immutable_revision": "unverified"},
             recommendations=[], recommendation_status="unassessed", run_settings_version=meta["configuration_id"],
             preparation_code_id=meta["versions"].get("code_id", ""), production_baseline_version="production-selection-1")
+        if meta.get('operational_policy'):
+            row.update(operational_budget=meta.get('operational_budget',{}),retention_policy=meta['settings'].get('retention_policy',{'automatic_deletion':False}),pause_reason=meta.get('pause_reason',''))
         if new_execution:
             row.update(execution_mode=meta["execution_mode"], selected_for_execution=source["source_row_id"] in meta["selected_row_ids"],
                 execution_selected_row_count=len(meta["selected_row_ids"]), checkpoint_reuse_count=source.get("checkpoint_reuse_count", 0),
@@ -168,7 +171,7 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
                 row[key] = ""
         rows.append(_redact(row, redactor))
     data, export_id = encode_csv(rows, fields, meta["row_ids"])
-    manifest = {"schema_version": "coverage-export-manifest-5" if new_execution else "coverage-export-manifest-4", "run_id": meta["run_id"], "export_id": export_id,
+    manifest = {"schema_version": "coverage-export-manifest-6" if meta.get("operational_policy") else "coverage-export-manifest-5" if new_execution else "coverage-export-manifest-4", "run_id": meta["run_id"], "export_id": export_id,
                 "export_revision_id": meta.get("export_revision_id", ""), "export_captured_at": meta.get("export_captured_at", ""),
                 "run_identity_id": meta.get("run_identity_id", ""), "run_identities": meta.get("run_identities", {}),
                 "run_identity_captured_at": meta.get("run_identity_captured_at", ""),
@@ -179,6 +182,11 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
                 "configuration_id": meta["configuration_id"], "settings": meta["settings"], "versions": meta["versions"],
                 "state": meta["state"], "csv_display_policy": "formula-prefix-map-1", "csv_escaped_cells": csv_display_escapes(rows), "evidence_visible": evidence_visible,
                 "outcome_counts": dict(Counter(r["outcome"] for r in rows))}
+    if meta.get('operational_policy'):
+        manifest['operational_budget']=meta.get('operational_budget',{})
+        manifest['operational_policy']=meta['operational_policy']
+        manifest['retention_policy']=meta['settings'].get('retention_policy',{'automatic_deletion':False})
+        manifest['pause_reason']=meta.get('pause_reason','')
     if new_execution:
         manifest.update(input_scope=scope, execution_mode=meta["execution_mode"], execution_version=meta["execution_version"],
             execution_selected_row_ids=meta["selected_row_ids"], processing_row_ids=meta["processing_row_ids"],

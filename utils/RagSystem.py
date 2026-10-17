@@ -217,7 +217,9 @@ class RAGSystem:
         self._vllm_active += 1
         try:
             async with trace_span("vllm"):
-                return await self.client.chat.completions.create(**kwargs)
+                from utils.audit_dispatch import audit_dispatch
+                return await audit_dispatch('completion',lambda:self.client.chat.completions.create(**kwargs),
+                    messages=kwargs.get('messages'),model=kwargs.get('model'),output_tokens=kwargs.get('max_tokens'))
         except APITimeoutError as exc:
             self._vllm_timeout_total += 1
             raise ServiceTimeoutError("Language model service timed out") from exc

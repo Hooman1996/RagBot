@@ -7,6 +7,8 @@ import json
 from pathlib import Path
 import secrets
 from typing import Annotated, Literal
+from dataclasses import asdict
+from knowledge_audit.operations import Budget,Limits
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -44,6 +46,15 @@ class ImportPayload(StrictModel):
     delimiter: str = ","
 
 
+class BudgetPayload(StrictModel):
+    completion_attempts: int = Field(strict=True,ge=1,le=100000)
+    token_allowance: int = Field(strict=True,ge=1,le=1000000000)
+    execution_seconds: int = Field(strict=True,ge=1,le=604800)
+    consecutive_failures: int = Field(strict=True,ge=1,le=100)
+    min_free_bytes: int = Field(strict=True,ge=0,le=1099511627776)
+    pace_ms: int = Field(strict=True,ge=0,le=60000)
+
+
 class RunPayload(StrictModel):
     dataset_id: str = Field(pattern=r"^d_[0-9a-f]{32}$")
     snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
@@ -52,6 +63,8 @@ class RunPayload(StrictModel):
     idempotency_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,128}$")
     entry_budget: int = Field(default=300, ge=1, le=300)
     documents: list[str] = Field(min_length=1, max_length=50)
+    operational_limits: BudgetPayload | None = None
+    budget_acknowledged: bool = False
 
 
 class RecoveryPayload(StrictModel):
@@ -68,7 +81,7 @@ def safe_meta(meta):
     keys = ("run_id", "dataset_id", "snapshot_id", "created_at", "state", "stage", "completed_pilot_rows",
             "input_row_count", "selected_row_ids", "active_row_id", "error_code", "attempt", "cancel_requested",
             "processed_rows", "execution_mode", "execution_version", "selected_row_count", "completion_quality", "recovery_choice",
-            "ordering_provenance", "settings")
+            "ordering_provenance", "settings", "pause_reason", "operational_policy")
     return {k: meta[k] for k in keys if k in meta}
 
 
@@ -109,7 +122,7 @@ async def page(request: Request, user: WebUser):
     settings = load_coverage_settings()
     return templates.TemplateResponse(request=request, name="knowledge_coverage.html", context={
         "permissions": permissions_for_user(user.role, user.id), "upload_max_bytes": settings.upload_max_bytes,
-        "contract_version": "coverage-page-3", "max_run_rows": settings.max_run_rows, "batch_max_entries": settings.batch_max_entries}, headers={"Cache-Control": "no-store"})
+        "contract_version": "coverage-page-3", "max_run_rows": settings.max_run_rows, "batch_max_entries": settings.batch_max_entries, "operational_limits":asdict(settings.operational_limits), "retention_days":settings.retention_days}, headers={"Cache-Control": "no-store"})
 
 
 def calibration_summary(meta):
@@ -249,8 +262,14 @@ async def create_run(payload: RunPayload, request: Request, user: WebUser):
     snapshot = await safe_call(store.owned, "snapshots", payload.snapshot_id, user.id)
     if not set(payload.documents) <= set(snapshot["documents"]):
         raise HTTPException(422, detail="Choose a datasource from this snapshot")
+    if payload.execution_mode=='full_input' and not payload.budget_acknowledged:
+        raise HTTPException(422,detail='Confirm finite full-input limits; the run may pause before all rows are evaluated')
+    effective=payload.operational_limits.model_dump() if payload.operational_limits else asdict(settings.operational_limits)
+    ceiling=asdict(settings.operational_limits)
+    if any((v>ceiling[k] if k not in {'min_free_bytes','pace_ms'} else v<ceiling[k]) for k,v in effective.items()):
+        raise HTTPException(422,detail='Run limits exceed configured allowance or reduce storage/pacing protection')
     config = {**settings.manifest(), "entry_budget": payload.entry_budget, "documents": payload.documents,
-              "selection_method": "server_all_user_query_rows" if payload.execution_mode == "full_input" else "explicit_source_row_ids"}
+              "selection_method": "server_all_user_query_rows" if payload.execution_mode == "full_input" else "explicit_source_row_ids", "operational_limits":effective}
     meta = await safe_call(store.create_run, user.id, payload.dataset_id, payload.snapshot_id,
                            payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key or canonical_sha256(payload.model_dump()))
     jobs.start(meta["run_id"], user.id)
@@ -271,7 +290,11 @@ async def run_detail(run_id: str, request: Request, user: WebUser):
     meta = await safe_call(store.owned, "runs", run_id, user.id)
     meta = await jobs.inspect_state(run_id, user.id)
     counts = await safe_call(store.progress, run_id, user.id)
-    return {**safe_meta(meta), **counts, **({"completed_pilot_rows": counts["processed_rows"]} if meta.get("execution_mode", "pilot")=="pilot" else {})}
+    resource={}
+    if meta.get('operational_policy'):
+        budget=await safe_call(Budget,store,store._path('runs',run_id),user.id,Limits.from_settings(meta['settings']))
+        resource=await safe_call(budget.summary)
+    return {**safe_meta(meta), 'operational_budget':resource, 'retention_policy':meta['settings'].get('retention_policy',{'automatic_deletion':False,'status':'historical_unrecorded'}), **counts, **({"completed_pilot_rows": counts["processed_rows"]} if meta.get("execution_mode", "pilot")=="pilot" else {})}
 
 
 def summary(row):
@@ -359,7 +382,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
     return {"state": "queued"}
 
 
-SAFE_API_CODES = {"invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
+SAFE_API_CODES = {"budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
     "invalid_pilot_selection", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",

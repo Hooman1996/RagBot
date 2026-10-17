@@ -70,7 +70,7 @@ def create_run(store, owner, did, sid, selected_ids, settings, versions, *, exec
         store.write(intent, {"request_id": request_id})
         private_directory(path / "rows")
         meta = {"run_id": rid, "owner_id": owner, "dataset_id": did, "snapshot_id": sid, "input_id": data.input_id,
-                "execution_version": VERSION, "execution_mode": execution_mode, "creation_request_id": request_id,
+                "execution_version": VERSION, "operational_policy": "audit-operations-1", "execution_mode": execution_mode, "creation_request_id": request_id,
                 "selected_row_ids": selected_ids, "processing_row_ids": chronological, "row_ids": available,
                 "selected_row_count": len(selected_ids), "input_row_count": len(available), "source_input_row_count": len(data.events),
                 "ordering_provenance": "a1_timestamp_then_stable_source_ordinal_unverified_ties",
@@ -94,6 +94,8 @@ def create_run(store, owner, did, sid, selected_ids, settings, versions, *, exec
             store.write(path / "rows" / (row["source_row_id"] + ".json"), initial)
             initial_rows.append(initial)
         store.write(path / "progress.json", build_index(meta, initial_rows))
+        from knowledge_audit.operations import Budget, Limits
+        Budget(store,path,owner,Limits.from_settings(settings))
         store.write(path / "meta.json", meta)  # publish only after all source rows exist
         return meta
 

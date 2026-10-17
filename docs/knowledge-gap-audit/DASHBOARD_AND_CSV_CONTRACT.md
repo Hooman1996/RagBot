@@ -799,3 +799,77 @@ owned/CSRF-protected start/status/results/cancel/retry/export endpoints are reus
 there is no server-path input, new account grant, infrastructure, production change
 or retention endpoint. Progress uses a bounded rebuildable summary index; rows
 remain authoritative and dirty/interrupted indexes reconcile before reuse.
+
+## Implemented A6.2 operational allowances and manual retention
+
+`coverage-settings-5` includes `audit-operations-1` and validated finite defaults:
+200 coverage completion attempts, 1,000,000 token allowance, 3,600 active execution
+seconds, 3 consecutive failures, 1 GiB minimum free storage, 500 ms audit pacing;
+recommendations have a separate default 20-completion allowance per revision.
+Manual retention defaults to 30 days; automatic deletion is disabled. See the env
+reference for ranges. Default batch cap 2, entry ceiling 300, sequential policy and
+the five-question default pilot remain unchanged.
+
+Run payload adds an optional complete `operational_limits` object and explicit
+`budget_acknowledged` for full-input starts. The server enforces configured
+ceilings and rejects weaker disk/pacing protection. Source selection is unchanged:
+full-input IDs come from the owned imported dataset. Idempotency includes effective
+limits. There is no allowance-extension endpoint or implicit recovery reset.
+
+A protected ledger reserves prompt plus maximum output tokens and one attempt
+before each completion, including history rewrites and syntax recovery. Known
+usage replaces reservation; unknown usage is not refunded. Per-row request identity,
+validated checkpoints, attempt history and conservative reservations survive worker
+loss. Explicit unknown-work recovery records acknowledgement without erasing usage.
+Partial work remains pending/interrupted under `paused`, never a gap or a completed
+full-input result. Exhausted allowances require a new explicitly configured run.
+Disk pauses can recover after storage repair if identities and remaining allowance
+still match. Failure streaks are tracked by model/rewrite/service family; metadata
+success cannot mask repeated model failures. Elapsed watchdog/service deadlines
+are audit-local and do not change production timeouts.
+
+Content-free counters separate completion dispatches, known/conservatively reserved
+tokens, unknown reservations, service POSTs, tokenization/metadata requests,
+source-check invocations, timings, checkpoints, process peak RSS, artifact bytes and
+last measured disk headroom. Source-check counts are not individual SQL/Qdrant
+request counts; normal application startup and historical standalone campaign tools
+are outside the new worker ledger. Existing bounded campaign limits remain their
+own scope. GPU telemetry and immutable weights/tokenizer provenance remain
+unverified where unavailable. Pacing/shared-admission courtesy is not strict
+cross-worker priority or a latency/SLA guarantee.
+
+New captures use `coverage-csv-6` / `coverage-export-manifest-6` and add JSON
+`operational_budget`, JSON `retention_policy` and `pause_reason` to each row; the
+matching immutable manifest freezes the same allowance snapshot and actual
+execution/row counts. Permission projections retain only content-free allowance
+metadata. Filtering/pagination never changes the full imported-row denominator.
+Historical v4/v5 captures retain original bytes/meaning. Recommendation-specific
+manifests separately pin their own allowance; A5 combined exports keep the common
+coverage source and explicit draft/review map. No independent human labels or
+quality claims are inferred from completion or recommendation approval.
+
+The page exposes effective finite limits before start, explicit full-input
+acknowledgement, paused/remaining/unknown-use/headroom information and manual
+retention policy. Recovery choices retain A6.1's duplicate-work warning. No new
+real-account grant, role privilege, scheduler or arbitrary-filesystem-path route
+exists. New configuration does not itself authorize a customer full-input run.
+
+Retention uses a trusted CLI, default dry-run, with explicit plan identity for
+apply. Eligible units include complete owned dataset/privacy-key and snapshot/run/
+recommendation trees only when expired, safe and unreferenced by retained units.
+Exports/checkpoints/reviews are dependent members, never independently removed
+from retained parents. Protected calibration, review/label/archive packages and
+unknown namespaces are held. Active/queued/recoverable/leased work, explicit holds,
+shared-owner snapshots, malformed inventories and unsafe links are preserved.
+Apply revalidates inventory/references/ownership/leases under root coordination;
+changed plans are rejected. Expiry alone does not revoke access; deletion makes
+resources unavailable. No automatic deletion or real-artifact apply is executed in
+A6.2. See the operator runbook for quiescence, local-filesystem and partial-failure
+limitations.
+
+A6.2 cleanup resolves input/export/review identities to owning parent artifacts.
+Same-owner runs sharing input and snapshot are also a retained comparison group: an
+older full counterproof cannot be removed while a comparable possible-gap run is
+retained. Unknown nested files hold their whole unit, and queued/running work holds
+all cleanup candidates. Coordination is nonblocking; a missing published allowance
+ledger fails closed instead of recreating a zero-usage budget.

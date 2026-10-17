@@ -20,6 +20,7 @@ from knowledge_audit.inputs import ImportedDataset, InputEvent, ColumnMapping, T
 from knowledge_audit.privacy import AuditError, Redactor, private_directory, private_json, private_write
 from knowledge_audit.export import FIELDS, STRUCTURED_DEFAULTS
 from knowledge_audit.snapshot import load_snapshot
+from knowledge_audit.retention import protected_method
 from utils.read_only_audit import canonical_json, canonical_sha256
 
 
@@ -95,6 +96,7 @@ class CoverageStore:
             raise AuditError("artifact_not_found")
         return meta
 
+    @protected_method
     def save_dataset(self, dataset, redactor, key, owner, preparations=None):
         did = "d_" + secrets.token_hex(16)
         path = private_directory(self._path("datasets", did))
@@ -124,6 +126,7 @@ class CoverageStore:
         private_json(path / "meta.json", meta)
         return meta
 
+    @protected_method
     def dataset(self, did, owner):
         self.owned("datasets", did, owner)
         path = self._path("datasets", did)
@@ -154,6 +157,7 @@ class CoverageStore:
         meta.update(preparation_status="ready", preparation_counts=dict(Counter(r["preparation_status"] for r in rows)))
         self.write(path / "meta.json", meta)
 
+    @protected_method
     def register_snapshot(self, snapshot_path, manifest_path, owner):
         snapshot = load_snapshot(snapshot_path)
         manifest = self.read(manifest_path)
@@ -182,6 +186,7 @@ class CoverageStore:
         private_json(path / "meta.json", meta)
         return meta
 
+    @protected_method
     def snapshot(self, sid, owner):
         meta = self.owned("snapshots", sid, owner)
         path = self._path("snapshots", sid)
@@ -190,6 +195,7 @@ class CoverageStore:
             raise AuditError("snapshot_identity_mismatch")
         return snapshot
 
+    @protected_method
     def import_a1(self, source: Path, raw_csv: Path, owner=0):
         """Trusted operator CLI only; never exposed as a server-path endpoint."""
         private_directory(source)
@@ -241,30 +247,36 @@ class CoverageStore:
         meta = self.save_dataset(dataset, redactor, keypath.read_bytes(), owner, rows)
         return meta, snapshot
 
+    @protected_method
     def create_run(self, owner, did, sid, selected_ids, settings, versions, *,
                    execution_mode="pilot", idempotency_key=None):
         from knowledge_audit.execution import create_run
         return create_run(self, owner, did, sid, selected_ids, settings, versions,
                           execution_mode=execution_mode, idempotency_key=idempotency_key)
 
+    @protected_method
     def row(self, rid, row_id, owner):
         meta = self.owned("runs", rid, owner)
         if row_id not in meta["row_ids"]:
             raise AuditError("artifact_not_found")
         return self.read(self._path("runs", rid) / "rows" / (row_id + ".json"))
 
+    @protected_method
     def save_row(self, rid, row, owner):
         from knowledge_audit.execution import save_row
         return save_row(self, rid, row, owner)
 
+    @protected_method
     def progress(self, rid, owner, *, reconcile=False):
         from knowledge_audit.execution import progress
         return progress(self, rid, owner, reconcile=reconcile)
 
+    @protected_method
     def result_page(self, rid, owner, offset, limit, outcome="", search=""):
         from knowledge_audit.execution import result_page
         return result_page(self, rid, owner, offset, limit, outcome, search)
 
+    @protected_method
     def rows(self, rid, owner):
         meta = self.owned("runs", rid, owner)
         return [self.row(rid, row_id, owner) for row_id in meta["row_ids"]]
@@ -295,6 +307,7 @@ class CoverageStore:
         finally:
             os.close(fd)
 
+    @protected_method
     def update_run(self, rid, owner, updates, preserve_cancel=True):
         with self.run_lock(rid):
             path = self._path("runs", rid)
@@ -311,6 +324,7 @@ class CoverageStore:
             self.write(path / "meta.json", meta)
             return meta
 
+    @protected_method
     def export_revision(self, rid, owner, evidence_visible, revision_id=None, *, create=False):
         """Frozen, permission-specific CSV/manifest pair; never regenerate a pair.
 
@@ -333,6 +347,9 @@ class CoverageStore:
                 revision_id = "rev_" + secrets.token_hex(16)
                 revision = private_directory(projection / revision_id)
                 frozen = {**meta, "export_revision_id": revision_id, "export_captured_at": now()}
+                if meta.get('operational_policy'):
+                    from knowledge_audit.operations import Budget,Limits
+                    frozen['operational_budget']=Budget(self,self._path('runs',rid),owner,Limits.from_settings(meta['settings'])).summary()
                 _, redactor = self.dataset(meta["dataset_id"], owner)
                 data, manifest = coverage_export(frozen, self.rows(rid, owner), redactor,
                                                  evidence_visible=evidence_visible)

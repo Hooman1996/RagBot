@@ -343,3 +343,35 @@ for exact synthetic/browser checks and measured file-I/O comparison.
 A6.2 retention, service-load/resource validation and operational acceptance remain
 separate gates. No retention deletion, deployment, KB editing, live inference or
 actual full customer dataset evaluation is included.
+
+## A6.2 finite operations and retention — planner review
+
+A6.2 adds `audit-operations-1`: immutable finite allowances, durable pre-dispatch
+completion/token reservations, cumulative execution time, failure streaks, disk
+headroom and audit-local pacing before shared admission. Unknown completion keeps
+its conservative charge; restored checkpoints require no new reservation. New
+runs expose `paused` and explicit remaining allowance; no in-place extension or
+counter reset is supported. Existing scope/aspect/coverage/recommendation prompts,
+retrieval defaults, eligibility, model/production timeouts and serving settings
+remain unchanged. Five-query pilot remains the default.
+
+`manual-dependency-retention-1` is trusted-operator dry-run/explicit-plan apply;
+automatic deletion is disabled. References, ownership, holds, protected/unknown
+packages, source privacy keys, shared snapshots and active/recoverable/leased work
+are conservatively protected. Real historical artifacts receive dry-run inspection
+only. Deletion tests use exclusively owned synthetic temporary stores.
+
+New coverage captures use CSV/manifest v6 for frozen operational counters/policy;
+old immutable revisions remain byte-identical. A5's frozen source and explicit
+recommendation/review selection remain intact. Full-selection acknowledgement and
+budget/recovery/retention status extend the existing protected dashboard. No new
+capability, infrastructure or real-user access grant is added.
+
+[A6_2_OPERATIONAL_READINESS_REPORT.md](A6_2_OPERATIONAL_READINESS_REPORT.md) records
+mechanical tests, controlled staging interference observations, limits and separate
+readiness decisions. [OPERATIONAL_RUNBOOK.md](OPERATIONAL_RUNBOOK.md) provides the
+operator handoff. A small staging experiment does not establish production
+capacity, an accuracy rate or the 200-concurrent-user SLA. A separately authorized
+full-input exploratory run remains distinct from production/quality acceptance.
+No actual 918-query customer run, production access, deployment, KB edit or deletion
+of real private artifacts is performed in A6.2.

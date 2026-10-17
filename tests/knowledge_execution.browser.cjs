@@ -24,7 +24,7 @@ async function run(){
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]').length===25);
   await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
   await page.waitForFunction(()=>!document.getElementById('coverageDatasetSummary').textContent.includes('Preparing input'));
-  step='full_selection';await page.locator('#coverageMode').selectOption('full_input');
+  step='full_selection';await page.locator('#coverageMode').selectOption('full_input');await page.locator('#coverageBudgetAck').check();
   await page.waitForFunction(()=>document.getElementById('coverageStartSummary').textContent.includes('918 / 918'));
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]:disabled:checked').length===25);
   await page.locator('#coverageStart').focus();assert.equal(await page.locator('#coverageStart').evaluate(e=>document.activeElement===e),true);

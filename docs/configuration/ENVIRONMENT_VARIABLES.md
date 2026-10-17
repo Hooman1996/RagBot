@@ -997,3 +997,29 @@ model/output/deadline settings and explicit default-deny grants are unchanged.
 Updated root examples (`env.example`, `env.review.example`, `Production_ENV`,
 `.env.example.generated`) and existing private `.env`/`.env_latest`; no generated
 template source exists beyond the source-authored generated-named example.
+
+## A6.2 finite audit operations and manual retention
+
+All settings are strict integers, appear in run configuration/export identities, and
+are audit-local. Run requests may tighten completion/token/time/failure ceilings or
+increase disk/pacing protections. They cannot relax configured ceilings. No in-place
+allowance extension is implemented: a depleted allowance requires a new run with
+explicit settings; consumed reservations on the old run remain intact.
+
+| Variable | Default | Range | Meaning |
+|---|---:|---|---|
+| `KNOWLEDGE_COVERAGE_MAX_COMPLETIONS` | 200 | 1–100000 | Reserved completion attempts across all recovery attempts. |
+| `KNOWLEDGE_COVERAGE_MAX_TOKENS` | 1000000 | 1–1000000000 | Conservative completion prompt plus maximum output token allowance. |
+| `KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS` | 3600 | 1–604800 | Cumulative execution seconds; abandoned active intervals include downtime. |
+| `KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES` | 3 | 1–100 | Consecutive service/model failures before pause. |
+| `KNOWLEDGE_COVERAGE_MIN_FREE_BYTES` | 1073741824 | 0–1099511627776 | Minimum free artifact filesystem bytes before dispatch. |
+| `KNOWLEDGE_COVERAGE_PACE_MS` | 500 | 0–60000 | Audit-local delay before shared admission in milliseconds. |
+| `KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS` | 20 | 1–10000 | Separate completion allowance per recommendation revision. |
+| `KNOWLEDGE_COVERAGE_RETENTION_DAYS` | 30 | 1–3650 | Manual cleanup age threshold; automatic deletion is always disabled. |
+
+Automatic deletion has no scheduled worker and is disabled. Retention is a trusted
+operator dry-run/explicit-plan apply operation; holds, retained dependencies and
+active/recoverable work are protected. Expiry does not silently change access.
+No separate generator for the source-authored `.env.example.generated` exists.
+Private `.env`/`.env_latest` receive only missing keys, without changing old values.
+A configured maximum is not measured capacity.

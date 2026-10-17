@@ -44,6 +44,7 @@
                 revision=revision||value.revisions[0].recommendation_revision_id;choose.value=revision;
                 choose.addEventListener('change',()=>{revision=choose.value;load().catch(error=>message(error.message,true));});label.append(choose);revisionPicker=label;root.append(label);await load();return;
             }
+            if(value.operational_limits)root.append(paragraph('Draft limit: '+value.operational_limits.completion_attempts+' completion attempts; '+value.operational_limits.token_allowance+' reserved/used tokens; '+value.operational_limits.execution_seconds+' execution seconds. Unknown usage remains charged.'));
             if(value.eligibility.eligible){message('Eligible for a possible-gap draft. Human gap confirmation is still pending.');
                 if(workspace.dataset.canStart==='true' && workspace.dataset.canExport==='true')root.append(button('Draft questions for review',create,'coverage-primary'));
                 else root.append(paragraph('Your account can view findings. Drafting requires explicit pilot and export access.'));
@@ -61,6 +62,9 @@
             const value=await api('recommendations/'+encodeURIComponent(requested));if(stopped||!root.isConnected){stop();return;}if(sequence!==requestSequence||requested!==revision)return;
             current=value;base();if(revisionPicker)root.append(revisionPicker);const result=value.results[identity.rowId];reasons(result.eligibility);
             const info=value.revision;message(display(info.state)+' · '+display(info.phase));
+            const allowance=value.operational_budget||{};
+            if(allowance.version)root.append(paragraph('Draft allowance: '+allowance.completion_attempts+' completion attempts used; '+allowance.remaining_completions+' remaining; '+allowance.tokens_charged+' tokens charged/reserved. '+(info.pause_reason||'')+'. A new draft revision has its own explicit allowance; prior usage stays recorded.'));
+
             if(['queued','running'].includes(info.state)){
                 root.append(paragraph('Preparing structured missing-information findings, then question and taxonomy proposals.'));
                 if(workspace.dataset.canStart==='true')root.append(button('Cancel question drafting',async()=>{await post('recommendations/'+revision+'/cancel');await load();}));

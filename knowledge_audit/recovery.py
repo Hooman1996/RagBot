@@ -107,7 +107,11 @@ class RowJournal:
             # typed structured result crosses this boundary, never response text.
             await self.runner.run(self.update, state='validated', result=result, result_sha256=canonical_sha256(result))
             return result
-        except BaseException:
+        except BaseException as error:
+            from knowledge_audit.operations import OperationalPause
+            if isinstance(error,OperationalPause) and str(error)!='unknown_remote_completion':
+                await self.event('budget_paused')
+                raise
             if self.current['state'] in UNKNOWN:
                 await self.event('unknown')
             elif self.current['state'] != 'response_received':

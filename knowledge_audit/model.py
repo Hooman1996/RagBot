@@ -15,6 +15,7 @@ from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
 from knowledge_audit.failures import VERSION as FAILURE_VERSION, category, safe_correlation
 from utils.read_only_audit import canonical_sha256
+from utils.audit_dispatch import audit_dispatch, completion_metadata, current_audit
 
 DIAGNOSTIC_TYPES = frozenset({"json_invalid", "missing", "literal_error", "extra_forbidden", "string_type",
     "string_pattern_mismatch", "string_too_short", "string_too_long", "int_type", "int_parsing",
@@ -73,12 +74,12 @@ class AuditModel:
         self.identity_fields = frozenset(identity_fields)
 
     async def discover(self):
-        models = await self.http.get(self.origin + "/v1/models")
+        models = await audit_dispatch('metadata',lambda:self.http.get(self.origin + '/v1/models'))
         models.raise_for_status()
         served = [m for m in models.json()["data"] if m["id"] == self.rag.model_id]
         if len(served) != 1 or type(served[0].get("max_model_len")) is not int or served[0]["max_model_len"] <= 0:
             raise AuditError("unverified_context_limit")
-        version = await self.http.get(self.origin + "/version")
+        version = await audit_dispatch('metadata',lambda:self.http.get(self.origin + '/version'))
         version.raise_for_status()
         self.context_limit = served[0]["max_model_len"]
         self.serving = {"served_model_id": self.redactor.opaque("model", self.rag.model_id),
@@ -87,12 +88,20 @@ class AuditModel:
                         "weights_tokenizer_revision": "unverified",
                         "structured_output_mode": "json_schema_strict_1"}
 
+    async def count_completion_tokens(self,metadata):
+        # Rewrite calls use the same served chat-template counter as audit calls.
+        response=await audit_dispatch('tokenization',lambda:self.http.post(self.origin+'/tokenize',
+            json={'model':metadata['model'],'messages':metadata['messages'],'add_generation_prompt':True}))
+        response.raise_for_status();count=response.json().get('count')
+        if type(count) is not int or count<1:raise AuditError('invalid_token_count')
+        return count
+
     async def count(self, role, data):
         if self.context_limit is None:
             raise AuditError("model_not_discovered")
         msg = self.message_builder(role, data)
-        response = await self.http.post(self.origin + "/tokenize", json={"model": self.rag.model_id,
-            "messages": msg, "add_generation_prompt": True})
+        response = await audit_dispatch('tokenization',lambda:self.http.post(self.origin + "/tokenize", json={"model": self.rag.model_id,
+            "messages": msg, "add_generation_prompt": True}))
         response.raise_for_status()
         tokens = response.json().get("count")
         if type(tokens) is not int or tokens < 1:
@@ -152,10 +161,13 @@ class AuditModel:
                 raise AuditError("model_input_token_overflow")
             async def operation():
                 enter("completion")
-                if self.request_journal:
-                    await self.request_journal("dispatched", metric)
-                metric["dispatched"] = True
-                with bind_pipeline_observer(None):
+                async def mark_dispatch():
+                    if self.request_journal:
+                        await self.request_journal("dispatched", metric)
+                    metric["dispatched"] = True
+                if current_audit() is None:
+                    await mark_dispatch()
+                with bind_pipeline_observer(None), completion_metadata(role,tokens,mark_dispatch):
                     return await self.rag._completion(model=self.rag.model_id, messages=msg,
                         max_tokens=self.settings.model_max_tokens, temperature=0, top_p=1, seed=42,
                         response_format={"type": "json_schema", "json_schema": {"name": role + "_" + schema_version(role, self.schemas).replace("-", "_"),
@@ -221,6 +233,9 @@ class AuditModel:
             metric["phase_timings_ms"][phase] = round((time.perf_counter() - phase_started) * 1000, 3)
             metric["duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
             self.metrics.append(metric)
+            budget=current_audit()
+            if budget and metric['dispatched'] and metric.get('server_completion_state')=='response_received':
+                await budget.io(budget.model_result,metric['failure_category'])
             if self.request_journal:
                 await self.request_journal("unknown" if metric["server_completion_state"] == "unknown" else
                     "response_received" if metric["dispatched"] else "failed_before_dispatch", metric)
