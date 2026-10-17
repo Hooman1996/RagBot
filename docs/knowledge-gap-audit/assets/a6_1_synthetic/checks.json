@@ -1,0 +1,16 @@
+{
+  "browser_version": "153.0.8010.0",
+  "source_rows": 918,
+  "subset_rows": 9,
+  "live_model_dispatches": 0,
+  "checks": [
+    "918_server_resolved_full_selection_default_pilot_and_unknown_remote_retry_blocked",
+    "explicit_duplicate_work_acknowledgement_checkpoint_resume_cancel_and_immutable_918_row_export",
+    "nine_row_subset_finished_with_errors_evidence_keyboard_dark_rtl_mobile_no_overflow"
+  ],
+  "screenshots": [
+    "a61-full-input-light.png",
+    "a61-recovery-light.png",
+    "a61-subset-dark-rtl.png"
+  ]
+}

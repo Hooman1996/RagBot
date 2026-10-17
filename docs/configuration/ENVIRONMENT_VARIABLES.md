@@ -982,3 +982,18 @@ to three gaps/questions, twenty title candidates, sequential responsibilities an
 40 total staging pilot completion dispatches including checks/recovery. These are
 experiment/schema/algorithm bounds, not unused runtime knobs. Existing model
 output/token-margin/deadline/admission/zero-network-retry settings are reused.
+
+### A6.1 execution size
+
+`KNOWLEDGE_COVERAGE_MAX_RUN_ROWS` defaults to **10000**, integer range **5–100000**.
+It limits selected audit rows in pilot/subset/full-input modes; an oversized
+selection is rejected, never truncated. The default execution mode remains an
+explicit pilot of at most five rows. `coverage-settings-4` includes this value
+and the execution/checkpoint policy identities; changing pinned configuration
+requires a new run. The maximum is a selection guard, not measured capacity or
+permission to run customer inputs. A6.1 validates 918 synthetic rows only.
+Batch cap 2 by default, distinct-entry maximum 300, sequential inference, existing
+model/output/deadline settings and explicit default-deny grants are unchanged.
+Updated root examples (`env.example`, `env.review.example`, `Production_ENV`,
+`.env.example.generated`) and existing private `.env`/`.env_latest`; no generated
+template source exists beyond the source-authored generated-named example.

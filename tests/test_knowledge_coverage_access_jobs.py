@@ -86,6 +86,7 @@ def test_cancel_and_interrupted_recovery_skip_completed_rows(tmp_path):
     store,d,s,meta,data,redactor,prep=seed(tmp_path)
     # Select two rows and pre-complete one to test durable skip behavior.
     meta['selected_row_ids']=[e.source_row_id for e in data.selected[:2]]
+    meta['processing_row_ids']=meta['selected_row_ids'].copy()
     store.write(store._path('runs',meta['run_id'])/'meta.json',meta)
     completed=store.row(meta['run_id'],data.selected[0].source_row_id,1)
     completed.update(processing_status='completed',outcome='covered_reachable',coverage_status='full')

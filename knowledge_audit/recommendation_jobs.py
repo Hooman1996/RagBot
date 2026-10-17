@@ -8,7 +8,7 @@ from knowledge_audit.failures import category
 
 class RecommendationJobs:
     def __init__(self,store,coverage_jobs,runner,factory):
-        self.store=store;self.coverage=coverage_jobs;self.runner=runner;self.factory=factory
+        self.store=store;self.coverage=coverage_jobs;self.runner=coverage_jobs.runner;self.factory=factory
 
     def start(self,rid,owner):
         self.store.owned(rid,owner)
@@ -20,7 +20,18 @@ class RecommendationJobs:
             try:
                 meta=await self.runner.run(self.store.owned,rid,owner)
                 results=await self.runner.run(self.store.results,rid,owner)
-                lease=await self.runner.run(self.store.store.global_lease)
+                async def queued_check():
+                    live=await self.runner.run(self.store.owned,rid,owner)
+                    if live.get('cancel_requested'):raise asyncio.CancelledError()
+                lease=await self.coverage.acquire_global(queued_check)
+                # A competing worker may have completed/cancelled this revision
+                # while we waited. Never replay its model work or final bytes.
+                live=await self.runner.run(self.store.owned,rid,owner)
+                if live['state']!='queued' or live.get('cancel_requested'):
+                    meta=None
+                    return
+                meta=live
+                results=await self.runner.run(self.store.results,rid,owner)
                 if meta['versions']!=recommendation_versions():raise AuditError('audit_version_drift')
                 source=await self.runner.run(self.store.source,rid,owner)
                 engine=await self.factory(meta)

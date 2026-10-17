@@ -1,7 +1,7 @@
 /* Main-dashboard audit UI. Text-only DOM rendering; no private browser storage. */
 (function (global) {
     'use strict';
-    const CONTRACT = 'coverage-page-2';
+    const CONTRACT = 'coverage-page-3';
     const LABELS = {
         prepared: 'Prepared', pending_model: 'Pending model', needs_context: 'Needs preceding context', needs_review: 'Needs review',
         uncertain_preparation: 'Preparation needs review', invalid_input: 'Invalid input', failed: 'Error',
@@ -59,9 +59,15 @@
             select.value = selectedValue;
         }
         function counts(value) { return Object.entries(value || {}).map(([key, count]) => label(key) + ': ' + count).join(' · '); }
+        let startKey = null, startIdentity = null;
+        const mode = () => $('Mode')?.value || 'pilot';
+        const maximum = () => Number(root.dataset.maxRunRows || 10000);
         function selection() {
-            $('SelectionCount').textContent = selected.size + ' of 5 selected';
-            $('Start').disabled = selected.size < 1 || !currentDataset || !$('Snapshot').value;
+            const d=datasets.find(x=>x.dataset_id===currentDataset), count=mode()==='full_input' ? (d?.structure.selected_row_count||0) : selected.size;
+            $('SelectionCount').textContent=count+' selected / '+(d?.structure.selected_row_count||0)+' imported queries';
+            $('Start').disabled=count<1 || count>maximum() || !currentDataset || !$('Snapshot').value || (mode()==='pilot' && count>5);
+            $('Start').textContent=mode()==='pilot' ? 'Start selected pilot' : mode()==='full_input' ? 'Start full-input run' : 'Start selected subset';
+            if($('StartSummary')) $('StartSummary').textContent=(d ? 'Dataset '+d.dataset_id.slice(-8) : 'Choose a dataset')+' · Snapshot '+($('Snapshot').value.slice(0,8)||'not selected')+' · '+count+' / '+(d?.structure.selected_row_count||0)+' queries · '+$('Budget').value+' distinct entries maximum per question · batch cap '+(root.dataset.batchMax||2)+' · sequential, potentially long duration. No precise ETA. '+(count>maximum() ? 'Selection exceeds the configured maximum of '+maximum()+'.' : '');
         }
         async function refreshDatasets() {
             datasets = await api('datasets');
@@ -103,10 +109,10 @@
                 const tr = node(document, 'tr');
                 const first = node(document, 'td');
                 if (canStart && !currentRun) {
-                    const checkbox = node(document, 'input'); checkbox.type = 'checkbox'; checkbox.checked = selected.has(row.source_row_id);
+                    const checkbox = node(document, 'input'); checkbox.type = 'checkbox'; checkbox.checked = mode()==='full_input' || selected.has(row.source_row_id); checkbox.disabled=mode()==='full_input';
                     checkbox.setAttribute('aria-label', 'Select source row ' + row.source_record_ordinal);
                     checkbox.addEventListener('change', () => {
-                        if (checkbox.checked && selected.size >= 5) { checkbox.checked = false; fail(new Error('Choose at most five questions for this pilot.')); return; }
+                        if (checkbox.checked && selected.size >= (mode()==='pilot' ? 5 : maximum())) { checkbox.checked = false; fail(new Error('Selection exceeds the current mode limit. Choose a larger subset mode when needed.')); return; }
                         if (checkbox.checked) selected.add(row.source_row_id); else selected.delete(row.source_row_id);
                         selection();
                     }); first.append(checkbox, document.createTextNode(' '));
@@ -127,7 +133,7 @@
             });
             $('Previous').disabled = offset === 0; $('Next').disabled = offset + 25 >= total;
             $('PageLabel').textContent = 'Page ' + (Math.floor(offset / 25) + 1);
-            $('ResultCount').textContent = total + ' matching rows' + (currentRun ? ' · download always includes the full dataset' : ' · select an explicit pilot');
+            $('ResultCount').textContent = total + ' matching rows' + (currentRun ? ' · download always includes the full dataset' : ' · choose an execution scope');
         }
         async function refreshRows() {
             const sequence = ++querySequence;
@@ -148,17 +154,22 @@
             if(requestedRun!==currentRun || epoch!==viewEpoch || sequence!==progressSequence)return;
             const activeOption = Array.from($('Runs').children).find(option => option.value === currentRun);
             if (activeOption) activeOption.textContent = label(run.state) + ' · ' + run.selected_row_ids.length + ' questions · ' + currentRun.slice(-8);
-            $('Progress').max = run.selected_row_ids.length; $('Progress').value = run.completed_pilot_rows;
-            const errors=(run.outcome_counts||{}).error||0;
-            const runLabel=run.state==='completed' && errors ? 'completed with errors' : ({failed:'Failed pilot',interrupted:'Interrupted pilot',cancelled:'Cancelled pilot'}[run.state]||label(run.state));
-            $('ProgressText').textContent = runLabel + ' · ' + run.completed_pilot_rows + ' of ' + run.selected_row_ids.length + ' pilot questions processed · ' + run.input_row_count + ' rows retained' + (run.stage ? ' · ' + label(run.stage) : '');
-            if($('RunCounts')) { const c=run.outcome_counts||{}; $('RunCounts').replaceChildren(); [['Imported queries',run.input_row_count],['Pilot processed',run.completed_pilot_rows+' / '+run.selected_row_ids.length],['Pending / not evaluated',c.pending||0],['Covered · reachable',c.covered_reachable||0],['Covered · retrieval work',c.covered_not_reachable||0],['Possible gaps',(c.possible_gap||0)+(c.possible_partial_gap||0)],['Context / review',(c.needs_context||0)+(c.needs_review||0)],['Excluded / errors',(c.excluded||0)+' / '+(c.error||0)]].forEach(([title,value])=>{const cell=node(document,'div');cell.append(node(document,'strong',value),node(document,'span',title));$('RunCounts').append(cell);}); }
+            $('Progress').max = run.selected_row_ids.length; $('Progress').value = run.processed_rows ?? run.completed_pilot_rows;
+            const processed=run.processed_rows ?? run.completed_pilot_rows ?? 0;
+            const errors=(run.selected_outcome_counts||run.outcome_counts||{}).error||0;
+            const runLabel=run.state==='completed' && errors ? 'completed with errors' : ({failed:'Failed run',interrupted:'Interrupted run',cancelled:'Cancelled run'}[run.state]||label(run.state));
+            $('ProgressText').textContent = runLabel + ' · ' + processed + ' of ' + run.selected_row_ids.length + ' selected questions processed · ' + run.input_row_count + ' rows retained' + (run.stage ? ' · ' + label(run.stage) : '');
+            if($('RunCounts')) { const c=run.outcome_counts||{}; $('RunCounts').replaceChildren(); [['Imported queries',run.input_row_count],['Selected processed',processed+' / '+run.selected_row_ids.length],['Model evaluated',run.model_evaluated_rows??(run.execution_version?0:'Not recorded')],['Pending / not evaluated',c.pending||0],['Covered · reachable',c.covered_reachable||0],['Covered · retrieval work',c.covered_not_reachable||0],['Possible gaps',(c.possible_gap||0)+(c.possible_partial_gap||0)],['Context / review',(c.needs_context||0)+(c.needs_review||0)],['Excluded / errors',(c.excluded||0)+' / '+(c.error||0)]].forEach(([title,value])=>{const cell=node(document,'div');cell.append(node(document,'strong',value),node(document,'span',title));$('RunCounts').append(cell);}); }
             $('Cancel').hidden = !canStart || !['queued','running'].includes(run.state);
-            $('Resume').hidden = !canStart || (!['failed','interrupted','cancelled'].includes(run.state) && !(run.state === 'completed' && run.retryable_rows > 0));
+            $('Resume').hidden = !canStart || (!['failed','interrupted','cancelled'].includes(run.state) && !(['completed','queued'].includes(run.state) && (run.retryable_rows > 0 || run.state==='queued')));
+            if($('Recovery')) {
+                $('Recovery').hidden=$('Resume').hidden;
+                $('RecoveryText').textContent=(run.unknown_completion_count||0)+' request(s) have unknown remote completion · '+(run.validated_checkpoint_count||0)+' structured checkpoints retained. '+(run.execution_version ? 'Explicit recovery is available.' : 'Historical implementation identity must match; create a new run rather than migrating old work.');
+            }
             $('PrepareExport').hidden = root.dataset.canExport !== 'true';
             $('Export').hidden = root.dataset.canExport !== 'true' || exportRevisionRun !== currentRun; $('Manifest').hidden = $('Export').hidden;
             if (exportRevisionRun !== currentRun) $('ExportState').textContent = 'Prepare a frozen CSV and matching manifest from current progress.';
-            status(run.state === 'incompatible' ? 'Knowledge or serving revision changed. This pilot requires review; start a new compatible run.' : 'Pilot selection: ' + run.selected_row_ids.length + ' questions. Unselected rows remain pending / not evaluated.');
+            status(run.state === 'incompatible' ? 'Knowledge or serving revision changed. This run requires review; start a new compatible run.' : label(run.execution_mode||'pilot')+' selection: '+run.selected_row_ids.length+' / '+run.input_row_count+' queries. Unselected rows remain pending / not evaluated.');
             if (!['queued','running'].includes(run.state) && poll) { global.clearInterval(poll); poll = null; }
             await refreshRows();
             } finally {if(progressInFlight===marker)progressInFlight=null;}
@@ -246,6 +257,8 @@
                 appendText(details, 'History', label(row.history_status));
                 appendText(details, 'Snapshot', row.kb_snapshot_id);
                 appendText(details, 'Entries checked', row.evaluated_entry_count);
+                appendText(details, 'Recovery', (row.validated_checkpoint_count||0)+' retained structured checkpoints · '+(row.checkpoint_reuse_count||0)+' reused · '+(row.unknown_completion_count||0)+' requests with unknown remote completion.');
+                (row.request_journal||[]).forEach(r=>appendText(details, 'Attempt '+r.row_attempt+' · '+label(r.responsibility),label(r.state)+' · '+r.request_id));
                 appendText(details, 'Review codes', (row.review_codes || []).join(' · '));
                 if (row.output_recovery_count) appendText(details, 'Fresh output recovery attempts', row.output_recovery_count + ' · ' + row.recovery_policy);
             } catch (error) { if(sequence!==evidenceSequence || evidenceRun!==currentRun)return; fail(error); panel.replaceChildren(node(document, 'p', 'Evidence could not load. Select this row again to retry.')); }
@@ -260,7 +273,7 @@
         $('Filter').addEventListener('change', () => { offset = 0; refreshRows().catch(fail); });
         $('Runs').addEventListener('change', async () => { currentRun = $('Runs').value; offset = 0; viewChanged(); clearError(); if (currentRun) { startPoll(); await progress().catch(fail); } else { if (poll) global.clearInterval(poll); await refreshRows().catch(fail); } });
         $('Cancel').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/cancel',{method:'POST'}); status('Cancellation requested. Completed rows remain available.'); await progress(); } catch(e) { fail(e); } });
-        $('Resume').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/retry',{method:'POST'}); startPoll(); await progress(); } catch(e) { fail(e); } });
+        $('Resume').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/retry',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({unknown_policy:$('RecoveryChoice')?.value||'stop'})}); startPoll(); await progress(); } catch(e) { fail(e); } });
         $('PrepareExport').addEventListener('click', async () => {
             const run = currentRun; $('PrepareExport').disabled = true; clearError();
             try {
@@ -270,7 +283,7 @@
                 $('Export').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(run) + '/export' + suffix;
                 $('Manifest').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(run) + '/export-manifest' + suffix;
                 exportRevisionRun = run; $('Export').hidden = false; $('Manifest').hidden = false;
-                $('ExportState').textContent = 'Frozen ' + revision.export_captured_at + ' · ' + label(revision.state) + ' pilot · ' + revision.row_count + ' rows. Prepare again to include newer progress.';
+                $('ExportState').textContent = 'Frozen ' + revision.export_captured_at + ' · ' + label(revision.state) + ' run · ' + revision.row_count + ' rows. Prepare again to include newer progress.';
             } catch(e) { fail(e); } finally { $('PrepareExport').disabled = false; }
         });
         if (canStart) {
@@ -294,18 +307,25 @@
                     if(importEpoch!==viewEpoch){await refreshDatasets();return;}
                     currentDataset = data.dataset_id; currentRun = ''; viewChanged(); selected.clear(); offset = 0;
                     await refreshDatasets(); selection(); await refreshRows();
-                    const inputEpoch=viewEpoch;inputPoll=global.setInterval(async()=>{if(inputEpoch!==viewEpoch)return;try{await refreshDatasets();if(inputEpoch!==viewEpoch)return;await refreshRows();if(inputEpoch===viewEpoch && datasets.find(d=>d.dataset_id===currentDataset)?.preparation_status==='ready'){global.clearInterval(inputPoll);inputPoll=null;status('Input ready. Select up to five rows for a pilot; all rows will remain in the export.');}}catch(e){if(inputEpoch===viewEpoch){global.clearInterval(inputPoll);inputPoll=null;fail(e);}}},2000);
+                    const inputEpoch=viewEpoch;inputPoll=global.setInterval(async()=>{if(inputEpoch!==viewEpoch)return;try{await refreshDatasets();if(inputEpoch!==viewEpoch)return;await refreshRows();if(inputEpoch===viewEpoch && datasets.find(d=>d.dataset_id===currentDataset)?.preparation_status==='ready'){global.clearInterval(inputPoll);inputPoll=null;status('Input ready. Choose pilot, subset or all user queries; all rows remain in the export.');}}catch(e){if(inputEpoch===viewEpoch){global.clearInterval(inputPoll);inputPoll=null;fail(e);}}},2000);
                 } catch(e) { if(importEpoch===viewEpoch)fail(e); } finally { loading = false; $('Upload').disabled = false; }
             });
             $('Dataset').addEventListener('change', async () => { currentDataset = $('Dataset').value; currentRun=''; viewChanged(); selected.clear(); offset=0; $('Runs').value=''; if(poll) global.clearInterval(poll); await refreshDatasets().catch(fail); selection(); await refreshRows().catch(fail); });
             $('Snapshot').addEventListener('change', documents);
-            $('Capture').addEventListener('click', async () => { $('Capture').disabled = true; clearError(); status('Capturing a consistent knowledge revision…'); try { const s=await api('snapshots',{method:'POST'}); await refreshSnapshots(); $('Snapshot').value=s.snapshot_id; documents(); status('Knowledge revision captured. Select questions and start a pilot.'); } catch(e) { fail(e); } finally { $('Capture').disabled=false; } });
+            $('Capture').addEventListener('click', async () => { $('Capture').disabled = true; clearError(); status('Capturing a consistent knowledge revision…'); try { const s=await api('snapshots',{method:'POST'}); await refreshSnapshots(); $('Snapshot').value=s.snapshot_id; documents(); status('Knowledge revision captured. Choose an execution scope and start a run.'); } catch(e) { fail(e); } finally { $('Capture').disabled=false; } });
             $('ClearSelection').addEventListener('click', () => { selected.clear(); selection(); refreshRows().catch(fail); });
+            $('Mode')?.addEventListener('change',()=>{startKey=null;selection();refreshRows().catch(fail);});
+            $('Budget').addEventListener('change',selection);
             $('Start').addEventListener('click', async () => {
                 $('Start').disabled=true; clearError(); try {
                     const docs=Array.from($('Documents').querySelectorAll('input:checked')).map(n=>n.value);
-                    const run=await api('runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset_id:currentDataset,snapshot_id:$('Snapshot').value,row_ids:Array.from(selected),entry_budget:Number($('Budget').value),documents:docs})});
-                    currentRun=run.run_id; viewChanged(); offset=0; await refreshRuns(); startPoll(); await progress();
+                    const payload={dataset_id:currentDataset,snapshot_id:$('Snapshot').value,row_ids:mode()==='full_input'?[]:Array.from(selected),execution_mode:mode(),entry_budget:Number($('Budget').value),documents:docs};
+                    const identity=JSON.stringify(payload), startEpoch=viewEpoch;
+                    if(startIdentity!==identity){startKey=null;startIdentity=identity;}
+                    payload.idempotency_key=startKey||(startKey=global.crypto?.randomUUID?.().replaceAll('-','')||('start_'+Date.now()+'_'+Math.random().toString(36).slice(2)));
+                    const run=await api('runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+                    if(startEpoch!==viewEpoch)return;
+                    currentRun=run.run_id; startKey=null; viewChanged(); offset=0; await refreshRuns(); startPoll(); await progress();
                 } catch(e) { fail(e); } finally { selection(); }
             });
         }

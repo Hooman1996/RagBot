@@ -715,3 +715,87 @@ confirmation and real-query calibration remain `not_reviewed`/pending. No factua
 answer, confirmed KB absence or KB write is approved. No model calls, changed
 retrieval/prompt/eligibility settings, operational scaling or full-input execution
 are part of A5. No new environment variables.
+
+## Implemented A6.1 explicit execution and recovery
+
+New page contract `coverage-page-3`; new run policy `coverage-execution-1`.
+`POST /runs` adds `execution_mode`: default `pilot` (1–5 explicit IDs), `subset`
+(explicit IDs within the configured maximum), or `full_input` (no client row IDs;
+the server resolves every user-query row in the owned prepared dataset).
+Unmapped extra counts/fields are rejected. No selection uses feedback/answers.
+The server persists exact source-order selection and separate A1 chronological
+processing IDs before scheduling. All imported user queries remain in downloads,
+including unselected/pending, duplicates, invalid, context and error records.
+
+An optional 16–128-character ASCII idempotency key is bound to owner and the
+normalized request, settings and versions. Reusing a key with another request
+returns conflict. Omitted API keys use the canonical request hash; the dashboard
+creates a deliberate key and reuses it after an uncertain submission. An explicit
+new key creates a new run. Creation has a durable intent and deterministic key
+address, so interrupted file creation repairs the same run rather than duplicating
+it. There is no automatic restart inference.
+
+Progress distinguishes imported, selected, processed, entry-model-evaluated,
+pending/interrupted, excluded, context/review and error counts. Processed means a
+terminal result (including failed/invalid); model-evaluated means at least one KB entry has locally validated findings across
+compatible attempts. Attempted rows and completion-dispatch markers are counted
+separately; an unreturned request is not counted as evaluated. Scope-only calls
+are not KB evaluation. Legacy runs without these counters show not recorded. `completed` with errors is explicitly
+finished-with-errors; an all-terminal run is not a human quality acceptance.
+The legacy `completed_pilot_rows` alias is emitted only for pilots/legacy runs;
+new full/subset runs use `processed_rows`. No ETA/accuracy estimate is fabricated.
+
+Per-run nonblocking OS flock prevents competing workers. The common artifact-root
+OS gate serializes coverage and recommendation workers across processes; a busy
+gate keeps work queued. The gate does not serialize normal production answering
+and is not a distributed multi-host queue. Short in-process scheduling remains
+tracked. Cancellation persists before task cancellation; another process's
+watcher observes it. Kernel lease release after worker death enables inspection;
+no PID-based lock stealing or automatic unknown-work replay occurs.
+
+`audit-boundaries-1` checkpoints complete redacted structured responses and pinned
+candidate/selected ID manifests. Model JSON/schema validation is not semantic
+coverage: restored calls pass the existing membership/citation/compatibility/full
+verification path again under identical query/history, snapshot, versions,
+serving/configuration and token/batch policy identities. Source/index drift checks
+remain active. The snapshot does not freeze live Qdrant or unverified weight
+revisions. Request journals hold allowlisted IDs/hashes, responsibility, phase,
+attempt/dispatch/completion state, timings/tokens and safe failure categories;
+never filled prompts, raw outputs, exception values or arbitrary source columns.
+Opaque preparation/retrieval boundaries conservatively retain unobserved remote
+completion when interrupted; they do not claim a confirmed completion dispatch.
+
+`POST /runs/{run_id}/retry` optionally accepts `unknown_policy`: `stop` (default,
+reject if unknown work remains), `skip_unknown` (leave affected rows interrupted,
+continue others), or `retry_unknown` (explicit duplicate-work/cost acknowledgement).
+Completed rows are never reset. Failed/interrupted effective rows can be replaced
+by explicit attempts; old failures, dispatch journals, recovery choices and old
+CSV/manifest revisions are preserved. SDK network retries remain zero; the existing
+one fresh syntax-only recovery per call remains separately bounded and counted.
+A dispatch marker is not completed evidence. Changed code/settings/source/serving
+requires a new compatible run; pre-A6 runs cannot migrate through A6 resume.
+Legacy reads do not create recovery/index artifacts.
+
+New A6 captures use `coverage-csv-5` / `coverage-export-manifest-5`; old captures
+retain exact schemas/bytes. Fields add `execution_mode`, `selected_for_execution`,
+`execution_selected_row_count`, `checkpoint_reuse_count`,
+`validated_checkpoint_count`, `unknown_completion_count`, `model_evaluated`,
+`entry_model_dispatched`, `request_journal` (JSON,
+content-free metadata). Manifest adds actual input scope (`full_input`,
+`explicit_subset_full_input_export`, or `pilot_subset_full_input_export`), execution
+selection/order, policy, recovery choice and completion quality. Non-pilot captures
+omit `pilot_selected_row_ids` and add frozen `execution_counts`. All row IDs/source order, BOM, JSON cells, redaction,
+formula protection and CSV/manifest identity rules remain. Safe journal metadata
+is permitted in restricted projections; evidence, draft text and notes remain
+restricted. A5 combined exports propagate the frozen source's actual input scope
+and retain its explicit per-row draft/review map. Drafting remains separately
+triggered and retains its existing five-row bound; full coverage execution never
+implicitly drafts recommendations.
+
+The main page adds execution scope, source/selected counts, snapshot/settings,
+sequential-duration guidance, interruption inspection and explicit recovery choice.
+Themes, RTL/keyboard patterns and default-deny permissions are unchanged. Existing
+owned/CSRF-protected start/status/results/cancel/retry/export endpoints are reused;
+there is no server-path input, new account grant, infrastructure, production change
+or retention endpoint. Progress uses a bounded rebuildable summary index; rows
+remain authoritative and dirty/interrupted indexes reconcile before reuse.

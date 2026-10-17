@@ -11,7 +11,7 @@ async function run(){
  await context.route('**/*',route=>new URL(route.request().url()).origin===origin?route.continue():route.abort());
  try{
   assert.equal((await context.request.post(origin+'/api/login',{data:{username:'planner-synthetic',password:'synthetic-browser-only'}})).status(),200);
-  await page.goto(origin+'/knowledge-coverage');await page.waitForSelector('#coverageRoot[data-contract="coverage-page-2"]');
+  await page.goto(origin+'/knowledge-coverage');await page.waitForSelector('#coverageRoot[data-contract="coverage-page-3"]');
   await page.keyboard.press('Tab');assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('coverage-skip')),true);
   const questions=['Synthetic partial approval duration and cutoff? پرسش آزمایشی، چندخطی\nخط دوم','Synthetic approval duration and cutoff?','','Synthetic partial approval duration and cutoff? پرسش آزمایشی، چندخطی\nخط دوم'];
   const quote=v=>'"'+v.replaceAll('"','""')+'"';const csv='\ufeffquery\r\n'+questions.map(quote).join('\r\n')+'\r\n';

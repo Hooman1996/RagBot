@@ -67,6 +67,7 @@ class AuditModel:
         self.progress_callback = None
         self.metrics_path = None
         self.call_sequence = 0
+        self.request_journal = None
         self.schemas = SCHEMAS if schemas is None else schemas
         self.message_builder = messages if message_builder is None else message_builder
         self.identity_fields = frozenset(identity_fields)
@@ -151,6 +152,8 @@ class AuditModel:
                 raise AuditError("model_input_token_overflow")
             async def operation():
                 enter("completion")
+                if self.request_journal:
+                    await self.request_journal("dispatched", metric)
                 metric["dispatched"] = True
                 with bind_pipeline_observer(None):
                     return await self.rag._completion(model=self.rag.model_id, messages=msg,
@@ -169,6 +172,8 @@ class AuditModel:
                 raise
             metric.update(safe_correlation(response, self.redactor))
             metric["server_completion_state"] = "response_received"
+            if self.request_journal:
+                await self.request_journal("response_received", metric)
             enter("validation")
             choice = response.choices[0]
             metric["completion_tokens"] = response.usage.completion_tokens
@@ -216,6 +221,9 @@ class AuditModel:
             metric["phase_timings_ms"][phase] = round((time.perf_counter() - phase_started) * 1000, 3)
             metric["duration_ms"] = round((time.perf_counter() - started) * 1000, 3)
             self.metrics.append(metric)
+            if self.request_journal:
+                await self.request_journal("unknown" if metric["server_completion_state"] == "unknown" else
+                    "response_received" if metric["dispatched"] else "failed_before_dispatch", metric)
             if self.metrics_path:
                 from utils.read_only_audit import canonical_json
                 fd = os.open(self.metrics_path, os.O_WRONLY | os.O_CREAT | os.O_APPEND | os.O_NOFOLLOW, 0o600)

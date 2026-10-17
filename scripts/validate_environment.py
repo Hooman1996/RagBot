@@ -359,6 +359,9 @@ def _specs() -> dict[str, VariableSpec]:
         "KNOWLEDGE_COVERAGE_TOKEN_MARGIN": VariableSpec(
             kind="int", default="128", minimum=32, maximum=1024, component="Knowledge coverage", restart="FastAPI",
         ),
+        "KNOWLEDGE_COVERAGE_MAX_RUN_ROWS": VariableSpec(
+            kind="int", default="10000", minimum=5, maximum=100000, component="Knowledge coverage", restart="FastAPI",
+        ),
         "KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES": VariableSpec(
             kind="int", default="2", minimum=1, maximum=5, component="Knowledge coverage", restart="FastAPI",
         ),

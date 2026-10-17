@@ -22,7 +22,7 @@ async function run() {
         const login = await context.request.post(origin+'/api/login',{data:{username:'planner-synthetic',password:'synthetic-browser-only'}});
         assert.equal(login.status(),200);
         await page.goto(origin+'/knowledge-coverage');
-        await page.waitForSelector('#coverageRoot[data-contract="coverage-page-2"]');
+        await page.waitForSelector('#coverageRoot[data-contract="coverage-page-3"]');
         await page.keyboard.press('Tab');
         assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('coverage-skip')),true);
         checks.push('signed_synthetic_auth_and_keyboard_skip');

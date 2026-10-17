@@ -61,7 +61,17 @@ class CoverageStore:
     def write(self, path, payload):
         temporary = path.with_name(".checkpoint-" + secrets.token_hex(16))
         private_json(temporary, payload)
-        os.replace(temporary, path)
+        try:
+            with temporary.open("rb") as stream:
+                os.fsync(stream.fileno())
+            os.replace(temporary, path)
+            descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        finally:
+            temporary.unlink(missing_ok=True)
 
     def list_owned(self, kind, owner):
         rows = []
@@ -231,34 +241,11 @@ class CoverageStore:
         meta = self.save_dataset(dataset, redactor, keypath.read_bytes(), owner, rows)
         return meta, snapshot
 
-    def create_run(self, owner, did, sid, selected_ids, settings, versions):
-        data, _ = self.dataset(did, owner)
-        self.snapshot(sid, owner)
-        rows = self.preparations(did, owner)
-        if not selected_ids or len(selected_ids) > 5 or len(set(selected_ids)) != len(selected_ids) or not set(selected_ids) <= {e.source_row_id for e in data.selected}:
-            raise AuditError("invalid_pilot_selection")
-        rid = "r_" + secrets.token_hex(16)
-        path = private_directory(self._path("runs", rid))
-        private_directory(path / "rows")
-        meta = {"run_id": rid, "owner_id": owner, "dataset_id": did, "snapshot_id": sid,
-                "input_id": data.input_id, "selected_row_ids": selected_ids,
-                "row_ids": [e.source_row_id for e in data.selected], "input_row_count": len(data.selected),
-                "source_input_row_count": len(data.events),
-                "state": "queued", "created_at": now(), "updated_at": now(),
-                "settings": settings, "configuration_id": canonical_sha256(settings), "versions": versions,
-                "completed_pilot_rows": 0, "attempt": 0, "error_code": ""}
-        for row in rows:
-            initial = {**row, "processing_status": "pending", "coverage_status": "not_evaluated",
-                       "model_selected": row["source_row_id"] in selected_ids,
-                       "outcome": "needs_context" if row["preparation_status"] == "needs_context" else "pending",
-                       "recommendation_status": "unassessed", "recommendations": [], "attempt_count": 0,
-                       "stopping_reason": "pending", "evaluated_entry_count": 0}
-            if row["preparation_status"] in {"invalid_input", "failed"}:
-                initial.update(processing_status="invalid_input" if row["preparation_status"] == "invalid_input" else "failed",
-                               outcome="error", stopping_reason="invalid_input")
-            private_json(path / "rows" / (row["source_row_id"] + ".json"), initial)
-        private_json(path / "meta.json", meta)
-        return meta
+    def create_run(self, owner, did, sid, selected_ids, settings, versions, *,
+                   execution_mode="pilot", idempotency_key=None):
+        from knowledge_audit.execution import create_run
+        return create_run(self, owner, did, sid, selected_ids, settings, versions,
+                          execution_mode=execution_mode, idempotency_key=idempotency_key)
 
     def row(self, rid, row_id, owner):
         meta = self.owned("runs", rid, owner)
@@ -267,11 +254,16 @@ class CoverageStore:
         return self.read(self._path("runs", rid) / "rows" / (row_id + ".json"))
 
     def save_row(self, rid, row, owner):
-        with self.run_lock(rid):
-            meta = self.owned("runs", rid, owner)
-            if row["source_row_id"] not in meta["selected_row_ids"]:
-                raise AuditError("invalid_result_identity")
-            self.write(self._path("runs", rid) / "rows" / (row["source_row_id"] + ".json"), row)
+        from knowledge_audit.execution import save_row
+        return save_row(self, rid, row, owner)
+
+    def progress(self, rid, owner, *, reconcile=False):
+        from knowledge_audit.execution import progress
+        return progress(self, rid, owner, reconcile=reconcile)
+
+    def result_page(self, rid, owner, offset, limit, outcome="", search=""):
+        from knowledge_audit.execution import result_page
+        return result_page(self, rid, owner, offset, limit, outcome, search)
 
     def rows(self, rid, owner):
         meta = self.owned("runs", rid, owner)
@@ -309,6 +301,11 @@ class CoverageStore:
             meta = self.owned("runs", rid, owner)
             cancelled = meta.get("cancel_requested", False)
             meta.update(updates)
+            if preserve_cancel and cancelled:
+                if meta.get("state") not in {"incompatible", "interrupted"}:
+                    meta["state"] = "cancelled"
+                    meta["stage"] = "cancelled"
+                    meta["active_row_id"] = ""
             if preserve_cancel and cancelled:
                 meta["cancel_requested"] = True
             self.write(path / "meta.json", meta)

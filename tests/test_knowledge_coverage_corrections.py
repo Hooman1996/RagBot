@@ -228,6 +228,7 @@ def test_recovery_does_not_retry_length_semantic_or_redaction_failures(code,fini
 def test_resume_pins_original_identities_before_retaining_completed_rows(tmp_path,change):
     store,d,s,meta,data,redactor,prep=seed(tmp_path)
     meta['selected_row_ids']=[e.source_row_id for e in data.selected[:2]]
+    meta['processing_row_ids']=meta['selected_row_ids'].copy()
     store.write(store._path('runs',meta['run_id'])/'meta.json',meta)
     current={'serving':{'fixture':'version1'},'runtime':{'production_depth':50,'alias_version':'synthetic-v1'}}
     calls=[]

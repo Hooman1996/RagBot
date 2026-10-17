@@ -6,7 +6,7 @@ from collections import Counter
 import json
 from pathlib import Path
 import secrets
-from typing import Annotated
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, HTTPException, Query, Request
 from fastapi.responses import Response
@@ -27,6 +27,7 @@ from knowledge_audit.preparation import QueryPreparer, prepare_dataset
 from knowledge_audit.export import coverage_export
 from knowledge_audit.jobs import CoverageJobs, versions
 from knowledge_audit.service import build_engine
+from utils.read_only_audit import canonical_sha256
 
 router = APIRouter(tags=["knowledge-coverage"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -46,9 +47,15 @@ class ImportPayload(StrictModel):
 class RunPayload(StrictModel):
     dataset_id: str = Field(pattern=r"^d_[0-9a-f]{32}$")
     snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
-    row_ids: list[str] = Field(min_length=1, max_length=5)
+    row_ids: list[str] = Field(default_factory=list, max_length=100000)
+    execution_mode: Literal["pilot", "subset", "full_input"] = "pilot"
+    idempotency_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,128}$")
     entry_budget: int = Field(default=300, ge=1, le=300)
     documents: list[str] = Field(min_length=1, max_length=50)
+
+
+class RecoveryPayload(StrictModel):
+    unknown_policy: Literal["stop", "skip_unknown", "retry_unknown"] = "stop"
 
 
 def require(user, *capabilities):
@@ -59,7 +66,9 @@ def require(user, *capabilities):
 
 def safe_meta(meta):
     keys = ("run_id", "dataset_id", "snapshot_id", "created_at", "state", "stage", "completed_pilot_rows",
-            "input_row_count", "selected_row_ids", "active_row_id", "error_code", "attempt", "cancel_requested")
+            "input_row_count", "selected_row_ids", "active_row_id", "error_code", "attempt", "cancel_requested",
+            "processed_rows", "execution_mode", "execution_version", "selected_row_count", "completion_quality", "recovery_choice",
+            "ordering_provenance", "settings")
     return {k: meta[k] for k in keys if k in meta}
 
 
@@ -72,7 +81,12 @@ def runtime(request):
     async def factory(meta):
         return await build_engine(store, meta, settings, answering=request.app.state.answering_service,
             runner=runner, limiter=request.app.state.request_limiter)
-    jobs = CoverageJobs(store, factory, runner)
+    async def access_guard(owner):
+        import main
+        account = await runner.run(main.db_manager.get_web_user_by_id, owner)
+        return bool(account and account.get("is_active") and
+            {"coverage_run_start", "kb_read"} <= permissions_for_user(account.get("role"), owner))
+    jobs = CoverageJobs(store, factory, runner, access_guard=access_guard)
     request.app.state.coverage_runtime = (settings, store, jobs)
     return settings, store, jobs
 
@@ -95,7 +109,7 @@ async def page(request: Request, user: WebUser):
     settings = load_coverage_settings()
     return templates.TemplateResponse(request=request, name="knowledge_coverage.html", context={
         "permissions": permissions_for_user(user.role, user.id), "upload_max_bytes": settings.upload_max_bytes,
-        "contract_version": "coverage-page-2"}, headers={"Cache-Control": "no-store"})
+        "contract_version": "coverage-page-3", "max_run_rows": settings.max_run_rows, "batch_max_entries": settings.batch_max_entries}, headers={"Cache-Control": "no-store"})
 
 
 def calibration_summary(meta):
@@ -236,9 +250,9 @@ async def create_run(payload: RunPayload, request: Request, user: WebUser):
     if not set(payload.documents) <= set(snapshot["documents"]):
         raise HTTPException(422, detail="Choose a datasource from this snapshot")
     config = {**settings.manifest(), "entry_budget": payload.entry_budget, "documents": payload.documents,
-              "selection_method": "explicit_source_row_ids"}
+              "selection_method": "server_all_user_query_rows" if payload.execution_mode == "full_input" else "explicit_source_row_ids"}
     meta = await safe_call(store.create_run, user.id, payload.dataset_id, payload.snapshot_id,
-                           payload.row_ids, config, versions())
+                           payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key or canonical_sha256(payload.model_dump()))
     jobs.start(meta["run_id"], user.id)
     return safe_meta(meta)
 
@@ -256,10 +270,8 @@ async def run_detail(run_id: str, request: Request, user: WebUser):
     _, store, jobs = runtime(request)
     meta = await safe_call(store.owned, "runs", run_id, user.id)
     meta = await jobs.inspect_state(run_id, user.id)
-    rows = await safe_call(store.rows, run_id, user.id)
-    return {**safe_meta(meta), "outcome_counts": dict(Counter(r["outcome"] for r in rows)),
-            "retryable_rows": sum(r["source_row_id"] in meta["selected_row_ids"] and r["processing_status"] in {"failed", "interrupted", "cancelled"} for r in rows),
-            "preparation_counts": dict(Counter(r["preparation_status"] for r in rows))}
+    counts = await safe_call(store.progress, run_id, user.id)
+    return {**safe_meta(meta), **counts, **({"completed_pilot_rows": counts["processed_rows"]} if meta.get("execution_mode", "pilot")=="pilot" else {})}
 
 
 def summary(row):
@@ -274,10 +286,7 @@ async def results(run_id: str, request: Request, user: WebUser,
                   outcome: str = "", search: Annotated[str, Query(max_length=200)] = ""):
     require(user, "coverage_results_view")
     _, store, _ = runtime(request)
-    rows = await safe_call(store.rows, run_id, user.id)
-    filtered = [r for r in rows if (not outcome or r["outcome"] == outcome) and
-                (not search or search.casefold() in r["input_query_redacted"].casefold())]
-    return {"total": len(filtered), "source_total": len(rows), "rows": [summary(r) for r in filtered[offset:offset + limit]]}
+    return await safe_call(store.result_page, run_id, user.id, offset, limit, outcome, search)
 
 
 @router.get("/api/knowledge-coverage/runs/{run_id}/rows/{row_id}")
@@ -338,18 +347,22 @@ async def cancel(run_id: str, request: Request, user: WebUser):
 
 
 @router.post("/api/knowledge-coverage/runs/{run_id}/retry", status_code=202)
-async def retry(run_id: str, request: Request, user: WebUser):
+async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryPayload | None = None):
     require(user, "coverage_run_start")
     _, store, jobs = runtime(request)
     await safe_call(store.owned, "runs", run_id, user.id)
     try:
-        await jobs.recover(run_id, user.id)
-    except AuditError:
-        raise HTTPException(409, detail="Active or incompatible run cannot be resumed") from None
+        await jobs.recover(run_id, user.id, unknown_policy=payload.unknown_policy if payload else "stop")
+    except AuditError as error:
+        code = str(error)
+        raise HTTPException(409, detail=code if code in SAFE_API_CODES else "Active or incompatible run cannot be resumed") from None
     return {"state": "queued"}
 
 
-SAFE_API_CODES = {"invalid_pilot_selection", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
+SAFE_API_CODES = {"invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
+    "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
+    "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
+    "invalid_pilot_selection", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run"}
 

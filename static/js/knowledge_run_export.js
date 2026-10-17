@@ -8,7 +8,7 @@
         function button(text,action,cls) {const n=el('button',text,cls||'coverage-secondary');n.type='button';n.addEventListener('click',async()=>{n.disabled=true;try{await action();}catch(e){if(n.isConnected)fail(e);}finally{n.disabled=false;}});return n;}
         function post(path,value) {return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value||{})});}
         const heading=el('h2','Run download'), intro=el('p','Freeze one coverage source, choose drafts and reviews for individual rows, then check the full-dataset summary. Filters and pagination never limit the CSV.','coverage-summary');
-        const status=el('p','Open a pilot run to prepare its download.','coverage-summary');status.setAttribute('role','status');
+        const status=el('p','Open a run to prepare its download.','coverage-summary');status.setAttribute('role','status');
         const sourceLabel=el('label','Frozen coverage source');const sourceSelect=el('select');sourceSelect.id='coverageExportSource';sourceLabel.append(sourceSelect);
         const freeze=button('Freeze current coverage',async()=>{
             const token=generation, rid=run;

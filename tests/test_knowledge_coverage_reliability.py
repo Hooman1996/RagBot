@@ -245,7 +245,7 @@ def test_failure_categories_survive_restricted_immutable_csv_projection(tmp_path
     store.save_row(meta['run_id'],row,1)
     body,manifest=store.export_revision(meta['run_id'],1,False,create=True)
     rows=list(csv.DictReader(io.StringIO(body.decode('utf-8-sig'))))
-    assert rows[0]['schema_version']=='coverage-csv-4' and rows[0]['error_code']=='model_read_timeout'
+    assert rows[0]['schema_version']=='coverage-csv-5' and rows[0]['error_code']=='model_read_timeout'
     assert json.loads(rows[0]['failure_diagnostics'])==row['failure_diagnostics']
     assert all(r['export_id']==manifest['export_id'] for r in rows)
 

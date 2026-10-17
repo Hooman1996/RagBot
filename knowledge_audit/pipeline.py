@@ -207,7 +207,7 @@ class CoverageEvaluator:
                 cid = pending[position]
                 position += 1
                 new_ids = {x["chunk_id"] for x in pack} | {cid}
-                if len(self.evaluated_ids | new_ids) > self.entry_budget:
+                if len(self.evaluated_ids | set(getattr(self, "prior_evaluated_entry_ids", ())) | new_ids) > self.entry_budget:
                     limited = True
                     break
                 entry = self.index.entry(cid)

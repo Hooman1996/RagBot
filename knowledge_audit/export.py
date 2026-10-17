@@ -128,26 +128,35 @@ COVERAGE_FIELDS = FIELDS + ("outcome", "support_arrangement", "production_contex
     "output_recovery_count", "recovery_policy", "failure_diagnostics", "batch_max_entries")
 ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
     "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
-    "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "failure_diagnostics",
+    "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "failure_diagnostics", "request_journal",
     "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "preparation_errors", "uncertainty_codes", "validation_diagnostics"}
 MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions", "review_codes_by_phase", "evidence_phases"}
-RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes", "failure_diagnostics"}
+RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes", "failure_diagnostics", "request_journal"}
 
 
 def coverage_export(meta, results, redactor, *, evidence_visible):
+    new_execution = bool(meta.get("execution_version"))
+    fields = COVERAGE_FIELDS + (("execution_mode", "selected_for_execution", "execution_selected_row_count", "checkpoint_reuse_count", "unknown_completion_count", "validated_checkpoint_count", "request_journal", "model_evaluated", "entry_model_dispatched") if new_execution else ())
+    scope = ("full_input" if meta.get("execution_mode") == "full_input" else "explicit_subset_full_input_export" if meta.get("execution_mode") == "subset" else "pilot_subset_full_input_export")
     rows = []
     for source in results:
-        row = {k: source.get(k, [] if k in ARRAY_FIELDS else {} if k in MAP_FIELDS else "") for k in COVERAGE_FIELDS}
-        row.update(schema_version="coverage-csv-4", run_id=meta["run_id"], export_id="",
+        row = {k: source.get(k, [] if k in ARRAY_FIELDS else {} if k in MAP_FIELDS else "") for k in fields}
+        row.update(schema_version="coverage-csv-5" if new_execution else "coverage-csv-4", run_id=meta["run_id"], export_id="",
             batch_max_entries=meta["settings"].get("batch_max_entries",meta["settings"].get("batch_entries",2)),
             run_identity_id=meta.get("run_identity_id", ""), export_revision_id=meta.get("export_revision_id", ""),
             kb_snapshot_id=meta["snapshot_id"], configuration_id=meta["configuration_id"], input_id=meta["input_id"],
-            input_scope="pilot_subset_full_input_export", selected_input_row_count=len(meta["row_ids"]),
+            input_scope=scope, selected_input_row_count=len(meta["row_ids"]),
             source_input_row_count=meta.get("source_input_row_count", len(meta["row_ids"])), rubric_version=meta["versions"]["prompts"]["rubric_version"],
             model_versions=meta["versions"].get("serving", {}), prompt_versions=meta["versions"]["prompts"],
             tokenizer_versions={"method": "served_tokenize", "immutable_revision": "unverified"},
             recommendations=[], recommendation_status="unassessed", run_settings_version=meta["configuration_id"],
             preparation_code_id=meta["versions"].get("code_id", ""), production_baseline_version="production-selection-1")
+        if new_execution:
+            row.update(execution_mode=meta["execution_mode"], selected_for_execution=source["source_row_id"] in meta["selected_row_ids"],
+                execution_selected_row_count=len(meta["selected_row_ids"]), checkpoint_reuse_count=source.get("checkpoint_reuse_count", 0),
+                unknown_completion_count=source.get("unknown_completion_count", 0),
+                validated_checkpoint_count=source.get("validated_checkpoint_count", 0), request_journal=source.get("request_journal", []),
+                model_evaluated=source.get("model_evaluated", False), entry_model_dispatched=source.get("entry_model_dispatched", False))
         row["retrieved_candidate_count"] = sum(m["candidate_count"] for m in source.get("retrieval_metrics", []) if m["purpose"] != "production_baseline")
         row["review_codes_by_phase"] = {phase: a.get("review_codes", []) for phase, a in source.get("phase_assessments", {}).items()}
         row["evidence_phases"] = source.get("question_evidence", {}).get("entry_phases", {}) if evidence_visible else {}
@@ -158,8 +167,8 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
             for key in ("explanation", "verification_reason", "error_reason"):
                 row[key] = ""
         rows.append(_redact(row, redactor))
-    data, export_id = encode_csv(rows, COVERAGE_FIELDS, meta["row_ids"])
-    manifest = {"schema_version": "coverage-export-manifest-4", "run_id": meta["run_id"], "export_id": export_id,
+    data, export_id = encode_csv(rows, fields, meta["row_ids"])
+    manifest = {"schema_version": "coverage-export-manifest-5" if new_execution else "coverage-export-manifest-4", "run_id": meta["run_id"], "export_id": export_id,
                 "export_revision_id": meta.get("export_revision_id", ""), "export_captured_at": meta.get("export_captured_at", ""),
                 "run_identity_id": meta.get("run_identity_id", ""), "run_identities": meta.get("run_identities", {}),
                 "run_identity_captured_at": meta.get("run_identity_captured_at", ""),
@@ -170,4 +179,19 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
                 "configuration_id": meta["configuration_id"], "settings": meta["settings"], "versions": meta["versions"],
                 "state": meta["state"], "csv_display_policy": "formula-prefix-map-1", "csv_escaped_cells": csv_display_escapes(rows), "evidence_visible": evidence_visible,
                 "outcome_counts": dict(Counter(r["outcome"] for r in rows))}
+    if new_execution:
+        manifest.update(input_scope=scope, execution_mode=meta["execution_mode"], execution_version=meta["execution_version"],
+            execution_selected_row_ids=meta["selected_row_ids"], processing_row_ids=meta["processing_row_ids"],
+            selected_row_count=len(meta["selected_row_ids"]), completion_quality=meta.get("completion_quality", "incomplete"),
+            checkpoint_policy="audit-boundaries-1", recovery_choice=meta.get("recovery_choice", "none"))
+        from knowledge_audit.execution import TERMINAL
+        selected = [r for r in results if r["source_row_id"] in set(meta["selected_row_ids"])]
+        manifest['execution_counts'] = {"imported_rows": len(results), "selected_rows": len(selected),
+            "processed_rows": sum(r['processing_status'] in TERMINAL for r in selected),
+            "model_evaluated_rows": sum(bool(r.get('model_evaluated')) for r in selected),
+            "model_dispatched_rows": sum(bool(r.get('entry_model_dispatched')) for r in selected),
+            "entry_evaluation_attempted_rows": sum(r.get('evaluated_entry_count', 0)>0 for r in selected),
+            "pending_rows": sum(r['processing_status'] not in TERMINAL for r in selected)}
+        if meta["execution_mode"] != "pilot":
+            manifest.pop("pilot_selected_row_ids", None)
     return data, manifest

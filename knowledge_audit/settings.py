@@ -19,16 +19,20 @@ class CoverageSettings:
     model_max_tokens: int
     token_margin: int
     batch_max_entries: int = 2
+    max_run_rows: int = 10000
 
     def __post_init__(self):
         if type(self.batch_max_entries) is not int or not 1 <= self.batch_max_entries <= 5:
             raise AuditError("invalid_coverage_batch_max_entries")
 
+        if type(self.max_run_rows) is not int or not 5 <= self.max_run_rows <= 100000:
+            raise AuditError("invalid_coverage_max_run_rows")
+
     def manifest(self):
         from utils.read_only_audit import canonical_sha256
         return {"artifact_dir": str(self.artifact_dir), "access_grants_sha256": canonical_sha256(self.access_grants),
                 "upload_max_bytes": self.upload_max_bytes, "model_max_tokens": self.model_max_tokens,
-                "token_margin": self.token_margin, "schema": "coverage-settings-3",
+                "token_margin": self.token_margin, "schema": "coverage-settings-4", "max_run_rows": self.max_run_rows, "execution_policy": "coverage-execution-1", "checkpoint_policy": "audit-boundaries-1",
                 "structured_output_mode": "json_schema_strict_1", "proof_reuse_version": "question-ledger-1",
                 "run_identity_version": "run-identity-1", "export_revision_version": "immutable-export-1",
                 "json_syntax_recovery_attempts": 1, "recovery_policy": "json-invalid-stop-one-fresh-response-1",
@@ -72,7 +76,8 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         integer("KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", 5242880, 1024, 20971520),
         integer("KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS", 1200, 256, 4096),
         integer("KNOWLEDGE_COVERAGE_TOKEN_MARGIN", 128, 32, 1024),
-        integer("KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES", 2, 1, 5))
+        integer("KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES", 2, 1, 5),
+        integer("KNOWLEDGE_COVERAGE_MAX_RUN_ROWS", 10000, 5, 100000))
 
 
 def grants_for(user_id: int) -> frozenset[str]:

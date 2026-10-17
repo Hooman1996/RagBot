@@ -46,7 +46,10 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
         model.metrics_path = store._path("runs", meta["run_id"]) / "model-metrics.jsonl"
         retrieval = AuditRetrieval(rag, snapshot, runner, create_signature, limiter=limiter)
         await retrieval.check()
-        capability = await model.check_schema_support()
+        # A6 never sends unjournaled startup capability completions. Strict
+        # schema enforcement/local validation remain active on every real call.
+        capability = ({"status": "not_probed_in_run", "mode": "json_schema_strict_1"}
+                      if meta.get("execution_version") else await model.check_schema_support())
         # Schema checks are bounded synthetic work, not customer evaluation.
         # Recheck identity after the probes and pin it before any selected row.
         before_serving = dict(model.serving)

@@ -161,3 +161,6 @@ KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS=1200
 KNOWLEDGE_COVERAGE_TOKEN_MARGIN=128
 # Audit-local batch cap; integer 1-5. Token packing may select fewer.
 KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES=2
+
+# Maximum selected audit rows per run (5–100000); pilot default stays five.
+KNOWLEDGE_COVERAGE_MAX_RUN_ROWS=10000

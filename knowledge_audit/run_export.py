@@ -187,7 +187,7 @@ class RunExportStore:
                     'source_coverage_csv_sha256': source['csv_sha256'], 'source_coverage_manifest_sha256': canonical_sha256(source),
                     'coverage_source_manifest': source, 'revision_selection_map': pinned, 'summary': summary,
                     'captured_at': now(), 'evidence_visible': visible, 'coverage_state': source['state'],
-                    'input_scope': 'pilot_subset_full_input_export', 'human_gap_review_status': 'not_reviewed',
+                    'input_scope': source.get('input_scope', 'pilot_subset_full_input_export'), 'human_gap_review_status': 'not_reviewed',
                     'approval_scope': 'question_taxonomy_only_no_factual_answer_or_confirmed_kb_absence',
                     'csv_display_policy': 'formula-prefix-map-1', 'csv_escaped_cells': csv_display_escapes(rows)}
         directory = self._directory(run_id, visible) / revision_id

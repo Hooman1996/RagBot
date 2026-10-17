@@ -311,3 +311,35 @@ privately; publish counts and subset label, never imply it is a full-input audit
 
 For every stage report, distinguish executed commands/exit statuses from proposed
 checks and controlled mechanics from live quality/performance. Stop after report.
+
+## A6.1 execution and recovery — implemented for planner review
+
+User-authorized A6.1 adds `pilot` (default, maximum five), explicit `subset`, and
+server-resolved `full_input` execution against an owned redacted dataset. Source
+order is conserved in every export; A1 chronological replay order and strict
+history cutoffs remain separate. A configurable maximum rejects oversized runs.
+No customer execution or live model/embedding/reranker request is authorized or
+performed in this stage.
+
+`coverage-execution-1` persists selection/settings/ownership before processing,
+owner/request-bound creation idempotency, file-backed progress indexes and run/
+global OS leases. Busy workers remain queued. Persistent cancellation cannot be
+reverted by stale progress; a cancellation watcher also stops another process's
+local task. Interrupted work is discovered, never automatically replayed at boot.
+
+`audit-boundaries-1` journals dispatch/completion uncertainty and stores only
+redacted structured preparation/model results and frozen retrieval ID manifests.
+Resume checks identities, schema, hashes, membership/citations and semantic proof
+rules again. Completed rows are retained; identical completed boundaries avoid
+redispatch. Unknown remote work requires explicit skip or duplicate-work retry
+acknowledgement. Attempts, recovery decisions and old immutable exports remain
+separate. These controls do not promise exactly-once inference or cancellation
+of a remote server request.
+
+Coverage CSV/manifest v5 adds execution/recovery provenance for new A6.1 runs;
+historical schemas/bytes remain unchanged. A5 pinned coverage/draft/review exports
+remain explicit. See [A6_1_EXECUTION_RECOVERY_REPORT.md](A6_1_EXECUTION_RECOVERY_REPORT.md)
+for exact synthetic/browser checks and measured file-I/O comparison.
+A6.2 retention, service-load/resource validation and operational acceptance remain
+separate gates. No retention deletion, deployment, KB editing, live inference or
+actual full customer dataset evaluation is included.

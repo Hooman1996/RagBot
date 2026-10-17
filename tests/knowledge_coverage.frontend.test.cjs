@@ -81,7 +81,7 @@ test('upload → explicit selection → progress → evidence → complete expor
         assert.equal($('Rows').children[0].children[1].tagName,'TD');
         const checkbox=$('Rows').children[0].children[0].children[0]; checkbox.checked=true; checkbox.dispatch('change');
         $('Snapshot').value=sid; $('Snapshot').dispatch('change');
-        assert.equal($('SelectionCount').textContent,'1 of 5 selected');
+        assert.equal($('SelectionCount').textContent,'1 selected / 918 imported queries');
         await $('Start').dispatch('click'); await flush();
         assert.equal($('Progress').value,1); assert.match($('ProgressText').textContent,/918 rows retained/);
         await $('PrepareExport').dispatch('click');

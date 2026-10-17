@@ -29,20 +29,20 @@
             <button id="coverageTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode">Theme</button>
             {% set logout_label = 'Log out' %}{% include "_logout_button.html" %}
         </div></header>
-        <div id="coverageRoot" class="coverage-page" data-contract="{{ contract_version }}" data-upload-limit="{{ upload_max_bytes }}"
+        <div id="coverageRoot" class="coverage-page" data-contract="{{ contract_version }}" data-upload-limit="{{ upload_max_bytes }}" data-max-run-rows="{{ max_run_rows }}" data-batch-max="{{ batch_max_entries }}"
              data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}"
              data-can-evidence="{{ 'true' if 'coverage_evidence_view' in permissions and 'kb_read' in permissions else 'false' }}"
              data-can-export="{{ 'true' if 'coverage_export_download' in permissions else 'false' }}"
              data-can-review="{{ 'true' if 'coverage_recommendation_review' in permissions else 'false' }}">
-            <div class="coverage-intro"><div><p class="coverage-eyebrow">KNOWLEDGE REVIEW · EARLY PILOT</p><h1>What can our knowledge answer?</h1>
-                <p>Review a small selection against a frozen knowledge revision. Every imported query stays in the results and download.</p></div>
+            <div class="coverage-intro"><div><p class="coverage-eyebrow">KNOWLEDGE REVIEW · CONTROLLED EXECUTION</p><h1>What can our knowledge answer?</h1>
+                <p>Choose an explicit scope against a frozen knowledge revision. Every imported query stays in the results and download.</p></div>
                 <span class="coverage-pill">Up to 5 questions per pilot</span>
             </div>
             <p id="coverageStatus" class="coverage-status" role="status" aria-live="polite">Loading your review workspace…</p>
             <p id="coverageError" class="coverage-error" role="alert" hidden></p>
             {% if 'coverage_run_start' in permissions %}
             <details class="coverage-card coverage-import" open>
-                <summary>Import questions and choose a pilot</summary>
+                <summary>Import questions and choose an execution scope</summary>
                 <form id="coverageImportForm">
                     <div class="coverage-form-grid">
                         <label class="coverage-file-label">CSV file<input id="coverageFile" type="file" accept=".csv,text/csv" required><span>Only mapped query, session, time and role fields are retained.</span></label>
@@ -73,17 +73,32 @@
                 </div>
                 <div id="coverageDocuments" class="coverage-document-list" role="group" aria-label="Knowledge datasources"></div>
                 <p id="coverageDatasetSummary" class="coverage-summary">Import or select a dataset to review its preparation state.</p>
-                <div class="coverage-selection-bar"><strong id="coverageSelectionCount">0 of 5 selected</strong><button id="coverageClearSelection" class="coverage-link" type="button">Clear selection</button>
+                <label>Execution scope<select id="coverageMode">
+                    <option value="pilot">Pilot · up to five questions (default)</option>
+                    <option value="subset">Explicit larger subset</option>
+                    <option value="full_input">All user-query rows in this dataset</option>
+                </select></label>
+                <p id="coverageStartSummary" class="coverage-summary" aria-live="polite">Select a dataset and snapshot. Processing is sequential; larger runs may take a long time.</p>
+                <div class="coverage-selection-bar"><strong id="coverageSelectionCount">0 selected</strong><button id="coverageClearSelection" class="coverage-link" type="button">Clear selection</button>
                     <button id="coverageStart" class="coverage-primary" type="button" disabled>Start selected pilot</button></div>
             </details>
             {% endif %}
             <section class="coverage-card coverage-run" aria-labelledby="coverageRunTitle">
-                <div class="coverage-section-heading"><div><h2 id="coverageRunTitle">Review progress</h2><p id="coverageProgressText">No pilot selected. Import questions or open a previous run.</p></div>
+                <div class="coverage-section-heading"><div><h2 id="coverageRunTitle">Review progress</h2><p id="coverageProgressText">No run selected. Import questions or open a previous run.</p></div>
                     <label>Previous runs<select id="coverageRuns"><option value="">Select a run</option></select></label></div>
-                <progress id="coverageProgress" max="5" value="0" aria-label="Selected pilot rows processed"></progress>
+                <progress id="coverageProgress" max="5" value="0" aria-label="Selected rows processed"></progress>
                 <div id="coverageRunCounts" class="coverage-run-counts" aria-live="polite"></div>
-                <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel pilot</button>
+                <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel run</button>
                     <button id="coverageResume" class="coverage-secondary" type="button" hidden>Resume remaining rows</button>
+                </div>
+                <div id="coverageRecovery" class="coverage-summary" hidden>
+                    <p id="coverageRecoveryText"></p>
+                    <label>Recovery choice<select id="coverageRecoveryChoice">
+                        <option value="stop">Resume only if no remote completion is unknown</option>
+                        <option value="skip_unknown">Continue other rows; leave unknown work interrupted</option>
+                        <option value="retry_unknown">Explicitly retry unknown work · may duplicate server work/cost</option>
+                    </select></label>
+                    <p>Completed rows are retained. Validated checkpoints are checked again. A local cancellation does not prove that the server stopped. Changed identities require a new run.</p>
                 </div>
                 <details class="coverage-legacy-download"><summary>Coverage-only download · no draft recommendations</summary><div class="coverage-run-actions">
                     <button id="coveragePrepareExport" class="coverage-secondary" type="button" hidden>Prepare download</button>
