@@ -53,7 +53,7 @@
 .coverage-empty { padding: 36px 16px; color: var(--text-secondary); line-height: 1.8; text-align: center; font-size: 13px; }
 .coverage-pagination { justify-content: space-between; margin-top: 16px; font-size: 12px; }
 .coverage-scope-note { margin-top: 20px; }
-.coverage-evidence { position: sticky; top: 20px; max-height: calc(100vh - 48px); overflow-y: auto; }
+.coverage-evidence { position: sticky; top: 20px; max-height: calc(100dvh - 140px); overflow-y: auto; }
 .coverage-evidence h3 { font-size: 13px; font-weight: 650; margin-block: 22px 10px; }
 .coverage-evidence p { font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
 .coverage-evidence .coverage-query { min-width: 0; max-width: none; font-size: 16px; }
@@ -77,7 +77,7 @@ body.light-mode .coverage-badge[data-tone=review] { color: #6b4912; background: 
 body.light-mode .coverage-badge[data-tone=error] { color: #7d1f2b; background: #fff0f0; }
 html[dir=rtl] .coverage-page { font-family: 'Vazirmatn', 'Inter', sans-serif; }
 html[dir=rtl] .sidebar { border-inline-start: none; }
-@media (max-width: 1250px) { .coverage-workbench { grid-template-columns: minmax(0,1fr); } .coverage-evidence { position: static; max-height: none; } .coverage-form-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 1250px) { .coverage-workbench { grid-template-columns: minmax(0,1fr); } .coverage-evidence { position: static; max-height: calc(100dvh - 160px); } .coverage-form-grid { grid-template-columns: repeat(2,minmax(0,1fr)); } }
 @media (max-width: 720px) { .coverage-page { padding: 16px; } .coverage-card { padding: 16px; } .coverage-intro, .coverage-section-heading { flex-direction: column; } .coverage-form-grid, .coverage-filters { grid-template-columns: minmax(0,1fr); } .coverage-section-heading label { width: 100%; } .coverage-intro .coverage-pill { white-space: normal; } .coverage-page .coverage-primary { width: 100%; } .coverage-table-scroll { margin-inline: -8px; } }
 @media (max-width: 760px) { .app-shell { flex-direction: column; height: 100dvh; } .sidebar { width: 100%; min-width: 0; height: auto; } .sidebar__brand, .coverage-private-note { display: none; } .sidebar__nav { display: flex; gap: 8px; padding: 8px; overflow-x: auto; } .sidebar__nav-item { flex: 0 0 auto; white-space: nowrap; font-size: 12px; padding: 8px 10px; margin: 0; } .main-content { min-height: 0; } .topbar { padding-inline: 12px; gap: 8px; } .topbar__title { font-size: 12px; } .coverage-header-controls { gap: 6px; } }
 @media (prefers-reduced-motion: reduce) { .coverage-page *, .coverage-page *::before, .coverage-page *::after { animation: none !important; transition: none !important; scroll-behavior: auto !important; } }
@@ -96,3 +96,55 @@ html[dir=rtl] .sidebar { border-inline-start: none; }
 .recommendation-review-controls, .recommendation-downloads { display: flex; gap: 8px; flex-wrap: wrap; margin-block: 12px; }
 .recommendation-downloads p { flex-basis: 100%; }
 @media (max-width: 720px) { .recommendation-review-controls button { width: 100%; } .recommendation-card { padding: 12px; } }
+/* A5: explicit denominators and compact, navigable query review. */
+.coverage-run-counts { display: grid; grid-template-columns: repeat(4,minmax(0,1fr)); gap: 0; border: 1px solid var(--border-default); border-radius: 6px; margin-block: 8px 18px; }
+.coverage-run-counts > div { padding: 12px; min-width: 0; border-inline-end: 1px solid var(--border-default); }
+.coverage-run-counts strong { display: block; font-size: 18px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.coverage-run-counts span { display: block; color: var(--text-secondary); font-size: 11px; line-height: 1.6; }
+.coverage-export-source { display: flex; gap: 12px; align-items: end; margin-block: 18px; }
+.coverage-export-source label { flex: 1; min-width: 0; }
+.coverage-run-export h3 { font-size: 14px; margin-block: 20px 12px; }
+.coverage-run-export .coverage-table-scroll { margin-block: 12px; }
+.coverage-run-export td { max-width: 260px; }
+.coverage-run-export .coverage-id { display: block; font-family: 'JetBrains Mono',monospace; font-size: 11px; overflow-wrap: anywhere; }
+.coverage-export-summary { background: var(--color-bg-base); border-inline-start: 3px solid var(--color-accent-blue); padding: 0 16px; margin-block: 16px; line-height: 1.85; font-size: 13px; }
+.coverage-export-summary:not(:empty) { padding-block: 8px 16px; }
+.coverage-run-export details { margin-block: 18px; }
+.coverage-run-export summary { font-size: 12px; }
+.coverage-legacy-download { margin-block-start: 16px; color: var(--text-secondary); }
+.coverage-legacy-download .coverage-run-actions { margin-block-start: 12px; }
+.coverage-selected-query { position: sticky; inset-block-start: 0; z-index: 2; background: var(--color-bg-surface); border-block-end: 1px solid var(--border-strong); padding-block: 16px 12px; }
+.coverage-selected-query > strong { font-size: 11px; color: var(--text-secondary); }
+.coverage-selected-query > p { font-family: 'Vazirmatn','Inter',sans-serif; font-size: 15px; white-space: pre-wrap; margin-block: 8px; }
+.coverage-detail-nav { display: flex; gap: 12px; flex-wrap: wrap; margin-block: 14px; }
+.coverage-detail-nav .coverage-link { font-size: 12px; min-height: 32px; }
+.coverage-detail-group { border-block-end: 1px solid var(--border-default); padding-block: 12px; scroll-margin-block-start: 140px; }
+.coverage-detail-group > summary { font-size: 13px; }
+.coverage-detail-group .coverage-recommendations { border: 0; margin-block: 8px; }
+.coverage-page select { max-width: 100%; }
+.coverage-table-scroll table { min-width: 600px; }
+.coverage-page,.coverage-page * { min-inline-size: 0; }
+.coverage-page .coverage-status,.coverage-summary,.coverage-run-export p { overflow-wrap: anywhere; }
+.coverage-table-scroll:focus-visible { outline-offset: -3px; }
+@media (min-width: 1251px) { .coverage-workbench { grid-template-columns: minmax(0,1.2fr) minmax(390px,1fr); } }
+@media (max-width: 900px) { .coverage-run-counts { grid-template-columns: repeat(2,minmax(0,1fr)); } }
+@media (max-width: 720px) { .coverage-export-source { flex-direction: column; align-items: stretch; } .coverage-selected-query { inset-block-start: 0; } }
+
+.coverage-selected-query > p { max-block-size: 3.6em; overflow-y: auto; }
+
+.coverage-query-text { display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 6; overflow: hidden; }
+.coverage-detail-group > h3 { margin-block: 12px 6px; }
+.coverage-detail-group > p { font-size: 12px; line-height: 1.7; }
+@media (max-width: 900px) {
+    .app-shell { flex-direction: column; height: 100dvh; }
+    .sidebar { width: 100%; min-width: 0; height: auto; }
+    .sidebar__brand, .coverage-private-note { display: none; }
+    .sidebar__nav { display: flex; gap: 8px; padding: 8px; overflow-x: auto; }
+    .sidebar__nav-item { flex: 0 0 auto; white-space: nowrap; font-size: 12px; padding: 8px 10px; margin: 0; }
+    .main-content { min-height: 0; }
+}
+
+.sidebar__brand-sub { font-size: 10px; letter-spacing: .06em; }
+
+.coverage-evidence { scroll-padding-block-start: 160px; }
+.recommendation-card { scroll-margin-block-start: 150px; }

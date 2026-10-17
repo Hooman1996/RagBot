@@ -14,6 +14,11 @@ from web_permissions import PERMISSIONS, ROLE_PERMISSIONS, route_permission
 
 # Independent expected inventory: method and FastAPI route path -> grant.
 EXPECTED = {
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/export-options'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/combined-export-preview'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/combined-export-revisions'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/combined-export'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/combined-export-manifest'): 'coverage_export_download',
     ('GET', '/knowledge-coverage'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/runs/{run_id}/rows/{row_id}/recommendations'): 'coverage_evidence_view',
     ('POST', '/api/knowledge-coverage/runs/{run_id}/recommendations'): 'coverage_run_start',

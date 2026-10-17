@@ -52,6 +52,11 @@ def landing_for(role: str | None) -> str:
 # Each entry is (HTTP method, full path regex, permission). Unknown routes
 # remain unclassified and are denied by the browser middleware.
 ROUTES = (
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/export-options", "coverage_export_download"),
+    ("POST", r"/api/knowledge-coverage/runs/[^/]+/combined-export-preview", "coverage_export_download"),
+    ("POST", r"/api/knowledge-coverage/runs/[^/]+/combined-export-revisions", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/combined-export", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/runs/[^/]+/combined-export-manifest", "coverage_export_download"),
     ("GET", r"/knowledge-coverage", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+/recommendations", "coverage_evidence_view"),
     ("POST", r"/api/knowledge-coverage/runs/[^/]+/recommendations", "coverage_run_start"),

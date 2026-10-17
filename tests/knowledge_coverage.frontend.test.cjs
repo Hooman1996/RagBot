@@ -108,3 +108,61 @@ test('frontend never inserts untrusted HTML or stores customer data',()=>{
     assert(css.includes('focus-visible') && css.includes('prefers-reduced-motion') && css.includes('overflow-y: auto'));
     assert(css.includes('max-width: 760px') && css.includes('dir=rtl') && css.includes('Vazirmatn'));
 });
+
+test('delayed progress is not duplicated and stale row/run responses cannot repaint the current view',async()=>{
+    const document=dom(),$=name=>document.getElementById('coverage'+name);
+    document.getElementById('coverageRoot').dataset.canStart='false';
+    document.getElementById('coverageRoot').dataset.canExport='false';
+    const runA='r_'+'a'.repeat(32),runB='r_'+'b'.repeat(32),rowA='row_'+'a'.repeat(32),rowB='row_'+'b'.repeat(32);
+    let releaseProgress,releaseEvidence,slowProgress=true,progressRequests=0;
+    const progressGate=()=>new Promise(resolve=>{releaseProgress=resolve;});
+    const old={fetch:global.fetch,setInterval:global.setInterval,clearInterval:global.clearInterval,localStorage:global.localStorage,KnowledgeRecommendations:global.KnowledgeRecommendations};
+    global.KnowledgeRecommendations={mount(container,identity){assert.equal(identity.onRevisionChange,null);assert.equal(identity.getCoverageSource(),'');return {stop(){}};}};
+    global.localStorage={getItem(){return null;}};global.setInterval=()=>1;global.clearInterval=()=>{};
+    const run=(id,count)=>({run_id:id,state:'completed',completed_pilot_rows:1,selected_row_ids:[rowA],input_row_count:count,outcome_counts:{pending:count-1},retryable_rows:0});
+    global.fetch=async url=>{
+        const path=url.replace('/api/knowledge-coverage/','');let value;
+        if(path==='datasets')value=[];
+        else if(path==='runs')value=[run(runA,918),run(runB,17)];
+        else if(path==='runs/'+runA){progressRequests++;value=slowProgress?await progressGate():run(runA,918);}
+        else if(path==='runs/'+runB)value=run(runB,17);
+        else if(path.includes('/results?'))value={total:0,rows:[]};
+        else if(path.endsWith('/rows/'+rowA))value=await new Promise(resolve=>{releaseEvidence=resolve;});
+        else if(path.endsWith('/rows/'+rowB))value={result:{source_record_ordinal:2,input_query_redacted:'New selected query',outcome:'pending',coverage_status:'not_evaluated'},evidence:[]};
+        else throw new Error('Unexpected synthetic route');
+        return {ok:true,json:async()=>value};
+    };
+    try{
+        const controller=ui.boot(document);await flush();$('Runs').value=runA;const change=$('Runs').dispatch('change');await flush();
+        await controller.progress();assert.equal(progressRequests,1);
+        releaseProgress(run(runA,918));await change;assert.match($('ProgressText').textContent,/918 rows retained/);
+        const oldRow=controller.openEvidence(rowA,{id:'old'});await flush();await controller.openEvidence(rowB,{id:'new'});
+        releaseEvidence({result:{source_record_ordinal:1,input_query_redacted:'Old discarded query',outcome:'pending'},evidence:[]});await oldRow;
+        assert.match(text($('EvidenceContent')),/New selected query/);assert.doesNotMatch(text($('EvidenceContent')),/Old discarded query/);
+        const oldProgress=controller.progress();await flush();$('Runs').value=runB;await $('Runs').dispatch('change');releaseProgress(run(runA,918));await oldProgress;
+        assert.match($('ProgressText').textContent,/17 rows retained/);assert.doesNotMatch($('ProgressText').textContent,/918/);
+    }finally{Object.assign(global,old);}
+});
+
+test('a delayed CSV upload never replaces a run selected while it was in flight',async()=>{
+    const document=dom(),$=name=>document.getElementById('coverage'+name),runId='r_'+'c'.repeat(32),datasetId='d_'+'d'.repeat(32);
+    let releaseUpload;const saved={fetch:global.fetch,setInterval:global.setInterval,clearInterval:global.clearInterval,localStorage:global.localStorage};
+    global.localStorage={getItem(){return null;}};global.setInterval=()=>1;global.clearInterval=()=>{};
+    global.fetch=async(url,options={})=>{
+        const path=url.replace('/api/knowledge-coverage/','');let body;
+        if(path==='datasets'&&options.method==='POST')body=await new Promise(resolve=>{releaseUpload=resolve;});
+        else if(path==='datasets'||path==='snapshots')body=[];
+        else if(path==='runs')body=[{run_id:runId,state:'completed',selected_row_ids:['row_'+'a'.repeat(32)]}];
+        else if(path==='runs/'+runId)body={state:'completed',selected_row_ids:['row_'+'a'.repeat(32)],completed_pilot_rows:1,input_row_count:17,outcome_counts:{pending:16},retryable_rows:0};
+        else if(path.includes('/results?'))body={total:0,rows:[]};
+        else throw new Error('Unexpected synthetic route');
+        return {ok:true,json:async()=>body};
+    };
+    try{
+        const controller=ui.boot(document);await flush();const bytes=Buffer.from('query\nSynthetic question?\n');
+        $('File').files=[{size:bytes.length,arrayBuffer:async()=>bytes}];await $('File').dispatch('change');
+        const upload=$('ImportForm').dispatch('submit');await flush();$('Runs').value=runId;await $('Runs').dispatch('change');
+        releaseUpload({dataset_id:datasetId});await upload;await controller.progress();
+        assert.match($('ProgressText').textContent,/17 rows retained/);assert.equal($('Runs').value,runId);
+    }finally{Object.assign(global,saved);}
+});

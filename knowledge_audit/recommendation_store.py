@@ -22,7 +22,12 @@ def decode_coverage(body,manifest):
     result=[]
     for row in csv.DictReader(io.StringIO(body.decode('utf-8-sig'))):
         for key,value in row.items():
-            if value.startswith("'") and formula_safe(value[1:])==value:value=value[1:]
+            escapes=manifest.get('csv_escaped_cells')
+            if escapes is not None:
+                if key in escapes.get(row['source_row_id'],[]):
+                    if not value.startswith("'"):raise AuditError('export_identity_mismatch')
+                    value=value[1:]
+            elif value.startswith("'") and formula_safe(value[1:])==value:value=value[1:]
             if key in ARRAY_FIELDS or key in MAP_FIELDS or key in STRUCTURED_DEFAULTS:value=json.loads(value)
             if key in {'output_recovery_count','source_record_ordinal','evaluated_entry_count','batch_max_entries'} and value not in {'','None'} and isinstance(value,str):value=int(value)
             row[key]=value
@@ -218,33 +223,7 @@ class RecommendationStore:
                 status=result.get('recommendation_status','not_selected' if selected['eligible'] else 'unavailable')
                 if selected['reason_codes'] and status=='drafted':status='needs_review'
                 if status=='drafted' and meta['versions']['metadata_lookup']!=LOOKUP_VERSION:status='needs_review'
-                drafts=result.get('recommendations',[]) if visible else []
-                decisions=[review['decisions'].get(original['source_row_id']+':'+r['recommendation_id'],{'status':'unreviewed'}) for r in result.get('recommendations',[])]
-                states={d['status'] for d in decisions}
-                row.update(schema_version='coverage-recommendations-csv-1',export_id='',export_revision_id='',
-                    source_coverage_evidence_visibility=original.get('evidence_visibility',''),evidence_visibility='visible' if visible else 'restricted',
-                    source_coverage_export_id=source['manifest']['export_id'],source_coverage_row_sha256=canonical_sha256(original),
-                    recommendation_revision_id=rid,review_revision_id=review['review_revision_id'],recommendation_status=status,
-                    recommendation_review_status=next(iter(states)) if len(states)==1 else 'mixed' if states else 'unreviewed',
-                    human_gap_review_status='not_reviewed',calibration_status='real_query_calibration_pending',
-                    recommendation_approval_scope='question_taxonomy_only_no_factual_answer_or_kb_write',
-                    recommendations=[{**r,'review':d} for r,d in zip(drafts,decisions)],
-                    gap_specifications=result.get('gap_specifications',[]) if visible else [],
-                    recommendation_eligibility=selected['eligible'],recommendation_unavailable_reasons=selected['reason_codes'],
-                    recommendation_error_code=result.get('error_code',''),recommendation_prompt_versions=meta['versions']['prompts'],
-                    recommendation_model_versions=meta.get('serving_identity',{}),
-                    recommendation_code_id=meta['versions']['code_id'],title_lookup_scope={k:v for k,v in result.get('title_lookup',{}).items() if k not in {'titles','taxonomy_paths'}},
-                    proposed_question=[r['recommended_question'] for r in drafts],category=[r['category'] for r in drafts],subcategory=[r['subcategory'] for r in drafts],
-                    proposed_new_category=[r['category'] for r in drafts if r['taxonomy_status']=='proposed_new_category'],
-                    proposed_new_subcategory=[r['subcategory'] for r in drafts if r['taxonomy_status']=='proposed_new_subcategory'],
-                    related_existing_faq_ids=list(dict.fromkeys(i for r in drafts for i in r['related_faq_ids'])),
-                    equivalent_existing_faq_ids=list(dict.fromkeys(i for r in drafts for i in r['equivalent_faq_ids'])))
-                if not visible:
-                    from knowledge_audit.export import RESTRICTED_FIELDS
-                    for key in RESTRICTED_FIELDS:
-                        if key in row:row[key]=[]
-                    for key in ('explanation','verification_reason','error_reason'):row[key]=''
-                    row['evidence_phases']={}
+                row=recommendation_row(original,result,selected,meta,review,visible)
                 rows.append(row)
             revision_id='rex_'+secrets.token_hex(16)
             for row in rows:row['export_revision_id']=revision_id
@@ -273,6 +252,43 @@ class RecommendationStore:
         except OSError:raise AuditError('artifact_not_found') from None
         if hashlib.sha256(body).hexdigest()!=manifest['csv_sha256'] or manifest['evidence_visible']!=visible or manifest['recommendation_revision_id']!=rid:raise AuditError('export_identity_mismatch')
         return body,manifest
+
+
+def recommendation_row(original,result,selected,meta,review,visible):
+    """Shared projection; A4 callers retain their existing schema and meanings."""
+    row=dict(original)
+    rid=meta.get("recommendation_revision_id", "")
+    status=result.get("recommendation_status", "not_selected" if selected["eligible"] else "unavailable")
+    if selected["reason_codes"] and status=="drafted":status="needs_review"
+    if status=="drafted" and meta.get("versions",{}).get("metadata_lookup")!=LOOKUP_VERSION:status="needs_review"
+    drafts=result.get('recommendations',[]) if visible else []
+    decisions=[review['decisions'].get(original['source_row_id']+':'+r['recommendation_id'],{'status':'unreviewed'}) for r in result.get('recommendations',[])]
+    states={d['status'] for d in decisions}
+    row.update(schema_version='coverage-recommendations-csv-1',export_id='',export_revision_id='',
+        source_coverage_evidence_visibility=original.get('evidence_visibility',''),evidence_visibility='visible' if visible else 'restricted',
+        source_coverage_export_id=original['export_id'],source_coverage_row_sha256=canonical_sha256(original),
+        recommendation_revision_id=rid,review_revision_id=review['review_revision_id'],recommendation_status=status,
+        recommendation_review_status=next(iter(states)) if len(states)==1 else 'mixed' if states else 'unreviewed',
+        human_gap_review_status='not_reviewed',calibration_status='real_query_calibration_pending',
+        recommendation_approval_scope='question_taxonomy_only_no_factual_answer_or_kb_write',
+        recommendations=[{**r,'review':d} for r,d in zip(drafts,decisions)],
+        gap_specifications=result.get('gap_specifications',[]) if visible else [],
+        recommendation_eligibility=selected['eligible'],recommendation_unavailable_reasons=selected['reason_codes'],
+        recommendation_error_code=result.get('error_code',''),recommendation_prompt_versions=meta['versions']['prompts'],
+        recommendation_model_versions=meta.get('serving_identity',{}),
+        recommendation_code_id=meta['versions']['code_id'],title_lookup_scope={k:v for k,v in result.get('title_lookup',{}).items() if k not in {'titles','taxonomy_paths'}},
+        proposed_question=[r['recommended_question'] for r in drafts],category=[r['category'] for r in drafts],subcategory=[r['subcategory'] for r in drafts],
+        proposed_new_category=[r['category'] for r in drafts if r['taxonomy_status']=='proposed_new_category'],
+        proposed_new_subcategory=[r['subcategory'] for r in drafts if r['taxonomy_status']=='proposed_new_subcategory'],
+        related_existing_faq_ids=list(dict.fromkeys(i for r in drafts for i in r['related_faq_ids'])),
+        equivalent_existing_faq_ids=list(dict.fromkeys(i for r in drafts for i in r['equivalent_faq_ids'])))
+    if not visible:
+        from knowledge_audit.export import RESTRICTED_FIELDS
+        for key in RESTRICTED_FIELDS:
+            if key in row:row[key]=[]
+        for key in ('explanation','verification_reason','error_reason'):row[key]=''
+        row['evidence_phases']={}
+    return row
 
 
 def recommendation_versions():

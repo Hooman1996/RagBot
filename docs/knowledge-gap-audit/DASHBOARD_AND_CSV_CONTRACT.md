@@ -630,3 +630,88 @@ Restricted CSVs blank recommendation/evidence text and phase maps, and explicitl
 mark evidence restricted. A CSV and manifest always resolve to the same immutable
 rex revision even after later review/progress; a new POST creates new bytes.
 No historical 918-row export is regenerated or replaced.
+
+
+## Implemented A5 run-level export and dashboard
+
+The existing main-dashboard page retains its local assets, branding, roles and
+pilot limits. Input preparation counts are separate from coverage outcomes;
+processed pilot rows and imported rows always have explicit denominators.
+Completed-with-errors is distinct from a clean completed pilot. Covered but not
+reachable remains retrieval work; uncertainty/context/errors never become gaps.
+Query details retain a selected-question header, compact table previews (full text
+in details), native expandable assessment/aspect/source/proposal/provenance groups
+and source anchors that open their evidence section. Direction switching changes
+`dir` only; English labels and `lang=en` remain English. Polling and delayed
+row/run/source responses cannot repaint another selection or detached panel.
+
+**Run download** explicitly chooses one frozen `rev_` coverage export. New row
+question drafts use that selected source; they no longer implicitly capture a new
+coverage source per row. Existing source/revision-specific downloads remain
+available and their historical bytes are unchanged.
+
+The run workflow selects zero or one finished `rec_` revision for each source row,
+and an explicit immutable `rvw_` review revision. An empty review ID deliberately
+pins unreviewed/no decisions; omission is invalid, and mutable latest review is
+never silently selected. Draft results/row/source/manifest/snapshot hashes must
+match the selected coverage source, including the exact coverage export revision.
+Even an otherwise identical later coverage capture is a distinct source. A draft
+on another source is disclosed and cannot be combined; create/select compatible
+revisions rather than merging decisions from different runs/snapshots. Multiple
+proposals stay in one row's JSON cells. A run summary counts every source record,
+coverage evaluations, pending/excluded/context-review/error rows, selected drafts,
+proposal review states and all unselected/incompatible row/draft combinations.
+Filters and pagination do not enter export selection or reduce its denominator.
+
+New routes, under `/api/knowledge-coverage`, require current results/export grants,
+existing authentication and owned run. Mutating routes additionally require CSRF.
+No role/capability is added. Evidence permission plus `kb_read` selects the
+permission-specific projection and is rechecked on every download.
+
+| Method / run route | Meaning |
+|---|---|
+| GET `/runs/{run_id}/export-options` | Owned frozen coverage sources and all draft/review identities/states; optional `coverage_export_revision_id` provides source summary and compatibility. No evidence/draft text or notes. |
+| POST `/runs/{run_id}/combined-export-preview` | Validate explicit `coverage_export_revision_id` + `selections` (source row, recommendation revision, required review revision ID) and display summary. |
+| POST `/runs/{run_id}/combined-export-revisions` | Capture immutable `runex_` pair from that explicit selection. |
+| GET `/runs/{run_id}/combined-export?revision_id=runex_…` | Exact immutable run CSV, current owner and projection entitlement. |
+| GET `/runs/{run_id}/combined-export-manifest?revision_id=runex_…` | The matching immutable manifest. |
+
+`coverage-run-csv-1` is an additive projection of the frozen coverage rows plus
+A4 question/review fields. It retains coverage/production dimensions, requested/
+supported/missing aspects, numbered references, scope/budget/stopping/error,
+model/rubric/configuration identities, chronology and full source ordering.
+Additional fields include `source_coverage_export_revision_id`,
+`recommendation_selection`, `recommendation_projection_reasons` and
+`recommendation_approval_allowed`. An unselected eligible row is `not_selected`;
+ineligible rows are `unavailable` with reasons. A selected error/interrupted draft
+retains its status/error and empty proposals; it is not approvable. Stale lookup
+policies/freshness disagreements remain review-needed using existing A4 rules.
+Coverage judgments and recommendation prompt versions are never relabeled as A5.
+
+`coverage-run-manifest-1` contains the frozen source manifest/hash/export/CSV hash,
+all row IDs, snapshot, `revision_selection_map` keyed by source row, each selected
+draft/result/row/review hash and original prompt/code/serving identities, summary,
+CSV SHA/export identity, capture state/time and projection. Preview is advisory;
+creation revalidates sources and captures current availability. Later checkpoints,
+draft revisions or review decisions cannot regenerate old CSV or manifest bytes.
+A new explicit capture is required. Restricted projections withhold evidence,
+notes, gaps, questions and taxonomy proposals; only states/reasons/identities and
+allowed redacted query forms remain. Revoked evidence permission cannot retrieve
+an earlier evidence-visible pair; a separate restricted pair can be created.
+
+All new coverage-source and run exports record `csv_display_policy=
+formula-prefix-map-1` and `csv_escaped_cells`, mapping row IDs to field names where
+formula protection added a leading apostrophe. No cell values appear in that map.
+This makes literal original apostrophes distinguishable from display escaping in
+new captures, including whitespace/control/bidi prefixes. BOM, comma, quoted
+CRLF/multiline cells and JSON arrays/maps remain unchanged. Historical exports
+without this map retain the older decoder: some original leading-apostrophe
+values cannot be distinguished retrospectively; their bytes are not rewritten.
+Native Excel/LibreOffice acceptance is unperformed because neither is installed;
+independent Python CSV and pandas parser checks are recorded in the A5 report.
+
+Question/taxonomy approval remains proposal review only; independent gap
+confirmation and real-query calibration remain `not_reviewed`/pending. No factual
+answer, confirmed KB absence or KB write is approved. No model calls, changed
+retrieval/prompt/eligibility settings, operational scaling or full-input execution
+are part of A5. No new environment variables.

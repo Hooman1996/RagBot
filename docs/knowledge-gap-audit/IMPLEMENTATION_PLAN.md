@@ -123,6 +123,17 @@ unchanged. Independent human confirmation and release acceptance remain pending.
 No factual answers, KB writes, recommendations for covered/unreachable results,
 A5 or full-dataset evaluation are authorized by this implementation.
 
+The user authorized **A5 dashboard refinement and complete export validation**.
+[A5_DASHBOARD_EXPORT_REPORT.md](A5_DASHBOARD_EXPORT_REPORT.md) records an explicit
+run-level frozen-source/draft/review selection map, immutable permission-specific
+CSV/manifest pairs, 918-row synthetic conservation, protected customer accounting
+and actual synthetic browser checks at 390/768/1280/1440 pixels. Query details and
+pilot/input denominators are clearer; model prompts/settings, retrieval and
+recommendation eligibility are unchanged. A5 makes zero model or external data/inference service calls.
+Native spreadsheet validation remains unavailable and independent human labels
+remain pending. A6 scaling, retention, worker/load hardening and any full-input
+model execution require separate authorization.
+
 No naturally occurring unlabeled queries can supply a measured answer-quality error rate.
 Choose tolerances and label sets before experiments, rather than after results.
 
@@ -134,7 +145,7 @@ Choose tolerances and label sets before experiments, rather than after results.
 | **A2 early end-to-end pilot — implemented for review** | A1 CSV/replay/preparation reused; strict scope/aspects/batch/reconciliation/verification; frozen numbered evidence; independent production-context sufficiency; request-local 150/150/150 full-pool question/taxonomy rerank and initial top 50, followed by 300/300/300 for unresolved eligible questions within 300 total distinct evaluated entries; served-template token counting and up to five full Q/A entries per batch. Main `/knowledge-coverage` upload/explicit mapping, knowledge-document scope, up-to-five pilot selection/budget, progress/cancel/retry, filters/evidence and complete 918-row CSV/manifest. Default-deny per-user capabilities, protected durable artifacts and row checkpoints/leases; recommendations unassessed. Database input remains the A1 interface, not a fabricated query schema or UI. Actual five-query pilot and limitations are in the A2 report. |
 | **A3 controlled calibration — implemented for review** | Measure A2's existing engine against frozen fictional facts and isolated seeded removals; separately compare batch caps 2/5 with model-derived aspects held fixed. Import declared independent human labels only when supplied. Preserve the 300 total distinct-entry cap, unrepeated expansion evidence, chronology, question/taxonomy scoring, token budgets, CSV accounting and independent baseline sufficiency. Review schema failures, compatibility-call costs, breadth, stopping reasons/conflicts and verifier rejection rates. Any answer-aware diagnostic requires separate approval and named experiment. |
 | **A4 gap and taxonomy recommendations — implemented for review** | Gap analyst consumes structured findings; recommender consumes gap specifications, existing category/subcategory paths and relevant FAQ titles. Suggest question/category/subcategory, flag proposed new paths, cite equivalent/related entries; reviewer approves/rejects recommendations without writing KB automatically. UI details and CSV include multiple recommendations without multiplying rows. No factual-answer generation. |
-| **A5 refinement and full export validation** | Polish enterprise dashboard, RTL/LTR/accessibility/responsiveness, protected evidence/versions, search/filter/pagination and state transitions. Validate full schema, redaction, Persian/Excel/quoting/formula safety; manifest-versus-export check and zero dropped rows. Real visual screenshots and keyboard checks against both existing themes. |
+| **A5 refinement and full export validation — implemented for review** | Polish enterprise dashboard, RTL/LTR/accessibility/responsiveness, protected evidence/versions, search/filter/pagination and state transitions. Validate full schema, redaction, Persian/Excel/quoting/formula safety; manifest-versus-export check and zero dropped rows. Real visual screenshots and keyboard checks against both existing themes. |
 | **A6 operational hardening and full-run readiness** | Durable interruption/resume, scoped retries, idempotency, checkpoints, leases/ownership, cancellation/deadlines, cleanup/retention, per-service caps and safe metadata telemetry. Confirm bounded CPU/RAM/GPU/service use under approved staging traffic, interference with normal chat and complete large-run row accounting. Planner accepts full-run readiness before an explicitly selected full dataset run. |
 
 These are review boundaries, not commands to begin feature work. A1 job/schema

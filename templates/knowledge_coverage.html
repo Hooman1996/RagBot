@@ -25,7 +25,7 @@
     </aside>
     <main id="coverageMain" class="main-content" tabindex="-1">
         <header class="topbar"><div class="topbar__title">Knowledge coverage</div><div class="web-header-controls coverage-header-controls">
-            <button id="coverageLanguage" class="theme-toggle" type="button" aria-label="Switch reading direction">RTL / LTR</button>
+            <button id="coverageLanguage" class="theme-toggle" type="button" aria-label="Switch reading direction, labels remain English">RTL / LTR</button>
             <button id="coverageTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode">Theme</button>
             {% set logout_label = 'Log out' %}{% include "_logout_button.html" %}
         </div></header>
@@ -81,13 +81,17 @@
                 <div class="coverage-section-heading"><div><h2 id="coverageRunTitle">Review progress</h2><p id="coverageProgressText">No pilot selected. Import questions or open a previous run.</p></div>
                     <label>Previous runs<select id="coverageRuns"><option value="">Select a run</option></select></label></div>
                 <progress id="coverageProgress" max="5" value="0" aria-label="Selected pilot rows processed"></progress>
+                <div id="coverageRunCounts" class="coverage-run-counts" aria-live="polite"></div>
                 <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel pilot</button>
                     <button id="coverageResume" class="coverage-secondary" type="button" hidden>Resume remaining rows</button>
+                </div>
+                <details class="coverage-legacy-download"><summary>Coverage-only download · no draft recommendations</summary><div class="coverage-run-actions">
                     <button id="coveragePrepareExport" class="coverage-secondary" type="button" hidden>Prepare download</button>
                     <a id="coverageExport" class="coverage-primary" hidden>Download all rows · CSV</a>
                     <a id="coverageManifest" class="coverage-link" download="coverage-manifest.json" hidden>Export manifest</a></div>
-                <p id="coverageExportState" class="coverage-summary" aria-live="polite">No download revision prepared.</p>
+                <p id="coverageExportState" class="coverage-summary" aria-live="polite">No download revision prepared.</p></details>
             </section>
+            <section id="coverageRunExport" class="coverage-card coverage-run-export" aria-label="Run-level CSV and review selection" hidden></section>
             <div class="coverage-workbench">
                 <section class="coverage-card coverage-results" aria-labelledby="coverageResultsTitle">
                     <div class="coverage-section-heading"><div><h2 id="coverageResultsTitle">Query results</h2><p id="coverageResultCount">No input loaded</p></div></div>
@@ -108,6 +112,7 @@
         </div>
     </main>
 </div>
+<script src="{{ versioned_asset(request, 'js/knowledge_run_export.js') }}" integrity="{{ asset_integrity('js/knowledge_run_export.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/knowledge_recommendations.js') }}" integrity="{{ asset_integrity('js/knowledge_recommendations.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/knowledge_coverage.js') }}" integrity="{{ asset_integrity('js/knowledge_coverage.js') }}" crossorigin="anonymous"></script>
 </body>

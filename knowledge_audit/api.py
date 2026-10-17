@@ -356,3 +356,6 @@ SAFE_API_CODES = {"invalid_pilot_selection", "invalid_column_mapping", "invalid_
 # A4 responsibilities and revisions remain separate from coverage run versions.
 from knowledge_audit.recommendation_api import router as recommendation_router
 router.include_router(recommendation_router)
+
+from knowledge_audit.run_export_api import router as run_export_router
+router.include_router(run_export_router)

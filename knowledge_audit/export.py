@@ -46,6 +46,18 @@ def _redact(value, redactor, key=""):
     return value
 
 
+def csv_display_escapes(rows):
+    """Record only cells prefixed by formula protection, never their values."""
+    result={}
+    for row in rows:
+        fields=[]
+        for key,value in row.items():
+            raw=canonical_json(value) if isinstance(value,(dict,list)) else "true" if value is True else "false" if value is False else str(value)
+            if formula_safe(raw)!=raw:fields.append(key)
+        if fields:result[row['source_row_id']]=fields
+    return result
+
+
 def encode_csv(rows, fields, expected_ids):
     """Shared A1/A2 byte exporter. Exact source order/IDs and formula-safe views."""
     if [r["source_row_id"] for r in rows] != expected_ids or len(set(expected_ids)) != len(expected_ids):
@@ -156,6 +168,6 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
                 "row_count": len(rows), "pilot_selected_row_ids": meta["selected_row_ids"],
                 "input_id": meta["input_id"], "snapshot_id": meta["snapshot_id"],
                 "configuration_id": meta["configuration_id"], "settings": meta["settings"], "versions": meta["versions"],
-                "state": meta["state"], "evidence_visible": evidence_visible,
+                "state": meta["state"], "csv_display_policy": "formula-prefix-map-1", "csv_escaped_cells": csv_display_escapes(rows), "evidence_visible": evidence_visible,
                 "outcome_counts": dict(Counter(r["outcome"] for r in rows))}
     return data, manifest

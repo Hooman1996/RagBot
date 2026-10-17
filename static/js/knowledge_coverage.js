@@ -40,10 +40,13 @@
         const canStart = root.dataset.canStart === 'true', canEvidence = root.dataset.canEvidence === 'true';
         let datasets = [], snapshots = [], currentDataset = '', currentRun = '', offset = 0, total = 0;
         let selected = new Set(), fileBytes = null, lastEvidenceButton = null, poll = null, loading = false, querySequence = 0;
-        let exportRevisionRun = '';
+        let exportRevisionRun = '', evidenceSequence=0, progressSequence=0, recommendationPanel=null, selectedEvidenceRow='', progressInFlight=null, viewEpoch=0, inputPoll=null;
+        let runExport=null;
+        function viewChanged() { viewEpoch++;if(inputPoll){global.clearInterval(inputPoll);inputPoll=null;}querySequence++; progressSequence++; closeEvidence(false); exportRevisionRun=''; if(runExport)runExport.setRun(currentRun); }
         const status = message => { $('Status').textContent = message; };
         const fail = error => { $('Error').hidden = false; $('Error').textContent = error.message || 'The operation could not complete. Try again.'; };
         const clearError = () => { $('Error').hidden = true; $('Error').textContent = ''; };
+        if(global.KnowledgeRunExport && $('RunExport') && root.dataset.canExport==='true')runExport=global.KnowledgeRunExport.mount($('RunExport'),api,fail);
         async function api(path, options) {
             const response = await global.fetch('/api/knowledge-coverage/' + path, options);
             const body = await response.json();
@@ -109,7 +112,7 @@
                     }); first.append(checkbox, document.createTextNode(' '));
                 }
                 first.append(node(document, 'bdi', '#' + row.source_record_ordinal)); tr.append(first);
-                const query = node(document, 'td', row.input_query_redacted, 'coverage-query'); query.dir = 'auto'; tr.append(query);
+                const query = node(document, 'td', undefined, 'coverage-query'); query.dir='auto';query.append(node(document,'div',row.input_query_redacted,'coverage-query-text'));tr.append(query);
                 const prep = node(document, 'td'); prep.append(badge(label(row.preparation_status), row.preparation_status));
                 if (row.history_status) prep.append(node(document, 'p', label(row.history_status))); tr.append(prep);
                 const outcome = row.outcome || (row.preparation_status === 'needs_context' ? 'needs_context' : 'pending');
@@ -130,17 +133,26 @@
             const sequence = ++querySequence;
             if (!currentRun && !currentDataset) { total = 0; renderRows([]); return; }
             const path = currentRun ? 'runs/' + encodeURIComponent(currentRun) + '/results?offset=' + offset + '&limit=25&outcome=' + encodeURIComponent($('Filter').value) + '&search=' + encodeURIComponent($('Search').value) : 'datasets/' + encodeURIComponent(currentDataset) + '/rows?offset=' + offset + '&limit=25';
-            const data = await api(path);
+            let data;try{data=await api(path);}catch(error){if(sequence!==querySequence)return;throw error;}
             if (sequence !== querySequence) return;
             total = data.total; renderRows(data.rows);
         }
         async function progress() {
             if (!currentRun) return;
-            const run = await api('runs/' + encodeURIComponent(currentRun));
+            const requestedRun=currentRun, epoch=viewEpoch;
+            if(progressInFlight && progressInFlight.run===requestedRun && progressInFlight.epoch===epoch)return;
+            const marker={run:requestedRun,epoch};progressInFlight=marker;
+            try {
+            const sequence=++progressSequence;
+            let run;try{run=await api('runs/'+encodeURIComponent(requestedRun));}catch(error){if(requestedRun!==currentRun||epoch!==viewEpoch||sequence!==progressSequence)return;throw error;}
+            if(requestedRun!==currentRun || epoch!==viewEpoch || sequence!==progressSequence)return;
             const activeOption = Array.from($('Runs').children).find(option => option.value === currentRun);
             if (activeOption) activeOption.textContent = label(run.state) + ' · ' + run.selected_row_ids.length + ' questions · ' + currentRun.slice(-8);
             $('Progress').max = run.selected_row_ids.length; $('Progress').value = run.completed_pilot_rows;
-            $('ProgressText').textContent = label(run.state) + ' · ' + run.completed_pilot_rows + ' of ' + run.selected_row_ids.length + ' pilot questions processed · ' + run.input_row_count + ' rows retained' + (run.stage ? ' · ' + label(run.stage) : '');
+            const errors=(run.outcome_counts||{}).error||0;
+            const runLabel=run.state==='completed' && errors ? 'completed with errors' : ({failed:'Failed pilot',interrupted:'Interrupted pilot',cancelled:'Cancelled pilot'}[run.state]||label(run.state));
+            $('ProgressText').textContent = runLabel + ' · ' + run.completed_pilot_rows + ' of ' + run.selected_row_ids.length + ' pilot questions processed · ' + run.input_row_count + ' rows retained' + (run.stage ? ' · ' + label(run.stage) : '');
+            if($('RunCounts')) { const c=run.outcome_counts||{}; $('RunCounts').replaceChildren(); [['Imported queries',run.input_row_count],['Pilot processed',run.completed_pilot_rows+' / '+run.selected_row_ids.length],['Pending / not evaluated',c.pending||0],['Covered · reachable',c.covered_reachable||0],['Covered · retrieval work',c.covered_not_reachable||0],['Possible gaps',(c.possible_gap||0)+(c.possible_partial_gap||0)],['Context / review',(c.needs_context||0)+(c.needs_review||0)],['Excluded / errors',(c.excluded||0)+' / '+(c.error||0)]].forEach(([title,value])=>{const cell=node(document,'div');cell.append(node(document,'strong',value),node(document,'span',title));$('RunCounts').append(cell);}); }
             $('Cancel').hidden = !canStart || !['queued','running'].includes(run.state);
             $('Resume').hidden = !canStart || (!['failed','interrupted','cancelled'].includes(run.state) && !(run.state === 'completed' && run.retryable_rows > 0));
             $('PrepareExport').hidden = root.dataset.canExport !== 'true';
@@ -149,6 +161,7 @@
             status(run.state === 'incompatible' ? 'Knowledge or serving revision changed. This pilot requires review; start a new compatible run.' : 'Pilot selection: ' + run.selected_row_ids.length + ' questions. Unselected rows remain pending / not evaluated.');
             if (!['queued','running'].includes(run.state) && poll) { global.clearInterval(poll); poll = null; }
             await refreshRows();
+            } finally {if(progressInFlight===marker)progressInFlight=null;}
         }
         function startPoll() {
             if (poll) global.clearInterval(poll);
@@ -159,21 +172,27 @@
             const p = node(document, 'p', text || 'Unavailable'); if (dir) p.dir = dir; container.append(p);
         }
         async function openEvidence(rowId, button) {
-            const evidenceRun = currentRun; lastEvidenceButton = button; const panel = $('EvidenceContent'); panel.replaceChildren(node(document, 'p', 'Loading evidence…'));
+            const evidenceRun = currentRun, sequence=++evidenceSequence; selectedEvidenceRow=rowId; if(recommendationPanel)recommendationPanel.stop(); lastEvidenceButton = button; const panel = $('EvidenceContent'); panel.replaceChildren(node(document, 'p', 'Loading evidence…'));
             $('Evidence').focus();
             if ($('Evidence').scrollIntoView) $('Evidence').scrollIntoView({block:'start',behavior:'auto'});
             try {
                 const data = await api('runs/' + encodeURIComponent(evidenceRun) + '/rows/' + encodeURIComponent(rowId));
-                if (evidenceRun !== currentRun) return;
+                if (evidenceRun !== currentRun || sequence!==evidenceSequence) return;
                 panel.replaceChildren();
                 if (data.evidence_visibility === 'snapshot_mismatch') { panel.append(node(document, 'p', 'This run is incompatible with its recorded knowledge revision. Evidence is withheld.')); return; }
                 const row = data.result;
                 panel.className = '';
-                appendText(panel, 'Intended question', row.standalone_query_redacted || row.normalized_query_redacted || row.input_query_redacted, 'auto');
-                appendText(panel, 'Assessment', label(row.outcome) + ' · ' + label(row.coverage_status));
-                appendText(panel, 'Why', row.explanation || (row.scope_decision || {}).explanation || 'This row has not been evaluated.', 'auto');
-                if (row.error_code) appendText(panel, 'Error code', row.error_code);
-                if ((row.review_codes || []).length) appendText(panel, 'Review required', row.review_codes.map(label).join(' · '));
+                const selectedHeader=node(document,'div',undefined,'coverage-selected-query');
+                selectedHeader.append(node(document,'strong','Selected query · source row '+row.source_record_ordinal),node(document,'p',row.standalone_query_redacted || row.normalized_query_redacted || row.input_query_redacted),badge(label(row.outcome),row.outcome));selectedHeader.children[1].dir='auto';selectedHeader.children[1].tabIndex=0;panel.append(selectedHeader);
+                function group(id,title,open) {const block=node(document,'details',undefined,'coverage-detail-group');block.id=id;block.open=!!open;block.append(node(document,'summary',title));panel.append(block);return block;}
+                const overview=group('coverage-detail-overview','Assessment and next step',true), aspects=group('coverage-detail-aspects','Requested aspects and conditions',true), sources=group('coverage-detail-sources','Numbered source evidence',false), proposals=group('coverage-detail-proposals','Missing information and question proposals',false), technical=group('coverage-detail-provenance','Provenance and validation',false);
+                const nav=node(document,'nav',undefined,'coverage-detail-nav');nav.setAttribute('aria-label','Query detail sections');
+                [[overview,'Assessment'],[aspects,'Aspects'],[sources,'Sources'],[proposals,'Proposals']].forEach(([section,text])=>{const link=node(document,'a',text,'coverage-link');link.href='#'+section.id;link.addEventListener('click',()=>{section.open=true;});nav.append(link);});panel.append(nav);
+                if(panel.insertBefore)panel.insertBefore(nav,overview);
+                appendText(overview, 'Assessment', label(row.outcome) + ' · ' + label(row.coverage_status));
+                appendText(overview, 'Why', row.explanation || (row.scope_decision || {}).explanation || 'This row has not been evaluated.', 'auto');
+                if (row.error_code) appendText(overview, 'Error code', row.error_code);
+                if ((row.review_codes || []).length) appendText(overview, 'Review required', row.review_codes.map(label).join(' · '));
                 (row.requested_aspects || []).forEach(aspect => {
                     const item = node(document, 'div', undefined, 'coverage-aspect'); item.append(node(document, 'span', aspect.aspect_id, 'coverage-aspect-id'));
                     const description = node(document, 'p', aspect.description); description.dir = 'auto'; item.append(description);
@@ -190,10 +209,10 @@
                         const p = node(document, 'p', support.applicability + (support.conditions.length ? ' · ' + support.conditions.join(' · ') : '')); p.dir = 'auto'; item.append(p);
                         support.citations.forEach(ref => {
                             const link = node(document, 'a', 'FAQ ' + ref.faq_entry_id + ' · sentence ' + ref.sentence_number, 'coverage-link');
-                            link.href = '#coverage-source-' + ref.chunk_id + '-' + ref.sentence_number; item.append(link);
+                            link.href = '#coverage-source-' + ref.chunk_id + '-' + ref.sentence_number; link.addEventListener('click',()=>{sources.open=true;}); item.append(link);
                         });
                     });
-                    panel.append(item);
+                    aspects.append(item);
                 });
                 const cited = new Set((row.supporting_sentence_refs || []).map(r => r.chunk_id + ':' + r.sentence_number));
                 data.evidence.forEach(entry => {
@@ -205,33 +224,33 @@
                         line.id = 'coverage-source-' + entry.chunk_id + '-' + sentence.sentence_number;
                         line.append(node(document, 'bdi', sentence.sentence_number, 'coverage-sentence-number'));
                         const text = node(document, 'p', sentence.text); text.dir = 'auto'; line.append(text); source.append(line);
-                    }); panel.append(source);
+                    }); sources.append(source);
                 });
-                appendText(panel, 'Production context', label(row.production_context_sufficiency));
-                appendText(panel, 'Stopping reason', label(row.stopping_reason));
-                appendText(panel, 'Verification', label(row.verification_result));
-                (row.verifications || []).forEach(v => appendText(panel, 'Verification · ' + label(v.verdict), v.explanation, 'auto'));
-                if (row.verification_reason) appendText(panel, 'Verification reason', row.verification_reason, 'auto');
+                appendText(overview, 'Production context', label(row.production_context_sufficiency));
+                appendText(overview, 'Stopping reason', label(row.stopping_reason));
+                appendText(overview, 'Verification', label(row.verification_result));
+                (row.verifications || []).forEach(v => appendText(overview, 'Verification · ' + label(v.verdict), v.explanation, 'auto'));
+                if (row.verification_reason) appendText(overview, 'Verification reason', row.verification_reason, 'auto');
                 const search = (row.evaluation_scope || {}).bundle_search;
-                if (search && row.coverage_status !== 'full') appendText(panel, 'Compatibility search',
+                if (search && row.coverage_status !== 'full') appendText(technical, 'Compatibility search',
                     'Bounded search · at most ' + search.seed_limit + ' seeds · ' + search.bundles_considered + ' bundles considered. A missing compatible proof is not proof of a missing fact.');
-                (row.validation_diagnostics || []).forEach(d => appendText(panel, 'Output validation',
+                (row.validation_diagnostics || []).forEach(d => appendText(technical, 'Output validation',
                     d.responsibility + ' · ' + d.schema_version + ' · ' + d.stage + ' · ' + (d.field_path || []).join('.') + ' · ' + d.error_type));
-                (row.failure_diagnostics || []).forEach(d => appendText(panel, 'Model request',
+                (row.failure_diagnostics || []).forEach(d => appendText(technical, 'Model request',
                     label(d.failure_category) + ' · ' + label(d.boundary) + ' · ' + label(d.evaluation_phase || 'unknown') +
                     ' · attempt ' + (d.attempt || 1) + ' · ' + (d.duration_ms || 0) + ' ms'));
-                if (global.KnowledgeRecommendations) global.KnowledgeRecommendations.mount(panel, {runId:evidenceRun,rowId:rowId});
-                const details = node(document, 'details'); details.append(node(document, 'summary', 'Query forms and audit scope'));
+                if (global.KnowledgeRecommendations) recommendationPanel=global.KnowledgeRecommendations.mount(proposals, {runId:evidenceRun,rowId:rowId,getCoverageSource:()=>runExport?runExport.getSource(evidenceRun):'',focusCoverageSource:()=>runExport&&runExport.focusSource(),onRevisionChange:runExport?()=>runExport.refresh():null});
+                const details=technical;
                 appendText(details, 'Original query · redacted', row.input_query_redacted, 'auto');
                 appendText(details, 'Retrieval wording', row.canonical_retrieval_query_redacted, 'auto');
                 appendText(details, 'History', label(row.history_status));
                 appendText(details, 'Snapshot', row.kb_snapshot_id);
                 appendText(details, 'Entries checked', row.evaluated_entry_count);
-                appendText(details, 'Review codes', (row.review_codes || []).join(' · ')); panel.append(details);
+                appendText(details, 'Review codes', (row.review_codes || []).join(' · '));
                 if (row.output_recovery_count) appendText(details, 'Fresh output recovery attempts', row.output_recovery_count + ' · ' + row.recovery_policy);
-            } catch (error) { fail(error); panel.replaceChildren(node(document, 'p', 'Evidence could not load. Select this row again to retry.')); }
+            } catch (error) { if(sequence!==evidenceSequence || evidenceRun!==currentRun)return; fail(error); panel.replaceChildren(node(document, 'p', 'Evidence could not load. Select this row again to retry.')); }
         }
-        function closeEvidence() { $('EvidenceContent').className = 'coverage-empty'; $('EvidenceContent').replaceChildren(node(document, 'p', 'Open an assessed query to inspect its evidence.')); const target=lastEvidenceButton && document.getElementById(lastEvidenceButton.id); if(target) target.focus(); else $('Search').focus(); }
+        function closeEvidence(returnFocus=true) { evidenceSequence++;selectedEvidenceRow='';if(recommendationPanel){recommendationPanel.stop();recommendationPanel=null;} $('EvidenceContent').className = 'coverage-empty'; $('EvidenceContent').replaceChildren(node(document, 'p', 'Open an assessed query to inspect its evidence.')); if(returnFocus){const target=lastEvidenceButton && document.getElementById(lastEvidenceButton.id); if(target) target.focus(); else $('Search').focus();} }
         $('CloseEvidence').addEventListener('click', closeEvidence);
         $('Evidence').addEventListener('keydown', event => { if (event.key === 'Escape') closeEvidence(); });
         $('Previous').addEventListener('click', () => { offset = Math.max(0,offset - 25); refreshRows().catch(fail); });
@@ -239,7 +258,7 @@
         let searchTimer;
         $('Search').addEventListener('input', () => { global.clearTimeout(searchTimer); searchTimer = global.setTimeout(() => { offset = 0; refreshRows().catch(fail); },250); });
         $('Filter').addEventListener('change', () => { offset = 0; refreshRows().catch(fail); });
-        $('Runs').addEventListener('change', async () => { currentRun = $('Runs').value; offset = 0; clearError(); if (currentRun) { startPoll(); await progress().catch(fail); } else { if (poll) global.clearInterval(poll); await refreshRows().catch(fail); } });
+        $('Runs').addEventListener('change', async () => { currentRun = $('Runs').value; offset = 0; viewChanged(); clearError(); if (currentRun) { startPoll(); await progress().catch(fail); } else { if (poll) global.clearInterval(poll); await refreshRows().catch(fail); } });
         $('Cancel').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/cancel',{method:'POST'}); status('Cancellation requested. Completed rows remain available.'); await progress(); } catch(e) { fail(e); } });
         $('Resume').addEventListener('click', async () => { try { await api('runs/' + currentRun + '/retry',{method:'POST'}); startPoll(); await progress(); } catch(e) { fail(e); } });
         $('PrepareExport').addEventListener('click', async () => {
@@ -264,7 +283,7 @@
             $('File').addEventListener('change', async () => { clearError(); try { const file = $('File').files[0]; if (!file) return; if (file.size > Number(root.dataset.uploadLimit)) throw new Error('This CSV exceeds the upload limit.'); fileBytes = new Uint8Array(await file.arrayBuffer()); mapHeaders(); } catch(e) { fileBytes = null; fail(e); } });
             $('Delimiter').addEventListener('change', () => { try { mapHeaders(); } catch(e) { fail(e); } });
             $('ImportForm').addEventListener('submit', async event => {
-                event.preventDefault(); if (loading || !fileBytes) return; clearError(); loading = true; $('Upload').disabled = true;
+                event.preventDefault(); if (loading || !fileBytes) return; const importEpoch=viewEpoch; clearError(); loading = true; $('Upload').disabled = true;
                 try {
                     const mapping = {query:$('QueryColumn').value,session:$('SessionColumn').value||null,role:$('RoleColumn').value||null,
                         timestamp:$('TimestampColumn').value||null,date:$('DateColumn').value||null,time:$('TimeColumn').value||null};
@@ -272,12 +291,13 @@
                     status('Importing and validating mapped records…');
                     const data = await api('datasets',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({csv_base64:global.btoa(binary),mapping,
                         calendar:$('Calendar').value,source_timezone:$('Timezone').value||null,authoritative_source_order:$('TrustedOrder').checked,delimiter:$('Delimiter').value})});
-                    currentDataset = data.dataset_id; currentRun = ''; selected.clear(); offset = 0;
+                    if(importEpoch!==viewEpoch){await refreshDatasets();return;}
+                    currentDataset = data.dataset_id; currentRun = ''; viewChanged(); selected.clear(); offset = 0;
                     await refreshDatasets(); selection(); await refreshRows();
-                    const timer = global.setInterval(async () => { try { await refreshDatasets(); await refreshRows(); if (datasets.find(d=>d.dataset_id===currentDataset)?.preparation_status === 'ready') { global.clearInterval(timer); status('Input ready. Select up to five rows for a pilot; all rows will remain in the export.'); } } catch(e) { global.clearInterval(timer); fail(e); } },2000);
-                } catch(e) { fail(e); } finally { loading = false; $('Upload').disabled = false; }
+                    const inputEpoch=viewEpoch;inputPoll=global.setInterval(async()=>{if(inputEpoch!==viewEpoch)return;try{await refreshDatasets();if(inputEpoch!==viewEpoch)return;await refreshRows();if(inputEpoch===viewEpoch && datasets.find(d=>d.dataset_id===currentDataset)?.preparation_status==='ready'){global.clearInterval(inputPoll);inputPoll=null;status('Input ready. Select up to five rows for a pilot; all rows will remain in the export.');}}catch(e){if(inputEpoch===viewEpoch){global.clearInterval(inputPoll);inputPoll=null;fail(e);}}},2000);
+                } catch(e) { if(importEpoch===viewEpoch)fail(e); } finally { loading = false; $('Upload').disabled = false; }
             });
-            $('Dataset').addEventListener('change', async () => { currentDataset = $('Dataset').value; currentRun=''; selected.clear(); offset=0; $('Runs').value=''; if(poll) global.clearInterval(poll); await refreshDatasets().catch(fail); selection(); await refreshRows().catch(fail); });
+            $('Dataset').addEventListener('change', async () => { currentDataset = $('Dataset').value; currentRun=''; viewChanged(); selected.clear(); offset=0; $('Runs').value=''; if(poll) global.clearInterval(poll); await refreshDatasets().catch(fail); selection(); await refreshRows().catch(fail); });
             $('Snapshot').addEventListener('change', documents);
             $('Capture').addEventListener('click', async () => { $('Capture').disabled = true; clearError(); status('Capturing a consistent knowledge revision…'); try { const s=await api('snapshots',{method:'POST'}); await refreshSnapshots(); $('Snapshot').value=s.snapshot_id; documents(); status('Knowledge revision captured. Select questions and start a pilot.'); } catch(e) { fail(e); } finally { $('Capture').disabled=false; } });
             $('ClearSelection').addEventListener('click', () => { selected.clear(); selection(); refreshRows().catch(fail); });
@@ -285,13 +305,13 @@
                 $('Start').disabled=true; clearError(); try {
                     const docs=Array.from($('Documents').querySelectorAll('input:checked')).map(n=>n.value);
                     const run=await api('runs',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({dataset_id:currentDataset,snapshot_id:$('Snapshot').value,row_ids:Array.from(selected),entry_budget:Number($('Budget').value),documents:docs})});
-                    currentRun=run.run_id; offset=0; await refreshRuns(); startPoll(); await progress();
+                    currentRun=run.run_id; viewChanged(); offset=0; await refreshRuns(); startPoll(); await progress();
                 } catch(e) { fail(e); } finally { selection(); }
             });
         }
         if (global.localStorage.getItem('theme')==='light') document.body.classList.add('light-mode');
         $('Theme').addEventListener('click',()=> { const light=document.body.classList.toggle('light-mode'); global.localStorage.setItem('theme',light?'light':'dark'); });
-        $('Language').addEventListener('click',()=> { const rtl=document.documentElement.dir!=='rtl'; document.documentElement.dir=rtl?'rtl':'ltr'; document.documentElement.lang=rtl?'fa':'en'; });
+        $('Language').addEventListener('click',()=> { const rtl=document.documentElement.dir!=='rtl'; document.documentElement.dir=rtl?'rtl':'ltr'; $('Language').setAttribute('aria-pressed',String(rtl)); });
         Promise.all([refreshDatasets(),refreshSnapshots(),refreshRuns()]).then(()=>status('Choose an imported dataset or upload questions to begin.')).catch(fail);
         return {refreshRows,progress,openEvidence};
     }
