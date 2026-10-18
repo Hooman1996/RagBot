@@ -63,7 +63,7 @@ async def run(confirmed):
             prepared=await prepare_dataset(data,preparer,redactor)
             imported=store.save_dataset(data,redactor,key,0,prepared)
             ids=[e.source_row_id for e,c in zip(data.selected,spec['cases']) if c['model_selected']]
-            coverage=store.create_run(0,imported['dataset_id'],snap['snapshot_id'],ids,{**settings.manifest(),'entry_budget':300,'documents':['Synthetic_FableBank'],'selection_method':'a4_fixed_fictional_cases'},versions())
+            coverage=store.create_run(0,imported['dataset_id'],snap['snapshot_id'],ids,{**settings.manifest(),'entry_budget':settings.max_entry_budget,'documents':['Synthetic_FableBank'],'selection_method':'a4_fixed_fictional_cases'},versions())
             model=AuditModel(rag,http,os.environ['VLLM_URL'],settings,redactor,limiter=AdmissionLimiter(1,name='a4-coverage'))
             await model.discover();model.metrics_path=store._path('runs',coverage['run_id'])/'model-metrics.jsonl'
             identities={'serving':dict(model.serving),'runtime_configuration':configuration_identity(data.timestamp_policy,len(ids),redactor),
@@ -76,7 +76,7 @@ async def run(confirmed):
             for event,case in zip(data.selected,spec['cases']):
                 if not case['model_selected']:continue
                 if budget.state['used']>=40:continue
-                engine=CoverageEvaluator(snapshot=snap,model=model,retrieval=ControlledCandidates(snap,case),preparer=preparer,redactor=redactor,dataset=data,batch_max_entries=settings.batch_max_entries)
+                engine=CoverageEvaluator(snapshot=snap,model=model,retrieval=ControlledCandidates(snap,case,initial_depth=settings.initial_depth),preparer=preparer,redactor=redactor,dataset=data,batch_max_entries=settings.batch_max_entries,initial_depth=settings.initial_depth,broader_depth=settings.broader_depth,max_entry_budget=settings.max_entry_budget)
                 row=await engine.evaluate(event,store.row(coverage['run_id'],event.source_row_id,0))
                 store.save_row(coverage['run_id'],row,0)
                 await model.discover()

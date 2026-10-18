@@ -422,3 +422,66 @@ Production_ENV
 ```
 
 Final main-checkout secret scan: `tracked secrets: 0 matches` (exit 0). `git diff --check` again had no output (exit 0).
+
+## [03a] Audit retrieval depths and entry budget come from the environment
+
+The audit's retrieval depths and per-question entry ceiling are read from the environment. Defaults are unchanged:
+
+| Key | Field | Default | Range |
+|---|---|---|---|
+| `KNOWLEDGE_COVERAGE_INITIAL_DEPTH` | `initial_depth` | 150 | 1–1000 |
+| `KNOWLEDGE_COVERAGE_BROADER_DEPTH` | `broader_depth` | 300 | 2–1000 |
+| `KNOWLEDGE_COVERAGE_INITIAL_ENTRIES` | `initial_entries` | 50 | 1–1000 |
+| `KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET` | `max_entry_budget` | 300 | 1–1000 |
+
+`CoverageSettings` requires `initial_entries <= initial_depth < broader_depth`, or it raises `invalid_coverage_depths`. With the defaults, the settings manifest is identical to the previous one: `initial_depths` `[150]*3`, `expanded_depths` `[300]*3`, `initial_entries` 50 and `maximum_distinct_entries` 300. No key was added and `schema` is unchanged, so existing runs continue. A run started under other depths still fails with `audit_runtime_identity_drift` in `build_engine`.
+
+`build_engine` passes the run's pinned `meta["settings"]` values (`initial_depths[0]`, `expanded_depths[0]`, `initial_entries`, `maximum_distinct_entries`) to `AuditRetrieval` and `CoverageEvaluator`, not the live settings. `ControlledCandidates` compares against its `initial_depth`. The API's `entry_budget` defaults to `settings.max_entry_budget`. A value above it is rejected with `invalid_entry_budget` through `safe_call`, and the code was added to `SAFE_API_CODES` so the rejection is visible. The page renders the budget input from `max_entry_budget`. The pilot, calibration, recommendation-pilot and resource scripts read the settings. `scripts/knowledge_audit_p0_baseline.py` is unchanged.
+
+No existing allow-list contained `invalid_coverage_integer`; it appears only in `knowledge_audit/settings.py`. No allow-list was changed for `invalid_coverage_depths`.
+
+The four keys were added after `KNOWLEDGE_COVERAGE_RETENTION_DAYS` in `.env` and `Production_ENV` (local only), `env.example`, `.env.example.generated` and `Production_ENV.example`, and to `SPECS` with component `Knowledge coverage audit`. `.claude/skills` is a relative symlink to `../.agents/skills`; `test -f .claude/skills/fastapi/SKILL.md && echo ok` printed `ok`. No `CLAUDE.md` was added.
+
+This step changes no behavior with the default values. No retrieval, answer-quality or performance run was required or performed.
+
+Checks before commit ran outside the sandbox in conda `faq`, with the offline pytest guard:
+
+```text
+timeout 900 python -m pytest -p tests.offline_guard -q tests/test_coverage_deployment_gate.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_coverage_access_jobs.py tests/test_knowledge_coverage_calibration.py tests/test_validate_environment.py tests/test_retrieval_depths.py tests/test_coverage_depth_settings.py
+141 passed, 4 warnings, 44 subtests passed in 17.70s
+
+python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+python scripts/validate_environment.py --env-file .env --mode staging | tail -1
+Summary: 0 critical, 27 warning, 4 informational
+Validator exit: 0
+
+git diff --check
+no output, exit 0
+```
+
+The validator summary was taken from the full output, because `tail -1` prints the last finding. The counts match step 03. The four new keys report `set` with no findings.
+
+Clean-checkout command (conda `faq`, outside the sandbox), run on the initial unpushed `[03a]` commit:
+
+```text
+git worktree add /tmp/faq-clean-03a HEAD
+cd /tmp/faq-clean-03a && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-03a; echo "exit $status"
+1020 passed, 26 deselected, 58 warnings, 291 subtests passed in 246.87s (0:04:06)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1014 in step 03 to 1020, from the six new tests in `tests/test_coverage_depth_settings.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's value scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.

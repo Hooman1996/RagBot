@@ -143,7 +143,7 @@ async def run(args):
             # global reranking, never PG/Qdrant/hybrid-search recall.
             if not state['unknown_remote_completion']:
                 from utils.persian_hybrid_search import SearchResult
-                for depth in (150,300):
+                for depth in (settings.initial_depth,settings.broader_depth):
                     planned=math.ceil(depth/min(perf.tei_rerank_max_client_batch_size,state['reranker_identity']['max_client_batch_size']))
                     if state['tei_posts']+planned+1>80:
                         state.setdefault('unexecuted',[]).append({'case_id':'controlled_'+str(depth),'reason':'tei_task_budget'});continue

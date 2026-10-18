@@ -68,7 +68,7 @@ async def run(args):
     prepared=store.preparations(args.dataset_id,args.owner_id)
     selected=args.row_ids or selection(dataset,prepared)
     snap=store.snapshot(args.snapshot_id,args.owner_id)
-    config={**settings.manifest(),'entry_budget':args.entry_budget,
+    config={**settings.manifest(),'entry_budget':settings.max_entry_budget if args.entry_budget is None else args.entry_budget,
             'documents':sorted({r['document_title'] for r in snap['records']}),
             'selection_method':'explicit_ids' if args.row_ids else 'a2-pilot-strata-1: stable hash, available-history and length bands; no outcome fields'}
     meta=store.create_run(args.owner_id,args.dataset_id,args.snapshot_id,selected,config,versions())
@@ -161,7 +161,7 @@ def main():
     commands=p.add_subparsers(dest='command',required=True)
     imp=commands.add_parser('import-a1'); imp.add_argument('--a1-directory',type=Path,required=True); imp.add_argument('--csv',type=Path,required=True)
     pilot=commands.add_parser('pilot'); pilot.add_argument('--dataset-id',required=True); pilot.add_argument('--snapshot-id',required=True)
-    pilot.add_argument('--row-ids',nargs='*'); pilot.add_argument('--entry-budget',type=int,default=300); pilot.add_argument('--confirmed-staging',action='store_true')
+    pilot.add_argument('--row-ids',nargs='*'); pilot.add_argument('--entry-budget',type=int,default=None); pilot.add_argument('--confirmed-staging',action='store_true')
     review=commands.add_parser('review');review.add_argument('--run-ids',nargs='+',required=True)
     args=p.parse_args()
     if args.owner_id<0: p.error('owner-id must be nonnegative')

@@ -12,9 +12,12 @@ from utils.read_only_audit import canonical_sha256
 
 class CoverageEvaluator:
     def __init__(self, *, snapshot, model, retrieval, preparer, redactor, dataset,
-                 entry_budget=300, documents=None, checkpoint=None, batch_max_entries=2):
-        if type(entry_budget) is not int or not 1 <= entry_budget <= 300:
+                 entry_budget=None, documents=None, checkpoint=None, batch_max_entries=2,
+                 initial_depth=150, broader_depth=300, max_entry_budget=300):
+        entry_budget = max_entry_budget if entry_budget is None else entry_budget
+        if type(entry_budget) is not int or not 1 <= entry_budget <= max_entry_budget:
             raise AuditError("invalid_entry_budget")
+        self.initial_depth, self.broader_depth = initial_depth, broader_depth
         self.index = EvidenceIndex(snapshot)
         self.model, self.retrieval, self.preparer, self.redactor = model, retrieval, preparer, redactor
         self.dataset, self.entry_budget, self.documents = dataset, entry_budget, documents
@@ -89,7 +92,7 @@ class CoverageEvaluator:
             self.required = {a["aspect_id"] for a in aspects}
             retrieval_query = prepared["canonical_retrieval_query_redacted"]
             baseline = await self.retrieval.fetch(retrieval_query, production=True, documents=self.documents)
-            initial_pool = await self.retrieval.fetch(retrieval_query, depth=150, documents=self.documents)
+            initial_pool = await self.retrieval.fetch(retrieval_query, depth=self.initial_depth, documents=self.documents)
             result.update(production_candidate_ids=baseline["candidate_ids"], production_context_ids=baseline["selected_ids"])
             # Independent baseline assessment recognizes equivalent evidence,
             # even if the audit later chooses different witness IDs.
@@ -116,7 +119,7 @@ class CoverageEvaluator:
                 question_ids = list(dict.fromkeys(baseline["selected_ids"] + initial_ids))
                 audit = await self.assess(question_ids, question, aspects, "question", evaluate_new=False)
                 if audit["coverage"] != "full":
-                    expanded = await self.retrieval.fetch(retrieval_query, depth=300, documents=self.documents)
+                    expanded = await self.retrieval.fetch(retrieval_query, depth=self.broader_depth, documents=self.documents)
                     broadened = True
                     phases["broader"] = await self.assess(expanded["selected_ids"], question, aspects, "broader")
                     question_ids = list(dict.fromkeys(question_ids + expanded["selected_ids"]))
@@ -431,7 +434,7 @@ class CoverageEvaluator:
                 verification_result="rejected" if any(v["verdict"] == "rejected" for v in self.verifications) else "not_run",
                 stopping_reason="compatibility_unresolved" if "compatibility_unverified" in audit.get("review_codes", []) else
                     "evaluation_uncertain" if uncertain else "evaluation_limit" if audit["budget_exhausted"] else "candidate_exhausted" if audit["candidates_exhausted"] else "needs_review")
-        result["evaluation_scope"] = {"initial_depths": [150] * 3, "broader_depths": [300] * 3 if broadened else [],
+        result["evaluation_scope"] = {"initial_depths": [self.initial_depth] * 3, "broader_depths": [self.broader_depth] * 3 if broadened else [],
             "distinct_entry_budget": self.entry_budget, "whole_kb_absence_proven": False,
             "snapshot_id": self.index.snapshot_id, "bundle_search": audit.get("bundle_search", {}),
             "proof_reuse_version": "question-ledger-1"}

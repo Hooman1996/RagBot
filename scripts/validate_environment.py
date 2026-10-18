@@ -405,6 +405,22 @@ def _specs() -> dict[str, VariableSpec]:
         "KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES": VariableSpec(
             kind="int", default="2", minimum=1, maximum=5, component="Knowledge coverage", restart="FastAPI",
         ),
+        "KNOWLEDGE_COVERAGE_INITIAL_DEPTH": VariableSpec(
+            kind="int", default="150", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/retrieval.py AuditRetrieval initial fetch depth; knowledge_audit/pipeline.py CoverageEvaluator initial pool",
+        ),
+        "KNOWLEDGE_COVERAGE_BROADER_DEPTH": VariableSpec(
+            kind="int", default="300", minimum=2, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/retrieval.py AuditRetrieval broader fetch depth; knowledge_audit/pipeline.py CoverageEvaluator broadening",
+        ),
+        "KNOWLEDGE_COVERAGE_INITIAL_ENTRIES": VariableSpec(
+            kind="int", default="50", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/retrieval.py AuditRetrieval entries kept from the reranked initial pool",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET": VariableSpec(
+            kind="int", default="300", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/pipeline.py CoverageEvaluator entry budget ceiling; knowledge_audit/api.py run entry_budget default",
+        ),
         "VLLM_HTTP_MAX_CONNECTIONS": VariableSpec(
             kind="int", default="32", minimum=1, component="vLLM client", restart="FastAPI"
         ),

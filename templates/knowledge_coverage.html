@@ -68,7 +68,7 @@
                 <div class="coverage-form-grid">
                     <label>Imported dataset<select id="coverageDataset"><option value="">No datasets yet</option></select></label>
                     <label>Knowledge revision<select id="coverageSnapshot"><option value="">Capture a revision first</option></select></label>
-                    <label>Maximum distinct entries per question<input id="coverageBudget" type="number" min="1" max="300" value="300"></label>
+                    <label>Maximum distinct entries per question<input id="coverageBudget" type="number" min="1" max="{{ max_entry_budget }}" value="{{ max_entry_budget }}"></label>
                     <div class="coverage-capture"><button id="coverageCapture" class="coverage-secondary" type="button">Capture current knowledge</button><p>Read-only capture. No knowledge edits.</p></div>
                 </div>
                 <div id="coverageDocuments" class="coverage-document-list" role="group" aria-label="Knowledge datasources"></div>

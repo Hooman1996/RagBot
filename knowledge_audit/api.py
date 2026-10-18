@@ -68,7 +68,7 @@ class RunPayload(StrictModel):
     row_ids: list[str] = Field(default_factory=list, max_length=100000)
     execution_mode: Literal["pilot", "subset", "full_input"] = "pilot"
     idempotency_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,128}$")
-    entry_budget: int = Field(default=300, ge=1, le=300)
+    entry_budget: int | None = Field(default=None, ge=1)
     documents: list[str] = Field(min_length=1, max_length=50)
     operational_limits: BudgetPayload | None = None
     budget_acknowledged: bool = False
@@ -130,7 +130,7 @@ async def page(request: Request, user: WebUser):
     settings = load_coverage_settings()
     return templates.TemplateResponse(request=request, name="knowledge_coverage.html", context={
         "permissions": permissions_for_user(user.role, user.id), "upload_max_bytes": settings.upload_max_bytes,
-        "contract_version": "coverage-page-3", "max_run_rows": settings.max_run_rows, "batch_max_entries": settings.batch_max_entries, "operational_limits":asdict(settings.operational_limits), "retention_days":settings.retention_days}, headers={"Cache-Control": "no-store"})
+        "contract_version": "coverage-page-3", "max_run_rows": settings.max_run_rows, "batch_max_entries": settings.batch_max_entries, "max_entry_budget": settings.max_entry_budget, "operational_limits":asdict(settings.operational_limits), "retention_days":settings.retention_days}, headers={"Cache-Control": "no-store"})
 
 
 def calibration_summary(meta):
@@ -260,6 +260,13 @@ async def snapshot_capture(request: Request, user: WebUser):
     return {k: meta[k] for k in ("snapshot_id", "record_count", "documents", "created_at")}
 
 
+def resolve_entry_budget(requested, maximum):
+    budget = maximum if requested is None else requested
+    if type(budget) is not int or not 1 <= budget <= maximum:
+        raise AuditError("invalid_entry_budget")
+    return budget
+
+
 @router.post("/api/knowledge-coverage/runs", status_code=202)
 async def create_run(payload: RunPayload, request: Request, user: WebUser):
     require(user, "coverage_run_start", "kb_read")
@@ -276,7 +283,8 @@ async def create_run(payload: RunPayload, request: Request, user: WebUser):
     ceiling=asdict(settings.operational_limits)
     if any((v>ceiling[k] if k not in {'min_free_bytes','pace_ms'} else v<ceiling[k]) for k,v in effective.items()):
         raise HTTPException(422,detail='Run limits exceed configured allowance or reduce storage/pacing protection')
-    config = {**settings.manifest(), "entry_budget": payload.entry_budget, "documents": payload.documents,
+    entry_budget = await safe_call(resolve_entry_budget, payload.entry_budget, settings.max_entry_budget)
+    config = {**settings.manifest(), "entry_budget": entry_budget, "documents": payload.documents,
               "selection_method": "server_all_user_query_rows" if payload.execution_mode == "full_input" else "explicit_source_row_ids", "operational_limits":effective}
     meta = await safe_call(store.create_run, user.id, payload.dataset_id, payload.snapshot_id,
                            payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key or canonical_sha256(payload.model_dump()))
@@ -393,7 +401,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
 SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
-    "invalid_pilot_selection", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
+    "invalid_pilot_selection", "invalid_entry_budget", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run"}
 

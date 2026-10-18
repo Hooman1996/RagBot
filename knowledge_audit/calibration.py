@@ -56,7 +56,8 @@ def input_dataset(case, redactor):
 
 class ControlledCandidates:
     """Frozen candidate-order adapter, explicitly not hybrid-search validation."""
-    def __init__(self, snapshot, case):
+    def __init__(self, snapshot, case, *, initial_depth=150):
+        self.initial_depth = initial_depth
         self.snapshot = copy.deepcopy(snapshot)
         self.expected = canonical_sha256(snapshot)
         self.case = copy.deepcopy(case)
@@ -66,11 +67,12 @@ class ControlledCandidates:
         if canonical_sha256(self.snapshot) != self.expected:
             raise AuditError("source_or_index_drift")
 
-    async def fetch(self, query, *, production=False, depth=150, documents=None):
+    async def fetch(self, query, *, production=False, depth=None, documents=None):
+        depth = self.initial_depth if depth is None else depth
         await self.check()
-        ids = self.case["production_ids" if production else "initial_ids" if depth==150 else "broader_ids"]
+        ids = self.case["production_ids" if production else "initial_ids" if depth==self.initial_depth else "broader_ids"]
         value = {"candidate_ids":list(ids),"selected_ids":list(ids),"candidate_count":len(ids),
-            "purpose":"production_baseline" if production else "initial_audit" if depth==150 else "broader_audit",
+            "purpose":"production_baseline" if production else "initial_audit" if depth==self.initial_depth else "broader_audit",
             "depths":[50 if production else depth]*3,"scope":"controlled_candidate_manifest"}
         self.metrics.append(value)
         return value

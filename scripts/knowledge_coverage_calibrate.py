@@ -125,8 +125,9 @@ async def run(args):
                     row["frozen_scope_aspects_sha256"]=canonical_sha256([frozen["scope_decision"],frozen["aspect_checklist"]])
                 dataset=input_dataset(case,redactor)
                 snapshot=snapshots[row["snapshot_id"]]
-                engine=CoverageEvaluator(snapshot=snapshot,model=selected_model,retrieval=ControlledCandidates(snapshot,case),
-                    preparer=preparer,redactor=redactor,dataset=dataset,batch_max_entries=row["batch_max_entries"],entry_budget=300)
+                engine=CoverageEvaluator(snapshot=snapshot,model=selected_model,retrieval=ControlledCandidates(snapshot,case,initial_depth=settings.initial_depth),
+                    preparer=preparer,redactor=redactor,dataset=dataset,batch_max_entries=row["batch_max_entries"],entry_budget=settings.max_entry_budget,
+                    initial_depth=settings.initial_depth,broader_depth=settings.broader_depth,max_entry_budget=settings.max_entry_budget)
                 row["prediction"]=await engine.evaluate(dataset.selected[0],{})
                 row["state"]="error" if row["prediction"]["outcome"]=="error" else "completed"
                 if not row["comparison_of"]:

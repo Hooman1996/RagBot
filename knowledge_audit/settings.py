@@ -38,6 +38,10 @@ class CoverageSettings:
     operational_limits: Limits = field(default_factory=Limits)
     recommendation_max_completions: int = 20
     retention_days: int = 30
+    initial_depth: int = 150
+    broader_depth: int = 300
+    initial_entries: int = 50
+    max_entry_budget: int = 300
 
     def __post_init__(self):
         if not isinstance(self.operational_limits,Limits):raise AuditError("invalid_operational_limits")
@@ -51,6 +55,10 @@ class CoverageSettings:
             raise AuditError('invalid_recommendation_completion_limit')
         if type(self.retention_days) is not int or not 1<=self.retention_days<=3650:
             raise AuditError('invalid_retention_days')
+        if any(type(v) is not int for v in (self.initial_depth, self.broader_depth, self.initial_entries, self.max_entry_budget)):
+            raise AuditError("invalid_coverage_integer")
+        if not 1 <= self.initial_entries <= self.initial_depth < self.broader_depth or not 1 <= self.max_entry_budget:
+            raise AuditError("invalid_coverage_depths")
 
     def manifest(self):
         from utils.read_only_audit import canonical_sha256
@@ -62,8 +70,8 @@ class CoverageSettings:
                 "json_syntax_recovery_attempts": 1, "recovery_policy": "json-invalid-stop-one-fresh-response-1",
                 "failure_policy": "audit-failures-1", "model_deadline_policy": "production-client-inherited-1",
                 "network_retries": 0, "unknown_server_completion_policy": "retain_error_no_automatic_retry",
-                "initial_depths": [150, 150, 150], "expanded_depths": [300, 300, 300],
-                "initial_entries": 50, "maximum_distinct_entries": 300, "batch_entries": self.batch_max_entries,
+                "initial_depths": [self.initial_depth] * 3, "expanded_depths": [self.broader_depth] * 3,
+                "initial_entries": self.initial_entries, "maximum_distinct_entries": self.max_entry_budget, "batch_entries": self.batch_max_entries,
                 "batch_max_entries": self.batch_max_entries, "batch_policy": "full-entries-configurable-1",
                 "pilot_query_limit": 5, "model_concurrency": 1}
 
@@ -109,7 +117,11 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
             integer("KNOWLEDGE_COVERAGE_MIN_FREE_BYTES",1073741824,0,1099511627776),
             integer("KNOWLEDGE_COVERAGE_PACE_MS",500,0,60000)),
         integer("KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS",20,1,10000),
-        integer("KNOWLEDGE_COVERAGE_RETENTION_DAYS",30,1,3650))
+        integer("KNOWLEDGE_COVERAGE_RETENTION_DAYS",30,1,3650),
+        integer("KNOWLEDGE_COVERAGE_INITIAL_DEPTH",150,1,1000),
+        integer("KNOWLEDGE_COVERAGE_BROADER_DEPTH",300,2,1000),
+        integer("KNOWLEDGE_COVERAGE_INITIAL_ENTRIES",50,1,1000),
+        integer("KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET",300,1,1000))
 
 
 def grants_for(user_id: int) -> frozenset[str]:
