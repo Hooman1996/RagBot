@@ -39,11 +39,12 @@ def model_fixture(transport, *, limiter=None, count_transport=None):
     return model, rag, http
 
 
-@pytest.mark.parametrize('kind,code',[(httpx.ReadTimeout,'model_read_timeout'),
-    (httpx.ConnectTimeout,'model_connect_timeout'),(httpx.WriteTimeout,'model_write_timeout'),
-    (httpx.PoolTimeout,'model_pool_timeout'),(httpx.ConnectError,'model_connection_failure'),
-    (httpx.RemoteProtocolError,'model_protocol_rejection')])
-def test_translated_sdk_causes_remain_specific_without_network_retries(kind,code):
+# A connection that was never made sent nothing; every other transport failure is unknown.
+@pytest.mark.parametrize('kind,code,dispatched,state',[(httpx.ReadTimeout,'model_read_timeout',True,'unknown'),
+    (httpx.ConnectTimeout,'model_connect_timeout',False,'not_dispatched'),(httpx.WriteTimeout,'model_write_timeout',True,'unknown'),
+    (httpx.PoolTimeout,'model_pool_timeout',False,'not_dispatched'),(httpx.ConnectError,'model_connection_failure',False,'not_dispatched'),
+    (httpx.RemoteProtocolError,'model_protocol_rejection',True,'unknown')])
+def test_translated_sdk_causes_remain_specific_without_network_retries(kind,code,dispatched,state):
     sent=[]
     def fail(request):
         sent.append(request)
@@ -54,8 +55,8 @@ def test_translated_sdk_causes_remain_specific_without_network_retries(kind,code
             with pytest.raises(AuditError,match=code): await model.call('scope',{'question':'Synthetic'})
             metric=model.metrics[-1]
             assert metric['failure_category']==code and metric['boundary']=='completion'
-            assert metric['dispatched'] is True and metric['completion_tokens'] is None
-            assert metric['server_completion_state']=='unknown'
+            assert metric['dispatched'] is dispatched and metric['completion_tokens'] is None
+            assert metric['server_completion_state']==state
             assert metric['phase_timings_ms']['completion']>=0
             assert PRIVATE not in json.dumps(metric)
             assert len(sent)==1 and len(model.metrics)==1

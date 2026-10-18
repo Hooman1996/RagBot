@@ -13,7 +13,7 @@ from knowledge_audit.privacy import AuditError, private_directory
 from knowledge_audit.schemas import SCHEMAS
 from utils.read_only_audit import canonical_sha256
 
-VERSION = "audit-boundaries-1"
+VERSION = "audit-boundaries-2"
 UNKNOWN = {"dispatched", "unknown", "preparation_unobserved", "retrieval_unobserved"}
 
 
@@ -100,7 +100,8 @@ class RowJournal:
             result = await operation()
             if schema is not None:
                 result = schema.model_validate(result).model_dump()
-            if kind == 'preparation' and (result.get('preparation_status') == 'failed' or result.get('rewrite_status') == 'fallback'):
+            # A rewrite fallback is a validated result; its rewrite call is in the ledger.
+            if kind == 'preparation' and result.get('preparation_status') == 'failed':
                 await self.event('preparation_unobserved')
                 return result
             # Redaction already applies in AuditModel/QueryPreparer. Only the

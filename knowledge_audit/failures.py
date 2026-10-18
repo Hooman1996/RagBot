@@ -8,7 +8,7 @@ from knowledge_audit.privacy import AuditError
 from utils.service_errors import (ModelContextLengthError, ServiceOverloadedError,
     ServiceProtocolError, ServiceTimeoutError, ServiceUnavailableError)
 
-VERSION = "audit-failures-1"
+VERSION = "audit-failures-2"
 TRANSPORT_CODES = frozenset({"admission_timeout", "outer_operation_deadline", "model_read_timeout",
     "model_connect_timeout", "model_write_timeout", "model_pool_timeout", "model_timeout_unknown",
     "model_connection_failure", "model_service_failure", "model_http_rejection", "model_protocol_rejection"})
@@ -25,6 +25,20 @@ def causes(error):
         seen.add(id(error))
         yield error
         error = getattr(error, "__cause__", None) or getattr(error, "__context__", None)
+
+
+def send_state(error):
+    """Whether a failed completion provably reached the server: never, answered, or unknown."""
+    from knowledge_audit.operations import OperationalPause
+    if isinstance(error, (asyncio.CancelledError, OperationalPause)):
+        return "unknown"
+    chain = list(causes(error))
+    # The cause chain, never the wrapper: SDK and service errors wrap transport errors.
+    if any(isinstance(e, (httpx.ConnectError, httpx.ConnectTimeout, httpx.PoolTimeout)) for e in chain):
+        return "not_sent"
+    if any(isinstance(e, (httpx.HTTPStatusError, APIStatusError)) for e in chain):
+        return "server_rejected"
+    return "unknown"
 
 
 def category(error):

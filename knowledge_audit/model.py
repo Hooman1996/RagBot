@@ -13,7 +13,7 @@ from knowledge_audit.schemas import SCHEMAS
 from pipeline_observer import bind_pipeline_observer
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
-from knowledge_audit.failures import VERSION as FAILURE_VERSION, category, safe_correlation
+from knowledge_audit.failures import VERSION as FAILURE_VERSION, category, safe_correlation, send_state
 from utils.read_only_audit import canonical_sha256
 from utils.audit_dispatch import audit_dispatch, completion_metadata, current_audit
 
@@ -225,6 +225,12 @@ class AuditModel:
                 metric.update(dispatched=False, status="blocked")
             metric["failure_category"] = "output_length" if metric["finish_reason"] == "length" else code
             metric.update(safe_correlation(error, self.redactor))
+            # A refused connection sent nothing; an error status is a server answer.
+            state = send_state(error)
+            if state == "not_sent":
+                metric.update(dispatched=False, server_completion_state="not_dispatched")
+            elif state == "server_rejected" and metric["dispatched"]:
+                metric["server_completion_state"] = "rejected_by_server"
             if isinstance(error, AuditError):
                 raise
             raise AuditError(code) from None

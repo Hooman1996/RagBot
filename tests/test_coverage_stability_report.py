@@ -40,14 +40,14 @@ def store(tmp_path):
     return CoverageStore(tmp_path / 'coverage', ephemeral_test_store=True)
 
 
-def save_run(store, number, saved_row, *, batch=2, snapshot=SNAPSHOT, settings=None, state='completed'):
+def save_run(store, number, saved_row, *, batch=2, snapshot=SNAPSHOT, settings=None, state='completed', versions=None):
     rid = 'r_' + f'{number:032x}'
     base = {**load_coverage_settings({}).manifest(), 'entry_budget': 300, 'documents': ['Synthetic_FAQ']}
     pinned = {**base, 'batch_entries': batch, 'batch_max_entries': batch, **(settings or {})}
     path = private_directory(store._path('runs', rid))
     private_directory(path / 'rows')
     store.write(path / 'meta.json', {'run_id': rid, 'owner_id': 0, 'dataset_id': 'd_' + '2' * 32, 'snapshot_id': snapshot,
-        'state': state, 'settings': pinned, 'versions': {'code': 'synthetic'}, 'row_ids': [ROW], 'selected_row_ids': [ROW]})
+        'state': state, 'settings': pinned, 'versions': versions or {'code': 'synthetic'}, 'row_ids': [ROW], 'selected_row_ids': [ROW]})
     store.write(path / 'rows' / (ROW + '.json'), saved_row)
     return rid
 
@@ -131,3 +131,28 @@ def test_outputs_are_private_and_contain_no_text(store, tmp_path, capsys):
     assert MARKER not in captured.out and MARKER not in captured.err
     text = (tmp_path / 'out' / 'stability-report.md').read_text()
     assert 'initial:1:reversed=rejected' in text and '## Pass rule' in text and text.count(ROW) == 3
+
+
+def started_versions(batch, **runtime):
+    # A started run records settings.manifest(), batch keys included, in its versions.
+    manifest = {**load_coverage_settings({}).manifest(), 'batch_entries': batch, 'batch_max_entries': batch, **runtime}
+    return {'code': 'synthetic', 'runtime_configuration': {'status': 'observed', 'audit_runtime_settings': manifest}}
+
+
+def test_runs_differing_only_in_batch_size_in_runtime_versions_are_compared(store, tmp_path):
+    runs = [save_run(store, 1, row(), batch=1, versions=started_versions(1)),
+            save_run(store, 2, row(), batch=5, versions=started_versions(5))]
+    stored = [copy.deepcopy(store.owned('runs', rid, 0)) for rid in runs]
+    assert invoke(store, runs, tmp_path / 'out') == 0
+    assert json.loads((tmp_path / 'out' / 'stability-report.json').read_text())['all_passed'] is True
+    # The comparison works on a copy; the stored meta keeps its batch keys.
+    assert [store.owned('runs', rid, 0) for rid in runs] == stored
+    assert stored[1]['versions']['runtime_configuration']['audit_runtime_settings']['batch_max_entries'] == 5
+
+
+def test_runtime_versions_differing_beyond_batch_size_are_refused(store, tmp_path, capsys):
+    runs = [save_run(store, 1, row(), batch=1, versions=started_versions(1)),
+            save_run(store, 2, row(), batch=5, versions=started_versions(5, initial_entries=7))]
+    assert invoke(store, runs, tmp_path / 'out') == 2
+    assert capsys.readouterr().err.strip() == 'code_version_mismatch'
+    assert not (tmp_path / 'out').exists()

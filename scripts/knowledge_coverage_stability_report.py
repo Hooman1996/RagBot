@@ -7,6 +7,7 @@ sentence text or explanations. It never calls a model or a service.
 """
 from __future__ import annotations
 import argparse
+import copy
 from itertools import combinations
 import json
 from pathlib import Path
@@ -26,6 +27,17 @@ def jaccard(a, b):
     return 1.0 if not a and not b else len(a & b) / len(a | b)
 
 
+def comparable_versions(meta):
+    """A copy of the run's versions without the batch keys the audit manifest records."""
+    versions = copy.deepcopy(meta["versions"])
+    runtime = versions.get("runtime_configuration") if isinstance(versions, dict) else None
+    settings = runtime.get("audit_runtime_settings") if isinstance(runtime, dict) else None
+    if isinstance(settings, dict):
+        for key in BATCH_KEYS:
+            settings.pop(key, None)
+    return versions
+
+
 def load_runs(store, owner, run_ids):
     from knowledge_audit.privacy import AuditError
     runs = []
@@ -43,7 +55,8 @@ def load_runs(store, owner, run_ids):
         raise AuditError("snapshot_mismatch")
     # Batch size must be the only variable between the compared runs.
     pinned = [{k: v for k, v in m["settings"].items() if k not in BATCH_KEYS} for m in runs]
-    if any(m["versions"] != runs[0]["versions"] for m in runs) or any(p != pinned[0] for p in pinned):
+    versions = [comparable_versions(m) for m in runs]
+    if any(v != versions[0] for v in versions) or any(p != pinned[0] for p in pinned):
         raise AuditError("code_version_mismatch")
     return runs
 

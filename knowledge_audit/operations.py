@@ -10,10 +10,10 @@ import time
 
 from knowledge_audit.privacy import AuditError
 from utils.read_only_audit import canonical_sha256
-from knowledge_audit.failures import category, TRANSPORT_CODES, VALIDATION_CODES
+from knowledge_audit.failures import category, send_state, TRANSPORT_CODES, VALIDATION_CODES
 SAFE_ERRORS=TRANSPORT_CODES|VALIDATION_CODES|{"coverage_disabled", "coverage_enabled_in_production", "none","cancellation","audit_failed","schema_validation","output_length","citation_validation","semantic_validation"}
 
-VERSION='audit-operations-1'
+VERSION='audit-operations-2'
 
 
 class OperationalPause(BaseException):
@@ -128,7 +128,7 @@ class Budget:
         error=error if error in SAFE_ERRORS else "audit_failed"
         with self.lock():
             value=self.read();item=value['requests'][identity]
-            if item['state'] in {'returned','failed_known','unknown'}:return
+            if item['state'] in {'returned','failed_known','unknown','not_sent'}:return
             known=type(usage) is int and usage>=0
             item.update(state='failed_known' if known and error!='none' else 'returned' if known else 'unknown',
                 known_tokens=usage if known else None,error_category=error,
@@ -143,6 +143,32 @@ class Budget:
                 value['consecutive_failures']=max(streaks.values(),default=0)
             if not known:value['pause_reason']='unknown_remote_completion'
             elif value['tokens_charged']>self.limits.token_allowance:value['pause_reason']='budget_tokens'
+            self.write(value)
+
+    def _failed(self,value,item,error):
+        item.update(error_category=error if error in SAFE_ERRORS else 'audit_failed',
+            duration_ms=round((time.time()-item['started_at'])*1000,3))
+        key='history_rewrite' if item['responsibility']=='history_rewrite' else 'model'
+        streaks=value.setdefault('failure_streaks',{});streaks[key]=streaks.get(key,0)+1
+        value['consecutive_failures']=max(streaks.values(),default=0)
+
+    def not_sent(self,identity,error):
+        # The connection was never made: refund the charge and the attempt.
+        with self.lock():
+            value=self.read();item=value['requests'][identity]
+            if item['state'] in {'returned','failed_known','unknown','not_sent'}:return
+            item.update(state='not_sent',known_tokens=0);self._failed(value,item,error)
+            value['tokens_charged']-=item['charged_tokens'];item['charged_tokens']=0
+            value['completion_attempts']-=1
+            self.write(value)
+
+    def server_rejected(self,identity,error):
+        # The server answered without a completion; keep the conservative charge.
+        with self.lock():
+            value=self.read();item=value['requests'][identity]
+            if item['state'] in {'returned','failed_known','unknown','not_sent'}:return
+            item.update(state='failed_known',known_tokens=None);self._failed(value,item,error)
+            if value['tokens_charged']>self.limits.token_allowance:value['pause_reason']='budget_tokens'
             self.write(value)
 
     def service(self,kind,elapsed,error=False):
@@ -180,9 +206,11 @@ class Budget:
         requests=value.pop('requests');value.update(elapsed_seconds=round(self.elapsed(value),3),
             unknown_reservations=sum(v['state'] in {'reserved','dispatched','unknown'} for v in requests.values()),
             unknown_reserved_tokens=sum(v['charged_tokens'] for v in requests.values() if v['state'] in {'reserved','dispatched','unknown'}),
+            not_sent_completions=sum(v['state']=='not_sent' for v in requests.values()),
+            server_rejected_completions=sum(v['state']=='failed_known' and v['known_tokens'] is None for v in requests.values()),
             remaining_completions=max(0,self.limits.completion_attempts-value['completion_attempts']),
             remaining_tokens=max(0,self.limits.token_allowance-value['tokens_charged']),
-            dispatched_completions=sum(v['state']!='reserved' for v in requests.values()),
+            dispatched_completions=sum(v['state'] not in {'reserved','not_sent'} for v in requests.values()),
             allowance_extension='unsupported_new_run_required',gpu_telemetry='unverified')
         return value
 
@@ -222,7 +250,10 @@ class Budget:
         try:
             response=await self.bounded_operation(operation)
         except BaseException as error:
-            await self.io(self.finish,allowance,error=category(error))
+            state=send_state(error)
+            if state=='not_sent':await self.io(self.not_sent,allowance,category(error))
+            elif state=='server_rejected':await self.io(self.server_rejected,allowance,category(error))
+            else:await self.io(self.finish,allowance,error=category(error))
             raise
         usage=getattr(response,'usage',None)
         prompt=getattr(usage,'prompt_tokens',None);completion=getattr(usage,'completion_tokens',None)

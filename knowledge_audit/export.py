@@ -8,6 +8,7 @@ import re
 from pathlib import Path
 
 from knowledge_audit.privacy import AuditError, Redactor, formula_safe, private_json, private_write
+from knowledge_audit.recovery import VERSION as CHECKPOINT_VERSION
 from utils.read_only_audit import canonical_json, canonical_sha256
 
 
@@ -191,7 +192,7 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
         manifest.update(input_scope=scope, execution_mode=meta["execution_mode"], execution_version=meta["execution_version"],
             execution_selected_row_ids=meta["selected_row_ids"], processing_row_ids=meta["processing_row_ids"],
             selected_row_count=len(meta["selected_row_ids"]), completion_quality=meta.get("completion_quality", "incomplete"),
-            checkpoint_policy="audit-boundaries-1", recovery_choice=meta.get("recovery_choice", "none"))
+            checkpoint_policy=CHECKPOINT_VERSION, recovery_choice=meta.get("recovery_choice", "none"))
         from knowledge_audit.execution import TERMINAL
         selected = [r for r in results if r["source_row_id"] in set(meta["selected_row_ids"])]
         manifest['execution_counts'] = {"imported_rows": len(results), "selected_rows": len(selected),

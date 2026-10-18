@@ -6,7 +6,7 @@ import time
 from knowledge_audit.evidence import EvidenceIndex
 from knowledge_audit.history import AuditHistoryProvider
 from knowledge_audit.privacy import AuditError
-from knowledge_audit.failures import TRANSPORT_CODES, VALIDATION_CODES, category
+from knowledge_audit.failures import TRANSPORT_CODES, VALIDATION_CODES, VERSION as FAILURE_VERSION, category
 from knowledge_audit.referrals import classify_aspect, is_referral_only
 from utils.read_only_audit import canonical_sha256
 
@@ -170,11 +170,11 @@ class CoverageEvaluator:
             result["failure_diagnostics"] = [{k:v for k,v in m.items() if k in keys}
                 for m in self.model.metrics[metric_start:] if m.get("failure_category", "none") != "none"]
             if result.get("error_code") in VALIDATION_CODES and not result["failure_diagnostics"]:
-                result["failure_diagnostics"].append({"failure_policy":"audit-failures-1",
+                result["failure_diagnostics"].append({"failure_policy":FAILURE_VERSION,
                     "failure_category":"citation_validation" if result["error_code"] == "invalid_citation" else "semantic_validation",
                     "boundary":"evidence_validation"})
             if result.get("error_code") in TRANSPORT_CODES and not result["failure_diagnostics"]:
-                result["failure_diagnostics"].append({"failure_policy":"audit-failures-1",
+                result["failure_diagnostics"].append({"failure_policy":FAILURE_VERSION,
                     "failure_category":result["error_code"], "boundary":"preparation_or_retrieval"})
             if self.checkpoint:
                 await self.checkpoint(result)

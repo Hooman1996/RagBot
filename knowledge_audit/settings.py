@@ -71,11 +71,11 @@ class CoverageSettings:
         from utils.read_only_audit import canonical_sha256
         return {"artifact_dir": str(self.artifact_dir), "access_grants_sha256": canonical_sha256(self.access_grants),
                 "upload_max_bytes": self.upload_max_bytes, "model_max_tokens": self.model_max_tokens,
-                "token_margin": self.token_margin, "schema": "coverage-settings-5", "operational_policy": "audit-operations-1", "operational_limits": asdict(self.operational_limits), "recommendation_max_completions": self.recommendation_max_completions, "retention_policy": {"version":"manual-dependency-retention-1","days":self.retention_days,"automatic_deletion":False}, "max_run_rows": self.max_run_rows, "execution_policy": "coverage-execution-1", "checkpoint_policy": "audit-boundaries-1",
+                "token_margin": self.token_margin, "schema": "coverage-settings-5", "operational_policy": "audit-operations-2", "operational_limits": asdict(self.operational_limits), "recommendation_max_completions": self.recommendation_max_completions, "retention_policy": {"version":"manual-dependency-retention-1","days":self.retention_days,"automatic_deletion":False}, "max_run_rows": self.max_run_rows, "execution_policy": "coverage-execution-1", "checkpoint_policy": "audit-boundaries-2",
                 "structured_output_mode": "json_schema_strict_1", "proof_reuse_version": "question-ledger-2",
                 "run_identity_version": "run-identity-1", "export_revision_version": "immutable-export-1",
                 "json_syntax_recovery_attempts": 1, "recovery_policy": "json-invalid-stop-one-fresh-response-1",
-                "failure_policy": "audit-failures-1", "model_deadline_policy": "production-client-inherited-1",
+                "failure_policy": "audit-failures-2", "model_deadline_policy": "production-client-inherited-1",
                 "network_retries": 0, "unknown_server_completion_policy": "retain_error_no_automatic_retry",
                 "initial_depths": [self.initial_depth] * 3, "expanded_depths": [self.broader_depth] * 3,
                 "initial_entries": self.initial_entries, "maximum_distinct_entries": self.max_entry_budget, "batch_entries": self.batch_max_entries,

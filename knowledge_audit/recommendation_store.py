@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 
+from knowledge_audit.operations import VERSION as OPERATIONS_VERSION
 from knowledge_audit.privacy import AuditError,private_directory,private_json,private_write,formula_safe
 from knowledge_audit.store import now
 from knowledge_audit.retention import protected_method
@@ -124,7 +125,7 @@ class RecommendationStore:
         from knowledge_audit.settings import load_coverage_settings
         settings=load_coverage_settings().manifest()
         out['operational_settings']=settings
-        out['operational_policy']='audit-operations-1'
+        out['operational_policy']=OPERATIONS_VERSION
         Budget(self.store,path,owner,Limits.from_settings(settings,recommendation=True))
         private_json(path/'results.json',_redact(results,redactor));private_json(path/'meta.json',out)
         return out

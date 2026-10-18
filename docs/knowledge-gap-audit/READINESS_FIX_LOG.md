@@ -1044,3 +1044,138 @@ exit 0
 ```
 
 The pytest count rose from 1110 in step 07 to 1134, from the 24 new tests. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after run 2. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [09] Refused connections and HTTP rejections no longer pause audit runs; rewrite fallbacks are reusable
+
+### Part A: fix from verifying step 08
+
+`scripts/knowledge_coverage_stability_report.py` refused the experiment it was built for. `load_runs` required identical `versions`, but a started run's `versions.runtime_configuration.audit_runtime_settings` is `settings.manifest()`, which holds `batch_entries` and `batch_max_entries`. Two real runs differing only in batch size always exited with `code_version_mismatch`; the step 08 tests missed it because their synthetic `versions` had no `runtime_configuration`.
+
+Fix: the new `comparable_versions(meta)` deep-copies `versions` and removes `BATCH_KEYS` from `runtime_configuration.audit_runtime_settings` when that path exists. `load_runs` compares those copies. The stored meta is never changed, and every other field must still match. Two new tests in `tests/test_coverage_stability_report.py` cover it: runs differing only in the two batch keys produce a report (and the stored meta keeps its batch keys), and runs whose `audit_runtime_settings` also differ in `initial_entries` exit 2 with `code_version_mismatch`. The first test fails on `165f354` and passes after the fix.
+
+### Problems
+
+- **F8a (Medium).** `Budget.dispatch` marked an allowance `dispatched` before the call and, on any exception, called `finish` with no usage, which set `state='unknown'` and `pause_reason='unknown_remote_completion'`. `AuditModel._call_once` likewise left `dispatched=True` and `server_completion_state='unknown'`. So a refused TCP connection, which provably sent nothing, and an HTTP 500, where the server answered without a completion, paused the whole run until an operator chose retry or skip.
+- **F16b (Low).** `RowJournal.invoke` recorded a preparation whose rewrite fell back as `preparation_unobserved`, which is in `UNKNOWN`. A finished row looked as if it had unknown outstanding work, and its preparation was never reused from the checkpoint. The rewrite's own completion is already in the ledger as `history_rewrite`.
+
+### Rule (approved by the owner)
+
+| What happened | Ledger state | Charge | Failure streak | Pauses the run |
+|---|---|---|---|---|
+| Connection never made: `httpx.ConnectError`, `httpx.ConnectTimeout` or `httpx.PoolTimeout` anywhere in the cause chain | `not_sent` | refunded | +1 | no |
+| Server answered with an error status: `httpx.HTTPStatusError` or `openai.APIStatusError` anywhere in the cause chain | `failed_known` | reservation kept | +1 | no |
+| Anything else after sending: read or write timeouts, `ReadError`, `RemoteProtocolError`, cancellation, `OperationalPause` | `unknown` | as today | as today | yes, as today |
+
+The consecutive-failure limit (`KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES`, default 3) still stops a run when the server is down, with `budget_failures`. Rewrite fallbacks become validated results. There are no automatic retries: `network_retries: 0` stays.
+
+### Changes
+
+- `knowledge_audit/failures.py`: `send_state(error)` walks `causes(error)` and returns `not_sent`, `server_rejected` or `unknown` as in the table; `asyncio.CancelledError` or `OperationalPause` at the top is always `unknown`. `VERSION = "audit-failures-2"`.
+- `knowledge_audit/operations.py`: `Budget.not_sent(identity, error)` sets `state='not_sent'`, `known_tokens=0`, the safe `error_category` and `duration_ms`, refunds `charged_tokens` from `tokens_charged`, subtracts 1 from `completion_attempts`, adds 1 to the `history_rewrite` or `model` streak and never sets `pause_reason`. `Budget.server_rejected(identity, error)` sets `state='failed_known'`, `known_tokens=None`, keeps the charge, adds 1 to the streak and sets `pause_reason='budget_tokens'` only when `tokens_charged` exceeds the allowance. `dispatch` picks one of them or `finish` by `send_state` and always re-raises. `summary` gained `not_sent_completions` and `server_rejected_completions` (`failed_known` with `known_tokens is None`); `dispatched_completions` excludes `not_sent`. `_reason`, `unknown_row_ids`, `acknowledge_unknown` and the `unknown_*` counts keep using `{'reserved','dispatched','unknown'}`, so `not_sent` is excluded by construction (tested). `VERSION = 'audit-operations-2'`.
+- `knowledge_audit/model.py`: in `_call_once`'s `except Exception` branch, `not_sent` sets `dispatched=False` and `server_completion_state='not_dispatched'` (journal: `failed_before_dispatch`); `server_rejected` sets `server_completion_state='rejected_by_server'` and keeps `dispatched=True` (journal: `response_received`). `budget.model_result` still runs only for `response_received`, so one failure adds exactly 1 to the streak (tested with an HTTP 500).
+- `knowledge_audit/recovery.py`: `invoke` records `preparation_unobserved` only when `preparation_status == 'failed'`. A fallback rewrite is stored as `validated` with `result` and `result_sha256`; the result keeps `rewrite_status="fallback"` and the row keeps `preparation_status="uncertain_preparation"`. `VERSION = "audit-boundaries-2"`.
+- `knowledge_audit/settings.py`: manifest `failure_policy`, `operational_policy` and `checkpoint_policy` set to the three new versions.
+- `static/js/knowledge_coverage.js`: the budget panel, which lists ledger counts, shows `not_sent_completions` as "Not sent (connection refused)" and `server_rejected_completions` as "Rejected by server", after the unknown reservations.
+- `knowledge_audit/jobs.py`: not changed. The recovery prompt and `unknown_completion_count` count journal records in `UNKNOWN` and ledger requests in `{'reserved','dispatched','unknown'}`; neither includes `not_sent`, `failed_known`, `failed_before_dispatch` or `response_received`. The run's recovery text in `knowledge_coverage.js` uses those same counts.
+- New `tests/test_audit_send_state.py`: `send_state` cases; the reproduction (refused connection refunds, does not pause, is not among unknown rows or acknowledged; three refusals then `budget_failures`); server rejection (charge kept, no pause, next dispatch proceeds; over-allowance gives only `budget_tokens`); read timeout still pauses as unknown; model metrics and journal states for `ConnectError` and HTTP 500 through the real `AuditModel` with the mocked OpenAI transport; F16b checkpoint reuse and `failed` still `preparation_unobserved`.
+
+Runs and journals created before this step cannot resume: the ledger refuses a `budget.json` of another version (`budget_identity_mismatch`), the journal binding includes the checkpoint policy, and the manifest's three policy versions changed (`audit_runtime_identity_drift`).
+
+### Existing tests changed
+
+| Test | Old expectation | New expectation | Why |
+|---|---|---|---|
+| `tests/test_knowledge_coverage_reliability.py::test_translated_sdk_causes_remain_specific_without_network_retries`, parameters `ConnectTimeout`, `PoolTimeout`, `ConnectError` | `metric['dispatched'] is True` and `metric['server_completion_state']=='unknown'` | `metric['dispatched'] is False` and `metric['server_completion_state']=='not_dispatched'` | It encoded F8a: a connection that was never made counted as unknown remote work. The `ReadTimeout`, `WriteTimeout` and `RemoteProtocolError` parameters keep `True` and `unknown`. The failure codes, one send, no retry and limiter release are unchanged for all six. |
+
+No other existing test changed. `tests/test_knowledge_execution_recovery.py` and `tests/test_knowledge_operations.py` passed unchanged.
+
+### Decisions approved by the owner (step 09b)
+
+1. **Token-count errors.** `rejected_by_server` is used only when a completion was actually sent. An error status from the token-count request stays `not_dispatched`, as before.
+2. **Old version strings.** The hard-coded copies now use the module constants: `operational_policy` in `knowledge_audit/execution.py` (new run meta) and `knowledge_audit/recommendation_store.py` uses `VERSION` from `knowledge_audit/operations.py`; the export manifest's `checkpoint_policy` in `knowledge_audit/export.py` uses `VERSION` from `knowledge_audit/recovery.py`; the two synthetic `failure_diagnostics` entries in `knowledge_audit/pipeline.py` use `VERSION` from `knowledge_audit/failures.py`. Nothing else changed in those four files. No existing test asserted an old string: `tests/test_knowledge_coverage_reliability.py::test_failure_categories_survive_restricted_immutable_csv_projection` stores `'audit-failures-1'` as synthetic historical row data and checks only that the export carries it through unchanged, so it was left as is.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- `finish`, `not_sent` and `server_rejected` all ignore a request that is already terminal (`returned`, `failed_known`, `unknown`, `not_sent`), so a repeated call never refunds or counts twice.
+- `send_state` imports `OperationalPause` inside the function, as `recovery.py` does, because `operations.py` imports `failures.py`.
+
+### AGENTS.md note
+
+This changes only how the audit's ledger classifies failed requests. It does not change retrieval, prompts, models or the chatbot. No performance change to the chatbot; no benchmark was required.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_audit_send_state.py tests/test_coverage_stability_report.py tests/test_knowledge_execution_recovery.py tests/test_knowledge_operations.py tests/test_knowledge_coverage_access_jobs.py tests/test_coverage_order_verification.py tests/test_knowledge_coverage_pipeline.py
+166 passed, 9 warnings in 197.22s (0:03:17)
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+The changed existing test file was also run alone: `tests/test_knowledge_coverage_reliability.py`, 33 passed, 3 warnings in 13.69s. The step 09b re-run of the focused set, with the version-string change, is recorded below. The new tests are 20 in `tests/test_audit_send_state.py` and 2 in `tests/test_coverage_stability_report.py`.
+
+Clean-checkout command (conda `faq`), run on the unpushed `[09]` commit. `/tmp/faq-a21-browser-node` exists, so the browser stage ran with `REQUIRE_BROWSER=1`:
+
+```text
+git worktree add /tmp/faq-clean-09 HEAD
+cd /tmp/faq-clean-09 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-09; echo "exit $status"
+```
+
+Run 1, on the first `[09]` commit:
+
+```text
+1156 passed, 26 deselected, 58 warnings, 291 subtests passed in 251.06s (0:04:11)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1134 in step 08 to 1156, from the 22 new tests. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions.
+
+Run 2, on the `[09]` commit amended with run 1's log section only:
+
+```text
+Timeout (0:02:00)!
+Thread ... (most recent call first):
+  File ".../json/decoder.py", line 354 in raw_decode
+timeout: the monitored command dumped core
+scripts/run_offline_tests.sh: line 20: ... Segmentation fault      timeout 1800 python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q
+pytest: FAIL
+exit 139
+```
+
+Diagnosis: CPU starvation, not a regression. The test running at the crash (number 641 in collection order) was `tests/test_knowledge_execution_recovery.py::test_full_918_selection_idempotency_chronology_export_and_mock_run`, which exceeded `faulthandler_timeout = 120` in `pytest.ini`; the process then crashed while dumping tracebacks. Run alone on `[09]` it took 130.99 s, and on the parent `165f354` it hit the same 120 s limit and crashed the same way. A crypto-mining process on the dev host was using about 16 cores (load average about 17). The dev host's miner was removed in step 09b before the next run.
+
+Step 09b, after the miner was removed and with the two approved decisions, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_audit_send_state.py tests/test_coverage_stability_report.py tests/test_knowledge_execution_recovery.py tests/test_knowledge_operations.py tests/test_knowledge_coverage_access_jobs.py tests/test_coverage_order_verification.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_coverage_reliability.py
+199 passed, 9 warnings in 181.39s (0:03:01)
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+After this log section was written, the amended commit was checked in a new clean worktree with the same clean-checkout command, at normal load, before push.
