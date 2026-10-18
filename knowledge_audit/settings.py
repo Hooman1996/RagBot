@@ -4,6 +4,7 @@ import json
 import os
 from pathlib import Path
 
+from knowledge_audit import referrals
 from knowledge_audit.privacy import AuditError, normalize_public_contact
 from knowledge_audit.operations import Limits
 
@@ -76,7 +77,7 @@ class CoverageSettings:
                 "initial_depths": [self.initial_depth] * 3, "expanded_depths": [self.broader_depth] * 3,
                 "initial_entries": self.initial_entries, "maximum_distinct_entries": self.max_entry_budget, "batch_entries": self.batch_max_entries,
                 "batch_max_entries": self.batch_max_entries, "batch_policy": "full-entries-configurable-1",
-                "pilot_query_limit": 5, "model_concurrency": 1}
+                "pilot_query_limit": 5, "model_concurrency": 1, "referral_guard_version": referrals.VERSION}
 
 
 def load_coverage_settings(environ=None) -> CoverageSettings:

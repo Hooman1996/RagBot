@@ -7,6 +7,7 @@ from knowledge_audit.evidence import EvidenceIndex
 from knowledge_audit.history import AuditHistoryProvider
 from knowledge_audit.privacy import AuditError
 from knowledge_audit.failures import TRANSPORT_CODES, VALIDATION_CODES, category
+from knowledge_audit.referrals import classify_aspect, is_referral_only
 from utils.read_only_audit import canonical_sha256
 
 
@@ -38,6 +39,7 @@ class CoverageEvaluator:
         self.verification_cache, self.reconciliation_cache = {}, {}
         self.entry_phases, self.oversized_ids = defaultdict(list), set()
         self.entry_status = {}
+        self.aspect_classes, self.referral_excluded_ids, self.referral_unclassified_ids = {}, set(), set()
         result = {**initial, "processing_status": "running", "coverage_status": "not_evaluated",
                   "outcome": "pending", "requested_aspects": [], "supporting_sentence_refs": [],
                   "recommendations": [], "recommendation_status": "unassessed", "explanation": "",
@@ -91,6 +93,7 @@ class CoverageEvaluator:
                 return result
             aspects = checklist["aspects"]
             self.required = {a["aspect_id"] for a in aspects}
+            self.aspect_classes = {a["aspect_id"]: classify_aspect(a) for a in aspects}
             retrieval_query = prepared["canonical_retrieval_query_redacted"]
             baseline = await self.retrieval.fetch(retrieval_query, production=True, documents=self.documents)
             initial_pool = await self.retrieval.fetch(retrieval_query, depth=self.initial_depth, documents=self.documents)
@@ -238,10 +241,26 @@ class CoverageEvaluator:
             label = phase + ":" + str(len(self.evidence_batches) + 1)
             current = [{**s, "batch_id": label, "source_phase": phase,
                         "support_id": "s_" + canonical_sha256(s)[:24]} for s in batch["supports"]]
-            self.evidence_batches.append({"batch_id": label, "source_phase": phase,
-                "entry_ids": batch_ids, "result": batch, "supports": current})
+            # A referral alone is no evidence for a substantive fact. The model
+            # output in "result" stays as returned; only the usable supports change.
+            excluded = []
+            for support in current:
+                if not all(is_referral_only(self.index.resolve(r)["text"]) for r in support["citations"]):
+                    continue
+                kind = self.aspect_classes[support["aspect_id"]]
+                if kind == "substantive_fact":
+                    excluded.append(support)
+                    self.referral_excluded_ids.add(support["support_id"])
+                elif kind == "unclassified":
+                    self.referral_unclassified_ids.add(support["support_id"])
+            current = [s for s in current if s not in excluded]
+            stored = {"batch_id": label, "source_phase": phase, "entry_ids": batch_ids, "result": batch, "supports": current}
+            if excluded:
+                stored["excluded_referral_supports"] = excluded
+            self.evidence_batches.append(stored)
             self.review_codes = []
-            if batch["coverage"] == "full":
+            remaining = {s["aspect_id"] for s in current if s["applicability"] != "uncertain"}
+            if batch["coverage"] == "full" and remaining == self.required:
                 # A full batch has no conflicts (validate_batch). Each wider
                 # view re-verifies the proof against all of its own conflicts.
                 await self.verify(question, aspects, current, [], label)
@@ -314,6 +333,9 @@ class CoverageEvaluator:
         final = accepted or self.last_verdict or (inside[-1]["verdict"] if inside else {})
         review = list(dict.fromkeys(self.review_codes))
         residual = sorted(c for c in review if c in RESIDUAL_CODES)
+        # A note never enters review, never blocks and is never resolved.
+        if any(b.get("excluded_referral_supports") for b in batches):
+            residual.append("referral_only_support")
         coverage = "full" if witness else "uncertain" if review else "partial" if supported else "unsupported"
         return {"phase": phase, "coverage": coverage, "supports": supports, "witness": witness,
                 "supported_aspect_ids": sorted(self.required if witness else supported),
@@ -492,6 +514,9 @@ class CoverageEvaluator:
                     "insufficient" if production["coverage"] in {"partial", "unsupported"} else "uncertain")
             if production["coverage"] not in {"full", "partial", "unsupported"}:
                 result.update(processing_status="needs_review", review_codes=["production_reachability_unresolved"])
+            if any(s["support_id"] in self.referral_unclassified_ids for s in witness):
+                result.update(outcome="needs_review", processing_status="needs_review",
+                              review_codes=result["review_codes"] + ["referral_support_unclassified"])
         else:
             uncertain = coverage == "uncertain" or not broadened or bool(audit.get("review_codes")) or not audit["unresolved_aspect_ids"]
             if coverage == "partial":
@@ -512,13 +537,15 @@ MAX_VIEW_CONFLICTS = 40
 # Every review code that view can emit belongs to exactly one set. Blocking
 # codes concern the proof itself; residual codes are shown but never block a
 # verified proof and are never called resolved; search codes describe a proof
-# search that did not finish.
+# search that did not finish; note codes are informational residual codes.
 BLOCKING_CODES = frozenset({"evidence_conflict", "verification_unresolved", "incompatible_conditions",
-    "conflict_contradicts_proof", "conflict_undetermined", "conflict_limit_exceeded"})
+    "conflict_contradicts_proof", "conflict_undetermined", "conflict_limit_exceeded",
+    "referral_support_unclassified"})
 RESIDUAL_CODES = frozenset({"entry_too_long", "evaluation_failed", "subset_batch_uncertainty",
     "batch_support_unresolved", "batch_uncertain", "kb_redaction_affected"})
 SEARCH_CODES = frozenset({"compatibility_unverified", "bounded_bundle_search_unresolved",
     "reconciliation_token_overflow", "verification_token_overflow"})
+NOTE_CODES = frozenset({"referral_only_support"})
 
 
 def conflict_key(record):

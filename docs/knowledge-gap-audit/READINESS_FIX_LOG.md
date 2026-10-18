@@ -696,3 +696,106 @@ exit 0
 ```
 
 The pytest count rose from 1034 in step 04 to 1075, from the 41 new tests in `tests/test_kb_content_privacy.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [06] Ticket referrals count only for contact questions; unclassified aspects go to review
+
+### Problem
+
+The rule that a referral can answer how to submit a ticket, but not a missing fee, duration, eligibility condition or other fact, existed only in the prompt (`knowledge_audit/prompts.py:12-14`). When the batch evaluator and the verifier both accepted "please submit a ticket" as support for "What is the card issuance fee?", the row became `covered_reachable` with verification `accepted`.
+
+### Rule (approved by the owner)
+
+Each aspect is classified from its normalised `description`. A support is referral-only when every sentence it cites is only a referral or the chatbot's fallback text.
+
+| Aspect class | A referral-only support |
+|---|---|
+| `contact_procedure` | counts as support |
+| `substantive_fact` | does not count; the aspect's outcome follows the rest of the evidence |
+| `unclassified` | counts, and the row goes to review (`referral_support_unclassified`) |
+
+`substantive_fact` is checked first, so "Fee for submitting a complaint" is substantive.
+
+### Regexes (`knowledge_audit/referrals.py`, `VERSION = "referral-guard-1"`)
+
+All matching runs on `normalize_persian_text(text).lower()`, the normaliser the audit already uses in `preparation.py` and `recommendations.py`.
+
+- `REFERRAL_PATTERNS`, one compiled regex per phrase, with words joined by `[\s‌]+`: the normalised `FAQ_FALLBACK_FRAGMENT`, each of its two sentences, `اقدام به ثبت تیکت`, `ثبت تیکت`, `تیکت ثبت کن`, `با پشتیبانی تماس بگیرید`, `به پشتیبانی پیام دهید`, `از طریق پشتیبانی`, `submit a ticket`, `open a ticket`, `contact customer support`, `contact support`.
+- `SUBSTANCE`: `[0-9۰-۹٠-٩]|ریال|تومان|rial|روز|ساعت|دقیقه|هفته|ماه|day|hour|minute|week|month|سقف|حداقل|حداکثر|کارمزد|هزینه|fee|limit|minimum|maximum|شرط|شرایط|مشمول|eligible|condition`
+- `SUBSTANTIVE_ASPECT`: `کارمزد|هزینه|مبلغ|سقف|حداقل|حداکثر|مدت|زمان|چقدر|چند|روز|ساعت|شرایط|شرط|مشمول|نرخ|سود|درصد|fee|cost|amount|limit|minimum|maximum|how long|how much|duration|time|days?|hours?|eligib|condition|requirement|rate|interest|percent`
+- `CONTACT_ASPECT`: `تیکت|پشتیبانی|تماس|ارتباط|شکایت|اعتراض|ticket|support|contact|complain|reach`
+
+`is_referral_only(sentence)` is true when at least one referral pattern matches and, after every match is deleted, `SUBSTANCE` finds nothing.
+
+### Changes
+
+- `utils/faq_fallback.py` holds `FAQ_FALLBACK_FRAGMENT`, with the string unchanged; `agent_graph.py` imports it from there, so the audit does not import LangGraph.
+- `knowledge_audit/pipeline.py`:
+  - `evaluate` stores `self.aspect_classes`.
+  - `assess` resolves each support's cited sentences. It moves referral-only supports for `substantive_fact` aspects out of the batch's usable `supports` into `excluded_referral_supports` and records their IDs in `self.referral_excluded_ids`. It records referral-only supports for `unclassified` aspects in `self.referral_unclassified_ids`. A batch the model called `full` is verified only if the remaining supports still cover every required aspect; otherwise it is treated like a partial batch. `batch["result"]` is stored as the model returned it.
+  - `view` adds the note `referral_only_support` to `residual_review_codes` when a batch in the view has excluded referral supports, with or without a witness. The new `NOTE_CODES` set holds it; it never enters `review_codes`, never blocks and is never resolved.
+  - `apply_result` sets `outcome` and `processing_status` to `needs_review` and adds `referral_support_unclassified` (now in `BLOCKING_CODES`) when a full witness uses a referral-only support for an unclassified aspect. `coverage_status` stays `full`.
+- `knowledge_audit/settings.py`: the manifest gained `"referral_guard_version": "referral-guard-1"`. Runs created before this step cannot resume, because `service.py` refuses a run whose stored settings differ from the current manifest.
+- `static/js/knowledge_coverage.js`: English labels for `referral_only_support` and `referral_support_unclassified`.
+- Eligibility is unchanged. `needs_review` rows are ineligible, and a note in `residual_review_codes` leaves a real gap eligible; a test checks that the note does not change the eligibility decision.
+
+### Existing tests and calibration
+
+No calibration case changed outcome; `tests/test_knowledge_coverage_calibration.py` passed unchanged.
+
+One existing test fixture changed; no expected outcome changed.
+
+- `tests/test_knowledge_coverage_pipeline.py::test_referral_instructions_vs_missing_substantive_fact[True-covered_reachable]` failed with `needs_review` after the guard. Its shared `LabeledModel` describes every aspect as "Requested fixture fact a1", which is `unclassified`, and the cited sentence "To submit a ticket, open Support and select New ticket." is referral-only. The question is "How do I submit a ticket?", so the test now gives its aspect the description "How to submit a ticket" (`contact_procedure`), and "Fee amount" for the fee question. The expected outcomes `covered_reachable` and `possible_gap` are unchanged.
+- `tests/test_coverage_conflict_verdicts.py::test_every_view_code_belongs_to_exactly_one_set` now checks four disjoint sets, including `NOTE_CODES`, and its source scan also reads `residual.append(...)`.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- `segment_answer` splits the fallback into two sentences, and a citation points at one sentence. The patterns therefore include each fallback sentence as well as the whole fragment, so an entry that repeats the fallback is referral-only whichever sentence is cited. The fallback patterns come first and longer phrases before shorter ones, so deleting matches removes each phrase whole.
+- "Remaining supports cover every required aspect" counts only supports whose applicability is not `uncertain`, the same test `validate_batch` uses for a full claim.
+- The note is added when any batch in the view has excluded supports, as the command says, even if the excluded support's entry is outside the view; the same batch-level rule already applies to batch conflicts.
+- `tests/test_coverage_referral_guard.py` also checks that the note is kept beside a verified witness from another entry, and that the manifest carries the guard version.
+
+### AGENTS.md note
+
+Moving the constant is the only change in `agent_graph.py`, and the string is identical, so the chatbot's behaviour is unchanged. The guard affects only the audit, so the chatbot's retrieval and answer-quality tests do not apply. No performance change; no benchmark was required.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_referral_guard.py tests/test_coverage_conflict_verdicts.py tests/test_kb_content_privacy.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_coverage_calibration.py tests/test_knowledge_recommendations.py
+180 passed, 3 warnings in 17.46s
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+The 22 new tests are in `tests/test_coverage_referral_guard.py`; the other files have 158 tests.
+
+Clean-checkout command (conda `faq`), run on the unpushed `[06]` commit:
+
+```text
+git worktree add /tmp/faq-clean-06 HEAD
+cd /tmp/faq-clean-06 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-06; echo "exit $status"
+1097 passed, 26 deselected, 58 warnings, 291 subtests passed in 249.48s (0:04:09)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1075 in step 05 to 1097, from the 22 new tests in `tests/test_coverage_referral_guard.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.

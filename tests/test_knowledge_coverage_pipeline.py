@@ -211,6 +211,14 @@ def test_referral_instructions_vs_missing_substantive_fact(asking_how,expected):
     snap=snapshot({'1':'To submit a ticket, open Support and select New ticket.'})
     labels={'1':['a1']} if asking_how else {}
     model=LabeledModel(snap,labels,aspects=1)
+    call=model.call
+    async def described(role,data):
+        # A referral counts only for an aspect that asks how to reach support.
+        value=await call(role,data)
+        if role=='aspects':
+            value['aspects'][0]['description']='How to submit a ticket' if asking_how else 'Fee amount'
+        return value
+    model.call=described
     row=evaluate(snap,model,Retrieval(['1'],['1']),dataset=input_dataset(('How do I submit a ticket?' if asking_how else 'What is the fee?',)))[0]
     assert row['outcome']==expected
     assert row['recommendation_status']=='unassessed' and row['recommendations']==[]

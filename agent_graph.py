@@ -37,9 +37,7 @@ from pipeline_observer import (
 import time
 
 
-FAQ_FALLBACK_FRAGMENT = (
-    "متاسفانه اطلاعات دقیقی در این زمینه ندارم. لطفا اقدام به ثبت تیکت کنید."
-)
+from utils.faq_fallback import FAQ_FALLBACK_FRAGMENT
 
 # ---------- State definition ----------
 class AgentState(TypedDict):

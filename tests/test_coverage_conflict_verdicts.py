@@ -6,7 +6,7 @@ from pathlib import Path
 import pytest
 
 from knowledge_audit import pipeline
-from knowledge_audit.pipeline import BLOCKING_CODES, RESIDUAL_CODES, SEARCH_CODES, CoverageEvaluator
+from knowledge_audit.pipeline import BLOCKING_CODES, NOTE_CODES, RESIDUAL_CODES, SEARCH_CODES, CoverageEvaluator
 from knowledge_audit.preparation import QueryPreparer
 from knowledge_audit.privacy import Redactor
 from knowledge_audit.schemas import SCHEMAS
@@ -215,11 +215,11 @@ def test_duplicate_conflicts_are_removed_before_numbering():
 
 
 def test_every_view_code_belongs_to_exactly_one_set(monkeypatch):
-    sets = (BLOCKING_CODES, RESIDUAL_CODES, SEARCH_CODES)
-    assert not (BLOCKING_CODES & RESIDUAL_CODES or BLOCKING_CODES & SEARCH_CODES or RESIDUAL_CODES & SEARCH_CODES)
+    sets = (BLOCKING_CODES, RESIDUAL_CODES, SEARCH_CODES, NOTE_CODES)
+    assert all(not (a & b) for i, a in enumerate(sets) for b in sets[i + 1:])
     source = Path(pipeline.__file__).read_text()
     body = source[source.index('    async def view('):source.index('    def apply_result(')]
-    emitted = set(re.findall(r'codes\.append\("([a-z_]+)"\)', body))
+    emitted = set(re.findall(r'(?:codes|residual)\.append\("([a-z_]+)"\)', body))
     emitted |= {c for group in re.findall(r'review_codes\.extend\(\[([^\]]*)\]\)', body) for c in re.findall(r'"([a-z_]+)"', group)}
     rows = [reproduction(conflict_assessment=a)[0] for a in ('contradicts', 'not_applicable', 'cannot_determine')]
     rows += [reproduction(NoAssessments)[0], reproduction(UncertainSupport, conflict_assessment='cannot_determine')[0],

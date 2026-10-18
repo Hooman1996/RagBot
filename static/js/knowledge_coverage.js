@@ -13,6 +13,8 @@
         conflict_contradicts_proof: 'Evidence contradicts the proof', conflict_undetermined: 'A conflict could not be assessed',
         conflict_limit_exceeded: 'Too many conflicts to verify',
         kb_redaction_affected: 'Evidence contained scrubbed personal data or secrets',
+        referral_only_support: 'A ticket referral was not counted as evidence for a fact',
+        referral_support_unclassified: 'A ticket referral supports an aspect that could not be classified',
         snapshot_policy_superseded: 'Snapshot captured under an older privacy policy. Capture a new snapshot.'
     };
     function label(value) { return LABELS[value] || String(value || 'Not evaluated').replaceAll('_', ' '); }
