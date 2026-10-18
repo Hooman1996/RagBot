@@ -128,7 +128,7 @@ No Dockerfile, Compose file, or other repository-owned Docker definition was fou
 - `cd qdrant-web-ui-master && npm test` runs the bundled Qdrant UI Vitest script.
 - `cd static_qdrant && npm test` runs the second bundled Qdrant UI Vitest script.
 - `scripts/run_offline_tests.sh` runs the offline pytest suite, the Node frontend tests, the offline frontend audit and, when `BROWSER_NODE_DIR` is set, all browser harnesses. Set `REQUIRE_BROWSER=1` to fail when browsers are unavailable.
-- No retrieval-test or answer-quality-test command was found; both commands are unknown. This does not relax the requirement to run those tests before changing model behavior.
+- Retrieval test: `scripts/retrieval_eval.py` (`freeze`, `run`, `label-sheet`, `compare`). Answer-quality test: `scripts/answer_quality_eval.py` (`collect`, `blind`, `score`). Both are staging-only, need human labels (relevance labels and blind grades), and follow `docs/performance/RELEASE_EVALUATION_RUNBOOK.md`.
 - `benchmarks/` and `docs/performance/` exist, but no benchmark runner or benchmark command was found. The benchmark command is unknown.
 
 Do not claim a test or benchmark passed unless its command was actually run and its result recorded. Do not run connectivity tests against production.

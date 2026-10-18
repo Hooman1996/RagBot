@@ -1627,3 +1627,138 @@ exit 0
 ```
 
 The pytest count rose from 1177 in step 11 to 1186, from the 9 new tests in `tests/test_coverage_dedupe.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. Only this log section changed after run 1, and the amended commit was checked again in a new clean worktree with the same command before push.
+
+## [13] Add staging-only retrieval and answer-quality evaluation tools and the release runbook
+
+### Problem
+
+- **F11 (Medium, blocks production release):** the branch changes production ranking, and the only evidence is a few frozen cases per change (`scripts/rrf_p1_compare.py`, `retrieval_depth_p2_compare.py`, `reranker_p3_compare.py`). `AGENTS.md` listed the retrieval-test and answer-quality-test commands as unknown.
+
+### Configurations and the frozen-query rule
+
+| Label | Commit | Change |
+|---|---|---|
+| `baseline` | `681cc95` | `main` |
+| `p1` | `c833805` | An absent retrieval branch adds 0 to RRF scoring. |
+| `p2` | `d45ddf6` | Lexical and dense depths are request-local and configurable. |
+| `p3` | `e15761f` | Batched TEI reranking with merged global scores. |
+| `rc` | tip of `knowledge-gap-audit` | Release candidate. |
+
+`freeze` computes each case's retrieval query once, on this checkout, as `answering_service.py` builds it for a first-turn `general` question: `PersianTextProcessor(use_stemming=False).normalize`, `normalize_persian_text`, then `canonicalize_retrieval_query`. It records `query_rule: "general_canonical"`, the alias SHA-256, the canonicalization flag and the commit. Every configuration gets the identical query string, so the ranking code is the only variable.
+
+### Changes
+
+- **`scripts/_staging_guard.py`.** It has three functions:
+  - `require_staging(keys)` requires `ENVIRONMENT=staging`, and requires each key to equal this checkout's `.env` value and resolve to `127.0.0.1`, `localhost` or `::1`. For a key ending in `URL` the URL host is checked, else the value itself. This is the same comparison as `confirm_staging`. On failure it prints `staging guard: refused (KEY)` and exits 3.
+  - `require_loopback_url` applies the loopback rule to `--base-url`.
+  - `load_env()` fills unset variables from `.env`, as the other staging scripts do.
+- **`scripts/retrieval_eval.py`.**
+  - `freeze` reads the questions and writes `cases.json`.
+  - `run` calls the guard first and checks the worktree. It then runs `scripts/_retrieval_child.py` with `cwd` and `PYTHONPATH` set to the worktree, and writes `run.json`.
+  - `label-sheet` writes the union of each question's retrieved and context IDs across runs, without duplicates and with a blank row between questions.
+  - `compare` computes the paired metrics, the bootstrap intervals, the latency deltas and the verdict, and writes the report.
+- **`scripts/_retrieval_child.py`.** The child builds `RAGSystem` as `main.py` `lifespan` does, but without `init_db`, authentication, OCR, the classifier or the agent services. It runs each case sequentially under `bind_pipeline_observer(None)`, and its `select_context` mirrors `agent_graph.make_handle_general`. It writes these private files:
+  - `per_question.json`: the retrieved, reranked and context IDs, `empty`, `latency_ms`, and the exception class name for a case that raises;
+  - `titles.json`: the FAQ `question:` field per chunk ID, parsed as `prepare_context` does;
+  - `child.json`: the `rag_*` and `tei_rerank_*` settings and the counts.
+- **`scripts/answer_quality_eval.py`.**
+  - `collect` sends sequential `POST /api/mobile/v1/talk` requests, each with a new UUID session ID, the original question, the datasource and a 50 s timeout. It writes `answers.json` and `collect.json`.
+  - `blind` writes `grading-sheet.csv` (no configuration names) and `grading-key.json`, randomizing the answer order per item from the seed.
+  - `score` un-blinds the sheet, computes the rates, the preference counts and a two-sided exact sign test excluding `same`, and writes the report.
+- **Identity loader reuse.** `collect` takes national codes only from the operator-reserved fixture, through `load_fixture` in `benchmarks/load/mobile_talk_load_test.py`. The module is loaded by path, and the identities are assigned round-robin.
+- **Privacy.**
+  - Every private input and output directory must pass `knowledge_audit.privacy.private_directory`, and files are written by `private_write` (mode `0600`, never overwriting). The child writes with the same `O_EXCL` and `0600` semantics using the standard library.
+  - Reports must be `.md` files under `docs/performance/`.
+  - The terminal prints counts and fixed lines only, and the child's stdout and stderr are discarded.
+  - Sheet text cells go through `formula_safe`.
+- **`docs/performance/RELEASE_EVALUATION_RUNBOOK.md`** covers the worktrees (including the `e15761f` fail-closed fallback to comparing `p2` with `rc`), the 150 to 300 question retrieval set, sequential runs on an idle host, labeling, compare, the 50 to 100 question blind answer evaluation on two loopback app instances, and Gate C with L6.
+- **`AGENTS.md`.** Under "Tests and benchmarks", the "unknown" sentence is replaced by the two commands, the runbook pointer and the staging-only, human-label note.
+
+### Verdict thresholds (flags; defaults)
+
+- **Retrieval, each configuration against `baseline`.** It passes when all four hold:
+  - the lower 95% bound of the `hit_context` difference is at least `-0.02` (`--min-hit-diff`);
+  - the lower 95% bound of the `recall_context` difference is at least `-0.02` (`--min-recall-diff`);
+  - p95 is at most 45,000 ms (`--max-p95-ms`);
+  - p95 is at most 1.2 × the baseline's p95 (`--max-p95-ratio`).
+
+  The bootstrap draws 10,000 paired resamples with `random.Random(1234)`, using one index draw per resample for all three metrics. `compare` exits 0 only if every configuration passes.
+- **Answers.** The release candidate fails if the sign test favors the baseline at p < 0.05 (`--alpha`), or if its `incorrect` count exceeds the baseline's by more than 2 (`--max-extra-incorrect`). `score` exits 0 on pass, else 1.
+
+### Decisions not covered by the command
+
+1. **Normalization before canonicalization.** See "Facts corrected" below. The production retrieval query is canonicalized from the normalized query. `PersianTextProcessor`, `normalize_persian_text`, the canonicalizer and `config/retrieval_query_aliases.json` are unchanged between `681cc95` and the tip, so applying them on this checkout matches every configuration.
+2. **Imports in the child.** Besides the standard library and the worktree's modules, the child imports `httpx` and `openai`. These are the client libraries the worktree's `main.py` uses to build the same clients, from the shared conda environment. It never imports this checkout's code. It is started with `python -P` so this checkout's `scripts/` directory can't shadow worktree modules.
+3. **Clean worktree required.** `run` also exits 2 when the worktree has uncommitted tracked changes, so the recorded commit is the code that ran.
+4. **Failed cases.** A case that raised, or is missing from a run, counts as an empty context in the rates and is left out of the latencies. Error counts are reported per configuration.
+5. **Latency population.** Latency percentiles use every completed case, not only the labeled ones, because latency doesn't depend on labels.
+6. **Verdict scope.** Only non-baseline configurations get a verdict. When the previous configuration is the baseline, the duplicate pair is skipped.
+7. **Where `blind` reads questions.** `blind` has no `--cases` flag, so it reads the questions from the cases file that `collect` recorded. It checks that both collections and the file share one SHA-256. `--a` is the baseline and `--b` the release candidate. A missing answer shows as `[no answer]`.
+8. **Incomplete grading.** `score` exits 2, printing a count only, when any item has a missing or invalid grade.
+9. **Private inputs.** The questions CSV, the grading sheet and the key must also be in private directories.
+
+### Facts corrected
+
+- **Query canonicalization.** `answering_service.py` canonicalizes `classification_query`, the Parsivar-plus-`normalize_persian_text` normalized query, not the raw question. `freeze` therefore normalizes first; see decision 1.
+- **"Only three files change."** Between `681cc95` and `e15761f`, the only files that affect ranking are `utils/RagSystem.py`, `utils/performance_config.py` and `utils/persian_hybrid_search.py`. Outside tests, docs and scripts, these also changed:
+  - `env.example`, `.env.example.generated` and `Production_ENV` (tracked at those commits; untracked at the tip), which added two configuration keys;
+  - `internal_evaluation_api.py`, which added two runtime-snapshot fields.
+
+  None of these affects ranking.
+
+Everything else held:
+
+- The `RAGSystem(` call and the `lifespan` construction are identical in all five commits. `check_worktree` accepted temporary worktrees of `681cc95` and `e15761f` and the tip.
+- The child's imports resolve to each worktree's own modules at `681cc95` and `e15761f`. This was checked with imports only and no service connection; the worktrees were then removed.
+- `agent_graph.py` differs only by moving the `FAQ_FALLBACK_FRAGMENT` import.
+- The `/v1/talk` schema is unchanged.
+
+### AGENTS.md note
+
+This adds evaluation tools only. Retrieval, prompts, models and the chatbot are unchanged. No performance change, so no benchmark is required.
+
+### Live evaluation
+
+No live evaluation was run in this step. Running the tools on staging is an operator step from `docs/performance/RELEASE_EVALUATION_RUNBOOK.md`. Gate C stays open until both reports pass and L6 is confirmed.
+
+### Tests
+
+New `tests/test_release_evaluation_tools.py` (6 tests, offline, synthetic data):
+
+1. exact `hit_context`, `recall_context`, `mrr_context` and `recall_retrieved`, including no relevant hit and an empty result;
+2. the selection mirror with a recording fake: `FAQ` takes the whole reranked list, other categories the first 3, and reranking is skipped when disabled. A raising case records only `ValueError`;
+3. the bootstrap is deterministic. Identical runs give 0 differences with intervals containing 0. Constructed data passes, fails on `hit_context`, and fails on the p95 ratio. Comparison pairs are checked;
+4. a blind and score round trip recovers the per-configuration counts, the grounded count and the sign test (p = 2/256). The sheet holds no configuration names. The report holds no question or answer text;
+5. guards: `require_staging` exits 3 without `ENVIRONMENT=staging`, with a non-loopback host and with a value that differs from `.env`. A non-loopback `--base-url` exits 3. `freeze`, `label-sheet` and `collect` refuse an output directory inside the repository and don't create it. The `RAGSystem(` touch detection is checked;
+6. an end-to-end pass with a unique marker seeded in the questions, the titles and the answers. It covers the real `freeze`, `run` with one fake child (which prints the marker), `label-sheet`, `compare`, `collect` with a fake poster, `blind` and `score`. Both reports are written under `docs/performance/` and removed afterwards. The marker is absent from every repository file modified during the test and from captured stdout and stderr, and the private files are `0600`.
+
+Mutation checks:
+
+- not discarding the child's output failed test 6;
+- selecting the first 2 instead of 3 failed test 2.
+
+Both were restored.
+
+### Checks
+
+In conda `faq`:
+
+```text
+timeout 600 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_release_evaluation_tools.py
+6 passed in 3.81s
+
+conda run --no-capture-output -n faq python scripts/audit_offline_frontend.py
+Offline frontend audit: PASS
+External runtime dependencies: 0
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+
+git diff --name-only HEAD -- knowledge_audit/ main.py agent_graph.py utils/ mobile_api.py
+no output
+```
+
+The clean-checkout full run was skipped by agreement with the owner. This step adds standalone scripts, a runbook and an `AGENTS.md` paragraph; no application or audit module imports the new scripts, so the existing suite can't change. Step 14's clean run covers this commit, and the owner runs the full suite after the push.
