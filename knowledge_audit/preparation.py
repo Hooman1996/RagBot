@@ -110,6 +110,10 @@ class QueryPreparer:
                     if safe_rewrite != rewritten:
                         result["uncertainty_codes"].append("redaction_changed_rewrite")
                     rewritten = safe_rewrite
+                    # Production rewrites with the raw prior turns; this rewrite
+                    # saw redacted ones, so its output is not production's.
+                    if context.provenance["history_redaction_changed"]:
+                        result["uncertainty_codes"].append("redaction_changed_history")
                     result["rewrite_status"] = "fallback" if observer.fallback else "rewritten"
                 else:
                     result["rewrite_status"] = "no_prior_history"

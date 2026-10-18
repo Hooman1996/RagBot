@@ -77,7 +77,8 @@ class CoverageSettings:
                 "initial_depths": [self.initial_depth] * 3, "expanded_depths": [self.broader_depth] * 3,
                 "initial_entries": self.initial_entries, "maximum_distinct_entries": self.max_entry_budget, "batch_entries": self.batch_max_entries,
                 "batch_max_entries": self.batch_max_entries, "batch_policy": "full-entries-configurable-1",
-                "pilot_query_limit": 5, "model_concurrency": 1, "referral_guard_version": referrals.VERSION}
+                "pilot_query_limit": 5, "model_concurrency": 1, "referral_guard_version": referrals.VERSION,
+                "reachability_policy_version": "redaction-reachability-1"}
 
 
 def load_coverage_settings(environ=None) -> CoverageSettings:

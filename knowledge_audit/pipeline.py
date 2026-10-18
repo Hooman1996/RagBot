@@ -531,6 +531,14 @@ class CoverageEvaluator:
             "snapshot_id": self.index.snapshot_id, "bundle_search": audit.get("bundle_search", {}),
             "proof_reuse_version": "question-ledger-2"}
         result["verification_reason"] = audit["explanation"] if coverage == "full" else "; ".join(audit.get("review_codes", []))
+        # The production baseline ran on redacted text production never saw, so
+        # no reachability or gap claim from it is certain. KB coverage stands.
+        if PRODUCTION_QUERY_REDACTION_CODES & set(result.get("uncertainty_codes", [])):
+            added = ["redaction_changed_production_query"]
+            if result["outcome"] in {"covered_reachable", "covered_not_reachable"}:
+                added = ["production_reachability_unresolved"] + added
+            result.update(outcome="needs_review", processing_status="needs_review", production_reachability="uncertain",
+                          review_codes=list(dict.fromkeys(result["review_codes"] + added)))
 
 
 MAX_VIEW_CONFLICTS = 40
@@ -546,6 +554,8 @@ RESIDUAL_CODES = frozenset({"entry_too_long", "evaluation_failed", "subset_batch
 SEARCH_CODES = frozenset({"compatibility_unverified", "bounded_bundle_search_unresolved",
     "reconciliation_token_overflow", "verification_token_overflow"})
 NOTE_CODES = frozenset({"referral_only_support"})
+# Row-level, not view codes: the production query differs from the customer's.
+PRODUCTION_QUERY_REDACTION_CODES = frozenset({"redaction_changed_query", "redaction_changed_rewrite", "redaction_changed_history"})
 
 
 def conflict_key(record):

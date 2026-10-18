@@ -799,3 +799,123 @@ exit 0
 ```
 
 The pytest count rose from 1075 in step 05 to 1097, from the 22 new tests in `tests/test_coverage_referral_guard.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [07] Redacted questions get uncertain production reachability and go to review
+
+### Problem
+
+`QueryPreparer.prepare` redacts the customer query, the rewrite and the prior turns, and `CoverageEvaluator.evaluate` runs the production baseline on `canonical_retrieval_query_redacted`. Production never saw that text. `redaction_changed_query` and `redaction_changed_rewrite` made the row `uncertain_preparation`, but `apply_result` ignored them, so a row could still report `covered_reachable` or `covered_not_reachable`. A rewrite built from redacted prior turns was not marked at all; only `history_provenance["history_redaction_changed"]` recorded it.
+
+### Rule (approved by the owner)
+
+All redaction stays. Running the production baseline on unredacted text in memory would change the privacy boundary and is not part of this step.
+
+A row's production query is redaction-affected when its `uncertainty_codes` contain `redaction_changed_query`, `redaction_changed_rewrite` or `redaction_changed_history`. For such a row:
+
+| Outcome before this step | After this step |
+|---|---|
+| `covered_reachable` or `covered_not_reachable` | `outcome` and `processing_status` become `needs_review`. `review_codes` gain `production_reachability_unresolved` and `redaction_changed_production_query`. `coverage_status` stays `full`; the witness, supports and `verification_result` are unchanged. |
+| `possible_gap` or `possible_partial_gap` | `outcome` and `processing_status` become `needs_review`; `review_codes` gain `redaction_changed_production_query`. |
+| `needs_review` | `review_codes` gain `redaction_changed_production_query`. |
+
+In every case `production_reachability` becomes `"uncertain"`. Rows that are not redaction-affected are unchanged.
+
+### Changes
+
+- `knowledge_audit/preparation.py`: inside the branch that calls `rewrite_query`, `redaction_changed_history` is appended when `context.provenance["history_redaction_changed"]` is true. Rows with no prior history never run the rewrite and are not marked. The existing `code.startswith("redaction_changed")` check makes the row `uncertain_preparation`.
+- `knowledge_audit/pipeline.py`: new `PRODUCTION_QUERY_REDACTION_CODES`. The table is applied at the end of `apply_result`, after both branches and after the step 06 referral rule. Codes are merged with `list(dict.fromkeys(...))`. `coverage_status`, the witness, the supports, `verification_result` and `stopping_reason` are not touched. The early returns in `evaluate` and the error paths are unchanged. The two review codes are row-level and are not in `BLOCKING_CODES`, `RESIDUAL_CODES`, `SEARCH_CODES` or `NOTE_CODES`.
+- `knowledge_audit/recommendations.py`: `redaction_changed_history` also produces `context_or_redaction_unresolved` in `eligibility`.
+- `knowledge_audit/settings.py`: the manifest gained `"reachability_policy_version": "redaction-reachability-1"`. Runs created before this step cannot resume (`audit_runtime_identity_drift`), so no run mixes old and new outcomes.
+- `static/js/knowledge_coverage.js`: English labels for `redaction_changed_production_query`, `production_reachability_unresolved` and `redaction_changed_history`.
+
+### Known limit: history over-marking
+
+`history_redaction_changed` is true when any prior turn of the session was changed by redaction, while the rewrite sees at most the last three turns. A row whose redacted turn is older than the rewrite window is still marked. Over-marking sends rows to review rather than claiming certainty, which is the safe direction; it is not narrowed in this step.
+
+### Existing tests and calibration
+
+No existing test expectation or calibration outcome changed. `tests/test_knowledge_coverage_calibration.py` and every other existing test in the focused set passed unchanged; none of their queries, rewrites or prior turns is changed by redaction.
+
+One existing test changed, with no change to what it expects; see the next section.
+
+### Decision approved by the person running this step: garbage collection in a health timing test
+
+The first two clean-checkout runs of the `[07]` commit failed with one test, `tests/test_health_checks.py::HealthTests::test_component_and_overall_deadlines` (`0.588… not less than 0.3`, then `0.527… not less than 0.3`). The test asserts that a health report with a stuck vLLM probe returns within 0.3 s of wall-clock time.
+
+- The parent commit `83f9fc3` passed the same pytest stage in a clean worktree (1097 passed). The `[07]` code with `tests/test_coverage_redacted_reachability.py` excluded also passed (1097 passed). The test passed alone, beside the new file, and in shorter subsets.
+- With Python's garbage collector disabled, the full suite including the new file passed (1110 passed, 0 failed). A `gc.callbacks` probe measured a full generation-2 collection on the suite's heap at 0.474 s and 0.490 s, with `collected=0` and `uncollectable=0`: a pure heap traversal, with no leak or slow finalizer from the new tests.
+- Cause: the 13 new tests shift when the interpreter triggers that collection, and it landed inside the health test's 0.3 s window. The test was already fragile; this step exposed it.
+
+Approved fix: `test_component_and_overall_deadlines` runs `gc.collect()` and disables the collector around the timed `report()` call only, then restores the previous state in `finally`. The 0.3 s limit and every assertion are unchanged. `utils/health_checks.py` is unchanged.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- A `needs_review` row from full coverage with an undetermined production assessment already carries `production_reachability_unresolved`; it gains only `redaction_changed_production_query`, as the table's last row says. The merge keeps each code once.
+- For gap rows, `production_reachability` was never set by `apply_result` and stayed `"unknown"`; redaction-affected gap rows now show `"uncertain"`, unaffected ones still `"unknown"`.
+- The tests for `redaction_changed_rewrite` and `redaction_changed_history` replace the shared fixture's `QueryPreparer` with a subclass that appends the code to a prepared row and sets `preparation_status` to `uncertain_preparation`, as the real preparer does.
+- `tests/test_coverage_redacted_reachability.py` also checks a `needs_review` row (incompatible conditions) with a redacted query, and that the manifest carries the policy version. It reuses the `seed` fixture from `tests/test_knowledge_coverage_access_jobs.py` for the export check.
+- The 6 behaviour tests were checked to fail with `pipeline.py` and `preparation.py` reverted (6 failed, 7 passed), and to pass with the change.
+
+### AGENTS.md note
+
+This step changes only how the audit labels its rows. Retrieval, prompts, models and the chatbot are unchanged, so no retrieval or answer-quality test is required. No performance change; no benchmark was required.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_redacted_reachability.py tests/test_coverage_referral_guard.py tests/test_coverage_conflict_verdicts.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_coverage_calibration.py tests/test_knowledge_recommendations.py tests/test_knowledge_audit_a1.py
+199 passed, 3 warnings in 18.17s
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+The 13 new tests are in `tests/test_coverage_redacted_reachability.py`; the other files have 186 tests.
+
+Clean-checkout command (conda `faq`), run on the unpushed `[07]` commit:
+
+```text
+git worktree add /tmp/faq-clean-07 HEAD
+cd /tmp/faq-clean-07 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-07; echo "exit $status"
+```
+
+Runs 1 and 2, before the health-test fix (`f76cc6a`):
+
+```text
+1 failed, 1109 passed, 26 deselected, 58 warnings, 291 subtests passed in 250.96s (0:04:10)
+pytest: FAIL
+exit 1
+
+1 failed, 1109 passed, 26 deselected, 58 warnings, 291 subtests passed in 251.78s (0:04:11)
+pytest: FAIL
+exit 1
+```
+
+Run 3, after the approved health-test fix was amended into the `[07]` commit:
+
+```text
+1110 passed, 26 deselected, 58 warnings, 291 subtests passed in 249.91s (0:04:09)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1097 in step 06 to 1110, from the 13 new tests. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after run 3. The amended commit was checked again in a new clean worktree with the same command before push.

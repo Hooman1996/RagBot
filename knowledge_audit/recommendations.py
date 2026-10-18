@@ -57,7 +57,7 @@ def eligibility(row,meta,observations=()):
     for name in ('audit_assessment','production_assessment'):
         if row.get(name,{}).get('conflicts') or row.get(name,{}).get('review_codes'):reasons.append('compatibility_or_evaluation_unresolved')
     if any(row.get(k) for k in ('conflicts','ambiguities')) or row.get('aspect_checklist',{}).get('ambiguities'):reasons.append('context_or_compatibility_unresolved')
-    if any(c in {'unresolved_context','redaction_changed_query','redaction_changed_rewrite'} for c in row.get('uncertainty_codes',[])):reasons.append('context_or_redaction_unresolved')
+    if any(c in {'unresolved_context','redaction_changed_query','redaction_changed_rewrite','redaction_changed_history'} for c in row.get('uncertainty_codes',[])):reasons.append('context_or_redaction_unresolved')
     if row.get('validation_diagnostics') and not row.get('output_recovery_count'):reasons.append('unresolved_validation_issue')
     if any(d.get('failure_category') not in {'none','schema_validation'} for d in row.get('failure_diagnostics',[])):reasons.append('unresolved_model_failure')
     scope=row.get('evaluation_scope',{})
