@@ -447,7 +447,7 @@ class RerankBatchConfigurationTests(unittest.TestCase):
         self.assertEqual(_specs()['TEI_RERANK_VERIFIED_MAX_BATCH_SIZE'].required,('production',))
         spec=_specs()['TEI_RERANK_MAX_CLIENT_BATCH_SIZE']
         self.assertEqual((spec.kind,spec.default,spec.minimum),('int','50',1))
-        for name in ('env.example','Production_ENV','.env.example.generated'):
+        for name in ('env.example','Production_ENV.example','.env.example.generated'):
             text=(Path(__file__).resolve().parents[1]/name).read_text()
             self.assertEqual(text.count('TEI_RERANK_MAX_CLIENT_BATCH_SIZE=50'),1)
             for key in keys:

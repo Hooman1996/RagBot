@@ -34,9 +34,7 @@ class Config:
     # MinIO
     # MINIO_ENDPOINT = "localhost:9000"
     MINIO_ENDPOINT=os.getenv("MINIO_ENDPOINT", "localhost:9000")
-    # MINIO_ACCESS_KEY = "minioadmin"
     MINIO_ACCESS_KEY=os.getenv("MINIO_ACCESS_KEY")
-    # MINIO_SECRET_KEY = "minioadmin"
     MINIO_SECRET_KEY=os.getenv("MINIO_SECRET_KEY")
     MINIO_SECURE=False
     # MINIO_BUCKET = "hihelp-documents"

@@ -25,6 +25,10 @@ from tests.test_knowledge_coverage_pipeline import LabeledModel
 from tests.test_knowledge_coverage_access_jobs import audit_runtime
 from tests.test_web_auth import setup, login
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 REDACTOR=Redactor(b'fictional-calibration-test-key-only-12345678')
 
 
@@ -35,7 +39,7 @@ def test_default_range_validation_and_template_propagation():
         assert settings.manifest()['batch_max_entries']==cap
         assert settings.manifest()['batch_entries']==cap
     root=Path(__file__).resolve().parents[1]
-    for name in ('env.example','env.review.example','Production_ENV','.env.example.generated'):
+    for name in ('env.example','env.review.example','Production_ENV.example','.env.example.generated'):
         assert (root/name).read_text().count('KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES=2')==1
     for name in ('env.example','env.review.example'):
         assert 'POSTGRES_USER=CHANGE_ME_POSTGRES_USER' in (root/name).read_text()

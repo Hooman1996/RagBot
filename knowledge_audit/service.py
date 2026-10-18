@@ -34,6 +34,8 @@ async def _require_reranker_capability(search):
 
 
 async def build_engine(store, meta, settings, *, answering, runner, limiter):
+    from knowledge_audit.settings import require_coverage_enabled
+    require_coverage_enabled()
     import httpx
     from scripts.kb_signature import create_signature
     if any(meta["settings"].get(k) != v for k, v in settings.manifest().items() if k!="operational_limits"):

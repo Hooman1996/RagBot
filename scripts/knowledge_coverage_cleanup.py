@@ -7,6 +7,7 @@ sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
 
 
 def main():
+    # Cleanup remains available when the audit is disabled so leftover data can be deleted.
     from dotenv import load_dotenv
     load_dotenv(Path(__file__).resolve().parents[1]/'.env',override=False)
     from knowledge_audit.settings import load_coverage_settings

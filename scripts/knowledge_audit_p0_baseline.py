@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Offline P0 observations of current code; no env loading, network, or writes.
+"""Offline P0 observations after staging opt-in; no network or writes.
 
 AST-extract only the named production methods to avoid heavyweight imports and
 startup side effects. Dependencies and scores are synthetic. Exit 0 means the
@@ -23,6 +23,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 
 def source(path):
@@ -211,9 +212,25 @@ async def observations():
     }
 
 
-if __name__ == "__main__":
+def main():
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)
+    from knowledge_audit.settings import require_coverage_enabled
+    from knowledge_audit.privacy import AuditError
+    try:
+        require_coverage_enabled()
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     try:
         print(json.dumps(asyncio.run(observations()), indent=2, sort_keys=True))
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except Exception as exc:
         print(f"P0_DIAGNOSTIC_ERROR={type(exc).__name__}", file=sys.stderr)
         sys.exit(2)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

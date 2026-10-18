@@ -70,7 +70,7 @@ from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
 from web_permissions import permissions_for, permissions_for_user
-from knowledge_audit.api import router as coverage_router
+from knowledge_audit.api import mount
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
                       set_cookies, clear_cookies, web_auth_middleware, safe_user,
                       validate_config, job_access_token, valid_job_access)
@@ -514,7 +514,7 @@ app.mount("/static", VersionedStaticFiles(directory=str(STATIC_DIR)), name="stat
 app.include_router(kb_router)
 app.include_router(mobile_router)
 app.include_router(internal_evaluation_router)
-app.include_router(coverage_router)
+mount(app)
 
 
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---

@@ -211,6 +211,6 @@ class DepthConfigurationTests(unittest.TestCase):
         # manifest and this guard prevent silently dropping the new setting.
         spec=_specs()['RAG_BM25_CANDIDATE_LIMIT']
         self.assertEqual((spec.kind,spec.default,spec.minimum),('int','50',1))
-        for name in ('env.example','Production_ENV','.env.example.generated'):
+        for name in ('env.example','Production_ENV.example','.env.example.generated'):
             content=(Path(__file__).resolve().parents[1]/name).read_text()
             self.assertEqual(content.count('RAG_BM25_CANDIDATE_LIMIT=50'),1)

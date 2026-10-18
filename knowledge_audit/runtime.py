@@ -9,6 +9,7 @@ import subprocess
 from urllib.parse import urlsplit
 
 from knowledge_audit.privacy import AuditError
+from knowledge_audit.settings import require_coverage_enabled
 
 ROOT = Path(__file__).resolve().parents[1]
 
@@ -19,6 +20,7 @@ def confirm_staging(*, confirmed: bool, model: bool = False, snapshot: bool = Fa
     Historical reports establish this root .env's development targets. Explicit
     assertion alone never permits arbitrary remote production configuration.
     """
+    require_coverage_enabled()
     from dotenv import dotenv_values
     if not confirmed:
         raise AuditError("staging_confirmation_required")

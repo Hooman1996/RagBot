@@ -12,8 +12,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 
 
 async def run(args):
-    from dotenv import load_dotenv
-    load_dotenv(ROOT/'.env',override=False);logging.disable(logging.CRITICAL)
+    logging.disable(logging.CRITICAL)
     from knowledge_audit.runtime import confirm_staging
     from knowledge_audit.settings import load_coverage_settings
     from knowledge_audit.store import CoverageStore,now
@@ -110,9 +109,25 @@ async def run(args):
         finally:await runner.aclose();os.close(lease)
 
 
-if __name__=='__main__':
+def main():
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)
+    from knowledge_audit.settings import require_coverage_enabled
+    from knowledge_audit.privacy import AuditError
+    try:
+        require_coverage_enabled()
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     import argparse
     p=argparse.ArgumentParser(description=__doc__);p.add_argument('--recommendation-revision-id',required=True);p.add_argument('--source-row-id',required=True);p.add_argument('--confirmed-staging',action='store_true');p.add_argument('--metadata-normalization-check',action='store_true');p.add_argument('--final-heldout-check',action='store_true')
     try:asyncio.run(run(p.parse_args()))
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except Exception:
         print('{"status":"failed","error_code":"a4_candidate_operator_failed"}',file=sys.stderr);raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

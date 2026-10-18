@@ -24,6 +24,10 @@ from knowledge_audit.inputs import CsvInputAdapter, ColumnMapping
 from knowledge_audit.store import BytesInput
 from knowledge_audit.preparation import prepare_dataset
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 
 def synthetic_918(tmp_path):
     store,_,snap,old,_,redactor,preparer=seed(tmp_path)

@@ -107,6 +107,8 @@ Verified configuration files and sources:
 - `.env`: local runtime configuration; treat it as sensitive and never print, log, or commit its secret values.
 - `env.example`: environment-variable example.
 - `.env.server_git`: server-oriented environment configuration present in the worktree; treat it as sensitive.
+- `Production_ENV.example`: tracked copy of the production keys, with secret values empty.
+- `Production_ENV`: local only, untracked.
 - `new_architecture/app/config.py`: service configuration loaded from environment variables.
 - `main.py`: contains an additional inline Qdrant `Config` class.
 - `scenarios.json`: agent intent/scenario definitions.

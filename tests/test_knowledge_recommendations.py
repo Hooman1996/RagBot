@@ -15,6 +15,10 @@ from tests.test_knowledge_coverage_pipeline import snapshot,LabeledModel,Retriev
 from tests.test_knowledge_coverage_access_jobs import seed,audit_runtime
 from tests.test_web_auth import setup,login,csrf
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 KEY=b'fictional-recommendation-only-key-12345678'
 
 

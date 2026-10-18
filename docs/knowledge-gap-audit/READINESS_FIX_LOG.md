@@ -255,3 +255,170 @@ git diff --check
 (no output)
 Exit: 0
 ```
+
+
+## [03] Gate the audit to staging and keep production credentials local
+
+The audit is enabled only by the exact normalized flag/environment pair defined in `coverage_enabled`; `require_coverage_enabled` fails closed. Enabling it in production raises `coverage_enabled_in_production`. Both deployment error codes are allowlisted for API detail, pipeline results, operational diagnostics and interrupted-job records.
+
+Gated entry points: `knowledge_audit.api.mount`, `api.runtime`, `CoverageJobs.start`, `RecommendationJobs.start`, `service.build_engine`, and `runtime.confirm_staging`. `main.py` calls `mount(app)`; the other routers and shutdown cleanup are unchanged. Existing confirmation, loopback and root-environment target checks remain.
+
+Gated CLI `main` functions, with dotenv loading before the gate and code-only AuditError output/status 2:
+
+- `scripts/knowledge_audit_p0_baseline.py`
+- `scripts/knowledge_audit_prepare.py`
+- `scripts/knowledge_coverage_calibrate.py`
+- `scripts/knowledge_coverage_diagnose.py`
+- `scripts/knowledge_coverage_pilot.py`
+- `scripts/knowledge_coverage_resources.py`
+- `scripts/knowledge_recommendation_pilot.py`
+- `scripts/knowledge_recommendation_revalidate.py`
+
+Exempt: `scripts/knowledge_coverage_cleanup.py` remains available to delete leftover data while disabled; `scripts/diagnose_knowledge_update_production.sh` is not an audit CLI and was not changed or run.
+
+Permissions return existing role grants without loading coverage settings while disabled or misconfigured. Enabled configurations cache access grants by `(KNOWLEDGE_COVERAGE_ACCESS_GRANTS, KNOWLEDGE_COVERAGE_ARTIFACT_DIR)`; AuditError results are not cached. Existing audit tests and the shared synthetic browser app explicitly opt into staging; assertions are unchanged except for replacing the production-file name in the five documentation checks.
+
+`Production_ENV` was untracked and retained locally, byte-for-byte unchanged except for the requested gate comment/key. Its tracked example preserves line order/comments and non-secret configuration, with these key names emptied:
+
+- `QDRANT_API_KEY`
+- `POSTGRES_PASSWORD`
+- `DEFAULT_DB_PASSWORD`
+- `MINIO_ACCESS_KEY`
+- `MINIO_SECRET_KEY`
+
+The initial tracked-secret scan also found `MINIO_SECRET_KEY` in five application files. The owner explicitly approved expanding this step to remove those hard-coded defaults and commented copies. The affected configuration classes now read credentials only from the environment; document upload accepts explicit credentials or reads the environment when omitted. No credential values were printed or included in this log. The scan passed after the removals.
+
+Restored `.gitignore` with the prescribed edits. Private export-name rules remain only in `.git/info/exclude`. Redundant local blanket exclusions hiding tracked paths were removed from that local file so the requested invariant holds. `git ls-files -ci --exclude-standard` prints exactly:
+
+```text
+training/artifacts/intent_guardrail_jina_retrieval_query_v1.pt
+```
+
+This Git version rejects `git check-ignore -q .env Production_ENV .env.server_git` because quiet mode accepts only one path. The equivalent per-path quiet checks all exited 0. No private export filenames were emitted or added to `.gitignore`.
+
+The unchanged `docs/architecture/REQUEST_ADMISSION_AND_BACKPRESSURE.md` passed category checks: no known secret-value matches, credential assignments, customer-data patterns, hostnames or IP addresses. It is included as-is.
+
+Files changed (including the explicitly approved extension):
+
+- `.env.example.generated`
+- `.gitignore`
+- `AGENTS.md`
+- `Production_ENV`
+- `Production_ENV.example`
+- `docs/architecture/REQUEST_ADMISSION_AND_BACKPRESSURE.md`
+- `docs/knowledge-gap-audit/READINESS_FIX_LOG.md`
+- `env.example`
+- `knowledge_audit/api.py`
+- `knowledge_audit/jobs.py`
+- `knowledge_audit/operations.py`
+- `knowledge_audit/pipeline.py`
+- `knowledge_audit/recommendation_jobs.py`
+- `knowledge_audit/runtime.py`
+- `knowledge_audit/service.py`
+- `knowledge_audit/settings.py`
+- `main.py`
+- `new_architecture/app/config.py`
+- `new_architecture/app/core/database.py`
+- `new_architecture/app/services/document/upload.py`
+- `new_architecture/data_insertion_with_api.py`
+- `new_architecture/insert_data.py`
+- `scripts/check_tracked_secrets.py`
+- `scripts/knowledge_audit_p0_baseline.py`
+- `scripts/knowledge_audit_prepare.py`
+- `scripts/knowledge_coverage_calibrate.py`
+- `scripts/knowledge_coverage_cleanup.py`
+- `scripts/knowledge_coverage_diagnose.py`
+- `scripts/knowledge_coverage_pilot.py`
+- `scripts/knowledge_coverage_resources.py`
+- `scripts/knowledge_recommendation_pilot.py`
+- `scripts/knowledge_recommendation_revalidate.py`
+- `scripts/run_offline_tests.sh`
+- `scripts/validate_environment.py`
+- `tests/knowledge_coverage_browser_app.py`
+- `tests/test_coverage_deployment_gate.py`
+- `tests/test_knowledge_coverage_access_jobs.py`
+- `tests/test_knowledge_coverage_calibration.py`
+- `tests/test_knowledge_coverage_corrections.py`
+- `tests/test_knowledge_execution_recovery.py`
+- `tests/test_knowledge_operations.py`
+- `tests/test_knowledge_recommendations.py`
+- `tests/test_knowledge_run_export.py`
+- `tests/test_reranker_batching.py`
+- `tests/test_retrieval_depths.py`
+- `tests/test_step5_query_canonicalization.py`
+- `tests/test_web_permissions.py`
+- `web_permissions.py`
+
+Checks before commit ran outside the sandbox in conda `faq`, retaining the offline pytest guard:
+
+```text
+timeout 900 python -m pytest -p tests.offline_guard -q tests/test_coverage_deployment_gate.py tests/test_knowledge_coverage_access_jobs.py tests/test_validate_environment.py tests/test_reranker_batching.py tests/test_retrieval_depths.py tests/test_step5_query_canonicalization.py tests/test_knowledge_coverage_calibration.py tests/test_request_admission.py
+158 passed, 4 warnings, 168 subtests passed in 27.66s
+Final rerun after the approved credential-default removals:
+158 passed, 4 warnings, 168 subtests passed in 27.64s
+Exit: 0
+
+python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+Exit: 0
+
+python scripts/validate_environment.py --env-file .env --mode staging | tail -1
+Summary: 0 critical, 27 warning, 4 informational
+Pipeline exit: 0; validator exit: 0
+
+python scripts/validate_environment.py --env-file Production_ENV --mode production | tail -1
+Summary: 6 critical, 24 warning, 4 informational
+Pipeline exit: 0; validator exit: 2
+```
+
+Validator summaries were captured from full output because the requested tail pipelines emit the last finding rather than the summary. Comparing critical key names against the prior validator found no new critical findings in either mode, including for `KNOWLEDGE_COVERAGE_ENABLED` and `ENVIRONMENT`. Existing production findings remain out of scope.
+
+Open owner item: the five production credentials remain in Git history before this commit. Rotation and removal from historical commits are owner decisions and were not performed. No production target was contacted. `.env` and `.env.server_git` remain local and are not staged.
+
+Clean-checkout verification was performed on the initial unpushed commit; exact results follow below. The final amended commit must repeat this clean check before push.
+
+`git diff --check`: no output, exit 0. The insertion script originally mixed line endings; only the two edited credential lines were normalized to avoid newly introduced trailing-whitespace findings.
+
+The scan after staging the new example initially failed: credential values were reused in non-secret configuration fields. The owner explicitly approved emptying `QDRANT_COLLECTION`, `POSTGRES_USER`, `DEFAULT_DB_USER`, `DEFAULT_DB_NAME`, and `MINIO_BUCKET` in `Production_ENV.example` as well. This is an approved exception to copying non-secret values unchanged. The real local production file remains unchanged. No scan exception or allowlist was added.
+
+Clean-checkout command (conda `faq`, outside the sandbox):
+
+```text
+git worktree add /tmp/faq-clean-03 HEAD
+cd /tmp/faq-clean-03 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-03; echo "exit $status"
+1014 passed, 26 deselected, 58 warnings, 291 subtests passed in 240.21s (0:04:00)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+This clean checkout contained no local environment files. The secret stage's NOT RUN result was expected; the main checkout ran the value scan successfully. All five synthetic browser harnesses passed, including coverage, execution, operations, recommendations and run export. No test was newly skipped or removed; the 26 deselections are the requested existing integration/artifact marker exclusions. The temporary worktree was removed.
+
+Only the approved additional example-field sanitization and this verification log change after that first clean run. Before push, the amended commit must be checked in a new clean worktree with the identical command and the same passing stage summaries. No live service or production access is authorized by this verification.
+
+Focused command rerun after the approved example-field correction:
+
+```text
+158 passed, 4 warnings, 168 subtests passed in 28.12s
+Exit: 0
+```
+
+`git check-ignore .env Production_ENV .env.server_git` also exited 0 and printed only these paths:
+
+```text
+.env
+Production_ENV
+.env.server_git
+```
+
+Final main-checkout secret scan: `tracked secrets: 0 matches` (exit 0). `git diff --check` again had no output (exit 0).

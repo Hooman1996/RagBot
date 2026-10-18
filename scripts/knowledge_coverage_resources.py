@@ -14,12 +14,13 @@ import statistics
 import sys
 import time
 from urllib.parse import urlsplit
-sys.path.insert(0,str(Path(__file__).resolve().parents[1]))
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0,str(ROOT))
 
 
 async def run(args):
-    from dotenv import load_dotenv,dotenv_values
-    root=Path(__file__).resolve().parents[1];load_dotenv(root/'.env',override=False)
+    from dotenv import dotenv_values
+    root=Path(__file__).resolve().parents[1]
     logging.disable(logging.CRITICAL)
     import httpx
     from knowledge_audit.runtime import confirm_staging,code_identity
@@ -174,9 +175,22 @@ async def run(args):
 
 
 def main():
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)
+    from knowledge_audit.settings import require_coverage_enabled
+    from knowledge_audit.privacy import AuditError
+    try:
+        require_coverage_enabled()
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--confirmed-staging',action='store_true')
     parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
-    asyncio.run(run(args))
+    try:
+        asyncio.run(run(args))
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
 
 
-if __name__=='__main__':main()
+if __name__=='__main__':raise SystemExit(main())

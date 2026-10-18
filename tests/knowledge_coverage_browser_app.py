@@ -14,7 +14,6 @@ from types import SimpleNamespace
 
 from tests.test_answering_service import Processor, Rewriter, Classifier, ImmediateRunner
 from tests.test_knowledge_coverage_pipeline import LabeledModel, Retrieval
-from tests.test_knowledge_coverage_access_jobs import seed
 from knowledge_audit.jobs import CoverageJobs
 from knowledge_audit.pipeline import CoverageEvaluator
 from knowledge_audit.preparation import QueryPreparer
@@ -26,8 +25,13 @@ SYNTHETIC_OWNER = 990001
 
 
 def create_app(port):
+    os.environ.update(KNOWLEDGE_COVERAGE_ENABLED="true", ENVIRONMENT="staging")
     logging.disable(logging.CRITICAL)
     import main
+    from knowledge_audit.api import mount
+    from tests.test_knowledge_coverage_access_jobs import seed
+    if not any(getattr(route,"path",None)=="/knowledge-coverage" for route in main.app.routes):
+        mount(main.app)
     import web_auth
     # There are no real database/authentication objects in this fixture runtime.
     user = {"id": SYNTHETIC_OWNER, "username": "planner-synthetic", "full_name": "Synthetic Planner",

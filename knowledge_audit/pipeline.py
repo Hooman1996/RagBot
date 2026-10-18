@@ -438,7 +438,7 @@ class CoverageEvaluator:
         result["verification_reason"] = audit["explanation"] if coverage == "full" else "; ".join(audit.get("review_codes", []))
 
 
-ERROR_CODES = frozenset({"invalid_citation", "invalid_evidence_support", "invalid_full_claim", "invalid_aspect_identity",
+ERROR_CODES = frozenset({"coverage_disabled", "coverage_enabled_in_production", "invalid_citation", "invalid_evidence_support", "invalid_full_claim", "invalid_aspect_identity",
     "invalid_reconciliation_identity", "invalid_model_schema", "model_input_token_overflow", "incomplete_structured_output",
     "token_count_serving_mismatch", "unsupported_snapshot_entry", "reranker_capability_unavailable", "unverified_context_limit", "input_artifact_drift"}) | TRANSPORT_CODES
 

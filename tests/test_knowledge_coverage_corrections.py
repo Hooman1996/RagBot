@@ -13,6 +13,10 @@ from tests.test_knowledge_coverage_access_jobs import seed
 from tests.test_knowledge_coverage_access_jobs import audit_runtime
 from tests.test_web_auth import setup, login, csrf
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 
 def test_verified_production_full_cannot_be_overwritten_by_audit_miss():
     snap=snapshot({'1':'Synthetic duration and cutoff.','2':'Unrelated synthetic fact.'})

@@ -42,8 +42,6 @@ def selection(dataset, preparations):
 
 
 async def run(args):
-    from dotenv import load_dotenv
-    load_dotenv(ROOT/'.env',override=False)
     logging.disable(logging.CRITICAL)
     from knowledge_audit.settings import load_coverage_settings
     from knowledge_audit.store import CoverageStore
@@ -149,6 +147,15 @@ async def run(args):
 
 
 def main():
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)
+    from knowledge_audit.settings import require_coverage_enabled
+    from knowledge_audit.privacy import AuditError
+    try:
+        require_coverage_enabled()
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     p=argparse.ArgumentParser(description=__doc__)
     p.add_argument('--owner-id',type=int,default=0,help='Operator namespace 0; web ownership requires an explicitly assigned real user ID.')
     commands=p.add_subparsers(dest='command',required=True)
@@ -159,6 +166,9 @@ def main():
     args=p.parse_args()
     if args.owner_id<0: p.error('owner-id must be nonnegative')
     try: return asyncio.run(run(args))
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except Exception:
         print(json.dumps({'status':'failed','error_code':'a2_operator_failed'}),file=sys.stderr)
         return 2

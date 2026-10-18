@@ -3,6 +3,21 @@
 from __future__ import annotations
 
 import re
+import os
+from functools import lru_cache
+
+
+@lru_cache(maxsize=None)
+def _coverage_grants(grants: str | None, artifact_dir: str | None):
+    from knowledge_audit.settings import load_coverage_settings
+    environ = dict(os.environ)
+    for name, value in (("KNOWLEDGE_COVERAGE_ACCESS_GRANTS", grants),
+                        ("KNOWLEDGE_COVERAGE_ARTIFACT_DIR", artifact_dir)):
+        if value is None:
+            environ.pop(name, None)
+        else:
+            environ[name] = value
+    return load_coverage_settings(environ).access_grants
 
 PERMISSIONS = frozenset({
     "chat", "sessions", "feedback", "downloads", "documents", "ocr",
@@ -31,10 +46,14 @@ def permissions_for_user(role: str | None, user_id: int) -> frozenset[str]:
     """Explicit per-user audit grants; existing role privileges stay unchanged."""
     if role not in ROLE_PERMISSIONS:
         return frozenset()
-    from knowledge_audit.settings import grants_for
+    from knowledge_audit.settings import coverage_enabled
     from knowledge_audit.privacy import AuditError
     try:
-        audit = grants_for(user_id)
+        if not coverage_enabled():
+            return permissions_for(role)
+        grants = _coverage_grants(os.environ.get("KNOWLEDGE_COVERAGE_ACCESS_GRANTS"),
+                                  os.environ.get("KNOWLEDGE_COVERAGE_ARTIFACT_DIR"))
+        audit = frozenset(grants.get(str(user_id), []))
     except AuditError:
         audit = frozenset()
     return permissions_for(role) | audit

@@ -11,6 +11,10 @@ import kb_manager
 from tests.test_web_auth import setup, login, csrf
 from web_permissions import PERMISSIONS, ROLE_PERMISSIONS, route_permission
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 
 # Independent expected inventory: method and FastAPI route path -> grant.
 EXPECTED = {

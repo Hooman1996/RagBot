@@ -2,6 +2,7 @@
 import asyncio
 import os
 from knowledge_audit.privacy import AuditError
+from knowledge_audit.settings import require_coverage_enabled
 from knowledge_audit.recommendation_store import recommendation_versions
 from knowledge_audit.failures import category
 from knowledge_audit.operations import Budget,Limits,OperationalPause,AuditAdmission
@@ -14,6 +15,7 @@ class RecommendationJobs:
         self.store=store;self.coverage=coverage_jobs;self.runner=coverage_jobs.runner;self.factory=factory
 
     def start(self,rid,owner):
+        require_coverage_enabled()
         self.store.owned(rid,owner)
         self.coverage.tasks.start(rid,lambda:self.work(rid,owner),operation_type='knowledge_recommendation')
 

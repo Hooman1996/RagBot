@@ -25,6 +25,20 @@ from utils.read_only_audit import canonical_sha256
 from knowledge_audit.pipeline import CoverageEvaluator
 
 
+@pytest.fixture
+def coverage_staging(monkeypatch):
+    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ENABLED','true')
+    monkeypatch.setenv('ENVIRONMENT','staging')
+    from knowledge_audit.api import mount
+    if not any(getattr(route,'path',None)=='/knowledge-coverage' for route in main.app.routes):
+        mount(main.app)
+
+
+@pytest.fixture(autouse=True)
+def enabled_coverage(coverage_staging):
+    pass
+
+
 def seed(tmp_path, *, owner=1, queries=('What is the duration and cutoff?','Duplicate?','Duplicate?')):
     store=CoverageStore(tmp_path/'store',ephemeral_test_store=True)
     key=b'synthetic-only-private-key-1234567890'
@@ -148,7 +162,7 @@ def test_os_lease_blocks_double_worker_and_stale_running_recovers(tmp_path):
 
 
 @pytest.fixture
-def audit_runtime(setup,monkeypatch,tmp_path):
+def audit_runtime(setup,monkeypatch,tmp_path,coverage_staging):
     store,d,s,meta,data,redactor,prep=seed(tmp_path)
     settings=load_coverage_settings({})
     async def factory(run):
@@ -236,7 +250,7 @@ def test_configuration_validation_and_propagation(key,value):
     with pytest.raises(ValueError): load_coverage_settings({key:value})
     from scripts.validate_environment import SPECS
     from pathlib import Path
-    for name in ('env.example','Production_ENV','.env.example.generated'):
+    for name in ('env.example','Production_ENV.example','.env.example.generated'):
         text=Path(name).read_text()
         assert key+'=' in text and key in SPECS
 

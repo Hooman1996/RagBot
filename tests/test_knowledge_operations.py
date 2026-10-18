@@ -10,6 +10,10 @@ import pytest
 from tests.test_knowledge_coverage_access_jobs import seed
 from knowledge_audit.operations import Budget, Limits, OperationalPause
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 
 def budget_fixture(tmp_path,**overrides):
     store,d,snap,old,*_=seed(tmp_path)

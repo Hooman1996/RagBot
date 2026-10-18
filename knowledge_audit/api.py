@@ -21,7 +21,7 @@ from versioned_assets import versioned_asset, asset_integrity, vendor_integrity
 from web_auth import WebUser
 from web_permissions import permissions_for_user
 from knowledge_audit.schemas import StrictModel
-from knowledge_audit.settings import load_coverage_settings
+from knowledge_audit.settings import load_coverage_settings, coverage_enabled, require_coverage_enabled
 from knowledge_audit.store import CoverageStore, BytesInput
 from knowledge_audit.privacy import AuditError, Redactor, private_directory
 from knowledge_audit.inputs import ColumnMapping, TimestampPolicy, CsvInputAdapter
@@ -34,6 +34,13 @@ from utils.read_only_audit import canonical_sha256
 router = APIRouter(tags=["knowledge-coverage"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals.update(versioned_asset=versioned_asset, asset_integrity=asset_integrity, vendor_integrity=vendor_integrity)
+
+
+def mount(app, environ=None) -> bool:
+    if not coverage_enabled(environ):
+        return False
+    app.include_router(router)
+    return True
 
 
 class ImportPayload(StrictModel):
@@ -86,6 +93,7 @@ def safe_meta(meta):
 
 
 def runtime(request):
+    require_coverage_enabled()
     if hasattr(request.app.state, "coverage_runtime"):
         return request.app.state.coverage_runtime
     settings = load_coverage_settings()
@@ -382,7 +390,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
     return {"state": "queued"}
 
 
-SAFE_API_CODES = {"budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
+SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
     "invalid_pilot_selection", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",

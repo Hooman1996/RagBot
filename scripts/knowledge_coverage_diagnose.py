@@ -28,8 +28,6 @@ def synthetic_snapshot(repeats):
 
 
 async def run(args):
-    from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env", override=False)
     logging.disable(logging.CRITICAL)
     import httpx
     from knowledge_audit.settings import load_coverage_settings
@@ -177,7 +175,16 @@ def canonical_sha256_file(path):
     return hashlib.sha256(path.read_bytes()).hexdigest()
 
 
-if __name__ == "__main__":
+def main():
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)
+    from knowledge_audit.settings import require_coverage_enabled
+    from knowledge_audit.privacy import AuditError
+    try:
+        require_coverage_enabled()
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--run-id", required=True)
     p.add_argument("--confirmed-staging", action="store_true")
@@ -185,6 +192,13 @@ if __name__ == "__main__":
     args = p.parse_args()
     try:
         asyncio.run(run(args))
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except Exception:
         print('{"status":"failed","error_code":"boundary_diagnosis_failed"}', file=sys.stderr)
         raise SystemExit(2)
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())

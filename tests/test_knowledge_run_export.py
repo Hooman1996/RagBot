@@ -18,6 +18,10 @@ from tests.test_knowledge_coverage_access_jobs import seed, audit_runtime
 from tests.test_knowledge_recommendations import DraftModel, seed_gap_store
 from tests.test_web_auth import setup, login, csrf
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 
 def finish_draft(recs, meta, row_ids, *, multiple=False):
     """Prescribed question-only fixture; no model or evaluator is invoked."""

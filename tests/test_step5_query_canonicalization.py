@@ -333,7 +333,7 @@ class SharedPathAndEnvironmentTests(unittest.TestCase):
             parse_env_file(ROOT / name).values[
                 "RAG_QUERY_CANONICALIZATION_ENABLED"
             ].lower()
-            for name in ("env.example", "Production_ENV", ".env.example.generated")
+            for name in ("env.example", "Production_ENV.example", ".env.example.generated")
         ]
         self.assertEqual(values, ["true", "true", "true"])
 

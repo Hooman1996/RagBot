@@ -30,6 +30,10 @@ stage='offline frontend audit'
 python scripts/audit_offline_frontend.py
 printf 'offline frontend audit: PASS\n'
 
+stage='tracked secrets'
+python scripts/check_tracked_secrets.py
+printf 'tracked-secret check: PASS\n'
+
 stage='browser harnesses'
 if [[ -z "${BROWSER_NODE_DIR:-}" ]]; then
     printf 'browser harnesses: NOT RUN (BROWSER_NODE_DIR unset)\n'

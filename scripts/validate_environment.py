@@ -54,9 +54,13 @@ def _specs() -> dict[str, VariableSpec]:
         # Application and direct Uvicorn entry point.
         "ENVIRONMENT": VariableSpec(
             allowed=("development", "staging", "production"),
-            component="Unused metadata",
-            restart="none (not consumed)",
-            usage="apparently unused",
+            component="Coverage gate, database reset guard, structured logging",
+            restart="FastAPI",
+            usage="knowledge_audit/settings.py coverage gate; new_architecture/setup_dbs.py reset guard; utils/structured_logging.py",
+        ),
+        "KNOWLEDGE_COVERAGE_ENABLED": VariableSpec(
+            kind="bool", default="false", component="Knowledge coverage audit",
+            restart="FastAPI", usage="coverage gate: true only with ENVIRONMENT=staging",
         ),
         "API_HOST": VariableSpec(
             default="0.0.0.0", component="Uvicorn", restart="FastAPI"
@@ -851,6 +855,10 @@ def analyze_environment(
         findings.append(
             {"severity": "critical", "variable": variable, "message": message}
         )
+
+    if (effective.get("KNOWLEDGE_COVERAGE_ENABLED", "").strip().lower() == "true"
+            and effective.get("ENVIRONMENT", "").strip().lower() == "production"):
+        add_relationship_error("KNOWLEDGE_COVERAGE_ENABLED", "coverage_enabled_in_production")
 
     def as_number(name: str) -> float | None:
         value = effective.get(name)

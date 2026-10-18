@@ -27,8 +27,8 @@ class DocumentUploadService:
     def __init__(
             self,
             minio_endpoint: str = "localhost:9000",
-            minio_access_key: str = "minioadmin",
-            minio_secret_key: str = "minioadmin",
+            minio_access_key: str | None = None,
+            minio_secret_key: str | None = None,
             minio_secure: bool = False,
             minio_bucket: str = "documents",
             db_host: str = "localhost",
@@ -56,8 +56,8 @@ class DocumentUploadService:
         """
         # MinIO configuration
         self.minio_endpoint = minio_endpoint
-        self.minio_access_key = minio_access_key
-        self.minio_secret_key = minio_secret_key
+        self.minio_access_key = minio_access_key if minio_access_key is not None else os.getenv("MINIO_ACCESS_KEY")
+        self.minio_secret_key = minio_secret_key if minio_secret_key is not None else os.getenv("MINIO_SECRET_KEY")
         self.minio_secure = minio_secure
         self.minio_bucket = minio_bucket
 

@@ -37,8 +37,6 @@ def parser():
 
 async def run(args):
     # Established explicit-root loader precedes configuration/service imports.
-    from dotenv import load_dotenv
-    load_dotenv(ROOT / ".env", override=False)
     # Diagnostic process only: suppress SDK/library content/error logging.
     logging.disable(logging.CRITICAL)
     from knowledge_audit.inputs import CsvInputAdapter, ColumnMapping, TimestampPolicy
@@ -113,9 +111,21 @@ async def run(args):
 
 
 def main(argv=None):
+    from dotenv import load_dotenv
+    load_dotenv(ROOT / ".env", override=False)
+    from knowledge_audit.settings import require_coverage_enabled
+    from knowledge_audit.privacy import AuditError
+    try:
+        require_coverage_enabled()
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     args = parser().parse_args(argv)
     try:
         return asyncio.run(run(args))
+    except AuditError as error:
+        print(str(error), file=sys.stderr)
+        return 2
     except Exception:
         # No exception strings, raw SDK bodies, paths or tracebacks.
         print(json.dumps({"status": "failed", "error_code": "a1_diagnostic_failed"}), file=sys.stderr)

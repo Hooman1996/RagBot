@@ -12,6 +12,20 @@ CAPABILITIES = frozenset({"coverage_run_start", "coverage_results_view",
                           "coverage_recommendation_review"})
 
 
+def coverage_enabled(environ=None) -> bool:
+    env = os.environ if environ is None else environ
+    enabled = env.get("KNOWLEDGE_COVERAGE_ENABLED", "").strip().lower() == "true"
+    environment = env.get("ENVIRONMENT", "").strip().lower()
+    if enabled and environment == "production":
+        raise AuditError("coverage_enabled_in_production")
+    return enabled and environment == "staging"
+
+
+def require_coverage_enabled(environ=None) -> None:
+    if not coverage_enabled(environ):
+        raise AuditError("coverage_disabled")
+
+
 @dataclass(frozen=True)
 class CoverageSettings:
     artifact_dir: Path
