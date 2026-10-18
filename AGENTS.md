@@ -125,7 +125,7 @@ No Dockerfile, Compose file, or other repository-owned Docker definition was fou
 - `python3 test_qdrant.py` runs the standalone, read-only Qdrant connectivity and collection inspection script. It contains a placeholder API key and requires access to its configured Qdrant endpoint.
 - `cd qdrant-web-ui-master && npm test` runs the bundled Qdrant UI Vitest script.
 - `cd static_qdrant && npm test` runs the second bundled Qdrant UI Vitest script.
-- No repository-defined backend automated test-suite command was found; it is unknown.
+- `scripts/run_offline_tests.sh` runs the offline pytest suite, the Node frontend tests, the offline frontend audit and, when `BROWSER_NODE_DIR` is set, all browser harnesses. Set `REQUIRE_BROWSER=1` to fail when browsers are unavailable.
 - No retrieval-test or answer-quality-test command was found; both commands are unknown. This does not relax the requirement to run those tests before changing model behavior.
 - `benchmarks/` and `docs/performance/` exist, but no benchmark runner or benchmark command was found. The benchmark command is unknown.
 

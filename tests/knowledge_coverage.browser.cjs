@@ -36,20 +36,27 @@ async function run() {
         assert.equal(await page.locator('#coverageSessionColumn').inputValue(),'session_id');
         await page.locator('#coverageUpload').click();
         await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('input[type=checkbox]').length===6);
+        await page.waitForFunction(()=>document.getElementById('coverageStatus').textContent.startsWith('Input ready.'));
         assert.match(await page.locator('#coverageDatasetSummary').textContent(),/6 selected queries/);
         assert.match(await page.locator('#coverageDatasetSummary').textContent(),/Invalid input: 1/);
         await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
         for (let i=0;i<3;i++) await page.locator('#coverageRows input[type=checkbox]').nth(i).check();
-        assert.equal(await page.locator('#coverageSelectionCount').textContent(),'3 of 5 selected');
+        assert.equal(await page.locator('#coverageSelectionCount').textContent(),'3 selected / 6 imported queries');
         checks.push('csv_bom_persian_multiline_mapping_and_invalid_row_preservation');
         await page.locator('#coverageStart').click();
         await page.locator('#coverageCancel').waitFor({state:'visible'});
         await page.locator('#coverageCancel').click();
         await page.locator('#coverageResume').waitFor({state:'visible'});
         assert.match(await page.locator('#coverageProgressText').textContent(),/cancelled/i);
+        const unknownCompletion = !((await page.locator('#coverageRecoveryText').textContent()).startsWith('0 request'));
         await page.locator('#coverageResume').click();
-        await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.startsWith('completed'),{},{timeout:30000});
-        assert.match(await page.locator('#coverageRuns option:checked').textContent(),/completed/);
+        if (unknownCompletion) {
+            await page.waitForFunction(()=>document.getElementById('coverageError').textContent.includes('unknown_remote_completion_requires_choice'));
+            await page.locator('#coverageRecoveryChoice').selectOption('retry_unknown');
+            await page.locator('#coverageResume').click();
+        }
+        await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.toLowerCase().startsWith('completed'),{},{timeout:30000});
+        assert.match(await page.locator('#coverageRuns option:checked').textContent(),/completed/i);
         checks.push('background_progress_cancellation_and_pinned_retry');
         await page.locator('#coverageFilter').selectOption('covered_reachable');
         await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('button').length===1);
@@ -57,11 +64,13 @@ async function run() {
         const reviewId = await review.getAttribute('id');
         await review.focus(); await page.keyboard.press('Enter');
         await page.waitForFunction(()=>document.getElementById('coverageEvidenceContent').textContent.includes('Supported · verified'));
-        const citation = page.locator('#coverageEvidenceContent a').first();
+        const citation = page.locator('#coverage-detail-aspects a[href^="#coverage-source-"]').first();
         await citation.click(); assert.match(new URL(page.url()).hash,/coverage-source-/);
         await page.locator('#coverageEvidence').focus(); await page.keyboard.press('Escape');
         assert.equal(await page.evaluate(()=>document.activeElement.id),reviewId);
-        await review.click(); await page.waitForSelector('#coverageEvidenceContent .coverage-citation');
+        await review.click();
+        await page.locator('#coverageEvidenceContent a[href="#coverage-detail-sources"]').click();
+        await page.waitForSelector('#coverageEvidenceContent .coverage-citation');
         await page.screenshot({path:path.join(output,'desktop-dark.png')});
         await page.locator('#coverageTheme').click();
         assert.equal(await page.locator('body').evaluate(n=>n.classList.contains('light-mode')),true);
@@ -77,6 +86,7 @@ async function run() {
         await page.waitForFunction(()=>document.getElementById('coverageEvidenceContent').textContent.includes('invalid_citation'));
         await page.screenshot({path:path.join(output,'error-detail-light.png')});
         checks.push('filters_missing_aspects_and_explicit_error_stopping_reason');
+        await page.locator('.coverage-legacy-download summary').click();
         await page.locator('#coveragePrepareExport').click();
         await page.locator('#coverageExport').waitFor({state:'visible'});
         const csvUrl = await page.locator('#coverageExport').getAttribute('href');

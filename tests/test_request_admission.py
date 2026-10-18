@@ -1,6 +1,7 @@
 import asyncio
 import time
 import unittest
+from pathlib import Path
 
 from utils.concurrency import AdmissionLimiter
 from utils.service_errors import ServiceOverloadedError, ServiceTimeoutError
@@ -218,8 +219,8 @@ class AdmissionLimiterLifecycleTests(unittest.IsolatedAsyncioTestCase):
 
     def test_fairness_is_documented_without_being_promised(self):
         architecture = (
-            "/root/projects/faq/docs/architecture/"
-            "REQUEST_ADMISSION_AND_BACKPRESSURE.md"
+            Path(__file__).resolve().parents[1] / "docs" / "architecture"
+            / "REQUEST_ADMISSION_AND_BACKPRESSURE.md"
         )
         with open(architecture, encoding="utf-8") as stream:
             text = stream.read()

@@ -24,7 +24,7 @@ async function run(){
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]').length===25);
   await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
   await page.waitForFunction(()=>!document.getElementById('coverageDatasetSummary').textContent.includes('Preparing input'));
-  step='full_selection';await page.locator('#coverageMode').selectOption('full_input');await page.locator('#coverageBudgetAck').check();
+  step='full_selection';await page.locator('#coverageMode').selectOption('full_input');await page.getByText('Finite execution limits',{exact:true}).click();await page.locator('#coverageBudgetAck').check();
   await page.waitForFunction(()=>document.getElementById('coverageStartSummary').textContent.includes('918 / 918'));
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]:disabled:checked').length===25);
   await page.locator('#coverageStart').focus();assert.equal(await page.locator('#coverageStart').evaluate(e=>document.activeElement===e),true);
@@ -51,7 +51,7 @@ async function run(){
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]').length===25 && document.querySelectorAll('#coverageRows input[type=checkbox]:disabled').length===0 && document.querySelectorAll('#coverageRows input[type=checkbox]:checked').length===0);
   for(let i=1;i<=9;i++)await page.locator('#coverageRows input[type=checkbox]').nth(i).check();
   step='subset_selection_count';assert.match(await page.locator('#coverageStartSummary').textContent(),/9 \/ 918/);
-  await page.locator('#coverageStart').click();await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.startsWith('completed'),{},{timeout:30000});
+  await page.locator('#coverageStart').click();await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.toLowerCase().startsWith('completed'),{},{timeout:30000});
   step='subset_finished_counts';assert.match(await page.locator('#coverageProgressText').textContent(),/9 of 9 selected questions/);assert.match(await page.locator('#coverageProgressText').textContent(),/with errors/);
   const second=await page.locator('#coverageRuns').inputValue();assert.notEqual(first,second);
   await page.locator('#coverageRows button').nth(1).click();await page.locator('.coverage-selected-query').waitFor();
@@ -63,6 +63,6 @@ async function run(){
   assert.equal(errors,0);
   const summary={browser_version:browser.version(),source_rows:918,subset_rows:9,live_model_dispatches:0,checks,screenshots};
   fs.writeFileSync(path.join(output,'checks.json'),JSON.stringify(summary,null,2),{mode:0o600});for(const name of fs.readdirSync(output))fs.chmodSync(path.join(output,name),0o600);process.stdout.write(JSON.stringify(summary)+'\n');
- }catch(error){await shot('synthetic-failure.png');fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({step,error:await page.locator('#coverageError').textContent(),progress:await page.locator('#coverageProgressText').textContent(),recovery:await page.locator('#coverageRecoveryText').textContent(),selection:await page.locator('#coverageStartSummary').textContent(),checked:await page.locator('#coverageRows input[type=checkbox]:checked').count(),mode:await page.locator('#coverageMode').inputValue()}),{mode:0o600});throw error;}finally{await browser.close();}
+ }catch(error){await shot('failed-synthetic-check.png');fs.writeFileSync(path.join(output,'failure.json'),JSON.stringify({step,error:await page.locator('#coverageError').textContent(),progress:await page.locator('#coverageProgressText').textContent(),recovery:await page.locator('#coverageRecoveryText').textContent(),selection:await page.locator('#coverageStartSummary').textContent(),checked:await page.locator('#coverageRows input[type=checkbox]:checked').count(),mode:await page.locator('#coverageMode').inputValue()}),{mode:0o600});throw error;}finally{await browser.close();}
 }
 run().catch(error=>{process.stderr.write(JSON.stringify({status:'synthetic_browser_check_failed',step,category:error.name})+'\n');process.exitCode=1;});

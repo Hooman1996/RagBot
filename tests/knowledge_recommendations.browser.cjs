@@ -18,12 +18,15 @@ async function run(){
   await page.locator('#coverageFile').setInputFiles({name:'synthetic-a4.csv',mimeType:'text/csv',buffer:Buffer.from(csv)});
   await page.waitForFunction(()=>document.getElementById('coverageQueryColumn').value==='query');await page.locator('#coverageUpload').click();
   await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('input[type=checkbox]').length===4);
+  await page.waitForFunction(()=>document.getElementById('coverageStatus').textContent.startsWith('Input ready.'));
   await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
   await page.locator('#coverageRows input[type=checkbox]').nth(0).check();await page.locator('#coverageRows input[type=checkbox]').nth(1).check();await page.locator('#coverageStart').click();
   await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.startsWith('completed'),{},{timeout:30000});
   checks.push('synthetic_authenticated_upload_mapping_pilot_duplicate_and_error_preservation');
+  await page.locator('#coverageFreezeSource').click();
+  await page.waitForFunction(()=>!!document.getElementById('coverageExportSource').value);
   await page.locator('#coverageFilter').selectOption('possible_partial_gap');await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('button').length===1);
-  await page.locator('#coverageRows button').click();await page.getByRole('button',{name:'Draft questions for review',exact:true}).waitFor();
+  await page.locator('#coverageRows button').click();await page.locator('a[href="#coverage-detail-proposals"]').click();await page.getByRole('button',{name:'Draft questions for review',exact:true}).waitFor();
   await page.getByRole('button',{name:'Draft questions for review',exact:true}).click();await page.getByRole('button',{name:'Cancel question drafting',exact:true}).waitFor();await page.getByRole('button',{name:'Cancel question drafting',exact:true}).click();
   await page.getByRole('button',{name:'Create new draft revision',exact:true}).waitFor();assert.match(await page.locator('.coverage-recommendations').textContent(),/interrupted/);
   await page.getByRole('button',{name:'Create new draft revision',exact:true}).click();await page.locator('.recommendation-card').waitFor();
@@ -34,7 +37,7 @@ async function run(){
   await page.waitForFunction(()=>document.querySelector('.recommendation-review-state')?.textContent.includes('approved'));
   assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('coverage-recommendations')),true);
   checks.push('readonly_faq_metadata_link_explicit_question_only_approval_keyboard_focus');
-  await page.getByRole('button',{name:'Prepare CSV with pinned recommendations',exact:true}).click();
+  await page.getByRole('button',{name:'Prepare CSV for this draft revision only',exact:true}).click();
   await page.locator('.recommendation-downloads a').first().waitFor();const csvLink=await page.locator('.recommendation-downloads a').first().getAttribute('href');const manifestLink=await page.locator('.recommendation-downloads a').nth(1).getAttribute('href');
   const downloadPromise=page.waitForEvent('download');await page.locator('.recommendation-downloads a').first().click();const download=await downloadPromise;const csvPath=path.join(output,'synthetic-a4-export.csv');await download.saveAs(csvPath);fs.chmodSync(csvPath,0o600);
   const manifest=await (await context.request.get(origin+manifestLink)).json(),body=fs.readFileSync(csvPath);
@@ -50,13 +53,13 @@ async function run(){
   await page.setViewportSize({width:390,height:844});await page.locator('.coverage-recommendations').scrollIntoViewIfNeeded();await page.screenshot({path:path.join(output,'a4-rtl-mobile.png')});
   assert.ok(await page.evaluate(()=>document.documentElement.scrollWidth<=window.innerWidth+1));const focus=page.getByRole('button',{name:'Approve question proposal',exact:true});await focus.focus();assert.ok(Number(await focus.evaluate(el=>parseFloat(getComputedStyle(el).outlineWidth)))>=3);
   checks.push('actual_dark_light_persian_rtl_mobile_overflow_and_visible_keyboard_focus');
-  await page.locator('#coverageCloseEvidence').click();await page.locator('#coverageFilter').selectOption('covered_reachable');await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('button').length===1);await page.locator('#coverageRows button').click();
+  await page.locator('#coverageCloseEvidence').click();await page.locator('#coverageFilter').selectOption('covered_reachable');await page.waitForFunction(()=>document.getElementById('coverageRows').querySelectorAll('button').length===1);await page.locator('#coverageRows button').click();await page.locator('a[href="#coverage-detail-proposals"]').click();
   await page.waitForFunction(()=>document.querySelector('.coverage-recommendations')?.textContent.includes('already covers'));
   assert.equal(await page.getByRole('button',{name:'Draft questions for review',exact:true}).count(),0);
   assert.equal(errors,0);assert.ok(!requests.some(p=>/chunks\/(create|update|delete|revert)/.test(p)));
   checks.push('covered_result_blocks_gap_draft_no_page_errors_or_kb_write_requests');
   for(const name of fs.readdirSync(output))fs.chmodSync(path.join(output,name),0o600);
   const summary={browser_version:browser.version(),checks,source_records:4,independent_human_labels:'none_synthetic_ui_decisions_only',screenshots:['a4-dark-desktop.png','a4-light-desktop.png','a4-rtl-mobile.png']};fs.writeFileSync(path.join(output,'checks.json'),JSON.stringify(summary,null,2),{mode:0o600});process.stdout.write(JSON.stringify(summary)+'\n');
- }finally{await browser.close();}
+ }catch(error){await page.screenshot({path:path.join(output,'failed-synthetic-check.png')});process.stderr.write(JSON.stringify({completed_checks:checks,error_type:error.name})+'\n');throw error;}finally{await browser.close();}
 }
 run().catch(error=>{process.stderr.write('Synthetic A4 browser acceptance failed: '+error.name+'\n');process.exitCode=1;});

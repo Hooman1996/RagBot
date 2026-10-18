@@ -186,3 +186,72 @@ Exit: 0
 ```
 
 The production validator's six critical findings concern existing configuration; neither mode reported findings for any of the three new keys. No unrelated configuration was changed. The audit test command initially stalled after four tests inside the sandbox; the identical command passed outside the sandbox with the offline guard still enabled. The stalled duplicate was then terminated (exit 143); that incomplete run is not reported as passing.
+
+
+## [02] Full offline suite runs to completion behind one command
+
+### Hang diagnosis
+
+The step 00 stall was caused by the sandbox environment, not a backend deadlock. The required diagnostic command was run outside the sandbox in conda `faq` with the offline guard:
+
+```text
+timeout 900 python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q -o faulthandler_timeout=60 -x
+990 passed, 26 deselected, 58 warnings, 291 subtests passed in 245.04s (0:04:05)
+Exit: 0
+```
+
+The originally suspected tests, `tests/test_background_logging.py::BackgroundLoggingTests::test_concurrent_jobs_and_thread_offloads_keep_distinct_parents` and `tests/test_background_logging.py::BackgroundLoggingTests::test_bounded_blocking_runner_copies_request_and_operation_context`, both passed unchanged. No hang fix or skip was needed.
+
+The diagnostic did print a 60-second stack for the slow but completing `tests/test_knowledge_execution_recovery.py::test_full_918_selection_idempotency_chronology_export_and_mock_run`. Its top frames were `json.encoder.iterencode`, `json.encoder.encode`, `json.dumps`, `utils/read_only_audit.py:canonical_json`, `knowledge_audit/privacy.py:private_json`, `knowledge_audit/store.py:write`, and `knowledge_audit/execution.py:save_row`. This was active progress-index serialization during the 918-row fixture, not the original thread-offloading stall. No test data is included here.
+
+### Changes
+
+- `pytest.ini`: add a 120-second faulthandler timeout only.
+- `tests/test_request_admission.py`: resolve the architecture document relative to the checkout.
+- `tests/test_p2_concurrency.py`: use the requested overlap bound of 2–20 and elapsed bound of 0.5 seconds; preserve result and heartbeat assertions.
+- `requirements.runtime.candidate.txt`: add `lxml==6.0.2`; this exact version was already installed in `faq`, so no installation was needed.
+- `scripts/run_offline_tests.sh`: executable root-relative entry point, ordered fail-fast stages, offline-guarded pytest, all three Node suites, frontend audit, optional/required browsers, loopback free ports, bounded readiness checks, artifact paths, per-stage summaries, and fixture cleanup traps.
+- `tests/knowledge_coverage.browser.cjs`: wait for input preparation before checking invalid-row counts, use the current imported-row denominator, follow explicit unknown-completion recovery when necessary, select actual aspect citation links rather than the new detail-navigation links, open collapsed source evidence and legacy downloads.
+- `tests/knowledge_execution.browser.cjs`: open finite execution limits before checking the acknowledgement; use the common failure screenshot name `failed-synthetic-check.png`.
+- `tests/knowledge_recommendations.browser.cjs`: wait for input preparation, freeze the explicitly selected coverage source, open the proposals disclosure, use the renamed draft-specific CSV control, and capture failure screenshots/check progress. All six original checks remain.
+- `AGENTS.md`: document the single offline command.
+- `docs/knowledge-gap-audit/READINESS_FIX_LOG.md`: record this step.
+
+Both original browser failures were reproduced outside the sandbox. Their failure screenshots were opened and compared with the existing template and JavaScript. The execution baseline wrote `synthetic-failure.png`; the harness now uses the requested `failed-synthetic-check.png`. Subsequent coverage screenshots also exposed the explicit recovery requirement and the new detail navigation/source disclosures. The first single-command run also exposed an outdated recommendation flow: proposals are collapsed, a frozen source must be selected explicitly, and the draft-specific CSV button has a new label. Its failure screenshot was opened and compared with the existing page code; the repaired harness and the unchanged run-export harness both passed individually. All original harness checks were retained; none were removed. No fixture or product code changes were necessary, and no real UI bug was found. `.env` was not changed or committed in this step. No production service was contacted.
+
+### Verification
+
+All test commands ran outside the sandbox. Pytest retained `-p tests.offline_guard`. The 26 integration/artifact exclusions are the requested existing marker selection; no test was newly skipped or deleted.
+
+```text
+timeout 900 python -m pytest -p tests.offline_guard -q tests/test_request_admission.py tests/test_p2_concurrency.py tests/test_offline_frontend.py
+38 passed in 12.72s
+Exit: 0
+```
+
+The first single-command attempt exited 1 at `browser knowledge_recommendations.browser.cjs: FAIL` (TimeoutError). Its pytest result was `990 passed, 26 deselected, 58 warnings, 291 subtests passed in 243.09s (0:04:03)`; Node tests, frontend audit, coverage, execution and operations passed before the fail-fast stop. Run export was not reached in that attempt. This incomplete attempt is not reported as a passing single-command run.
+
+Final single-command verification, with the existing Playwright/Chromium installation required:
+
+```text
+BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 scripts/run_offline_tests.sh
+990 passed, 26 deselected, 58 warnings, 291 subtests passed in 243.31s (0:04:03)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+Exit: 0
+```
+
+The Node stage ran all three requested suites (5 coverage, 6 KB-manager and 5 analytics tests). The frontend audit reported `External runtime dependencies: 0`. All five browser harnesses passed with Chromium 153.0.8010.0, synthetic accounts/data and mocked inference. Coverage retained seven checks, execution three, operations five, recommendations six and run export seven. No harness check was removed. The script cleaned up each fixture app.
+
+```text
+git diff --check
+(no output)
+Exit: 0
+```
