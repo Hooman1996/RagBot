@@ -421,6 +421,10 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="300", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
             usage="knowledge_audit/pipeline.py CoverageEvaluator entry budget ceiling; knowledge_audit/api.py run entry_budget default",
         ),
+        "KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS": VariableSpec(
+            default="", component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/privacy.py Redactor.kb_text public-contact allow-list for KB snapshots",
+        ),
         "VLLM_HTTP_MAX_CONNECTIONS": VariableSpec(
             kind="int", default="32", minimum=1, component="vLLM client", restart="FastAPI"
         ),

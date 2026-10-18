@@ -247,7 +247,7 @@ async def snapshots(request: Request, user: WebUser):
 @router.post("/api/knowledge-coverage/snapshots", status_code=201)
 async def snapshot_capture(request: Request, user: WebUser):
     require(user, "coverage_run_start", "kb_read")
-    _, store, _ = runtime(request)
+    settings, store, _ = runtime(request)
     from knowledge_audit.runtime import confirm_staging
     from knowledge_audit.snapshot import capture_snapshot, read_postgres_snapshot
     from scripts.kb_signature import create_signature
@@ -255,7 +255,8 @@ async def snapshot_capture(request: Request, user: WebUser):
     confirm_staging(confirmed=True, snapshot=True)
     path = await safe_call(private_directory, store.root / "archive" / ("capture_" + secrets.token_hex(16)))
     await safe_call(capture_snapshot, path, Redactor(secrets.token_bytes(32)), signature_provider=create_signature,
-        content_provider=lambda: read_postgres_snapshot(DatabaseManager().get_connection))
+        content_provider=lambda: read_postgres_snapshot(DatabaseManager().get_connection),
+        public_contacts=settings.public_contacts)
     meta = await safe_call(store.register_snapshot, path / "kb-snapshot.json", path / "kb-snapshot-manifest.json", user.id)
     return {k: meta[k] for k in ("snapshot_id", "record_count", "documents", "created_at")}
 
@@ -403,7 +404,8 @@ SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
     "invalid_pilot_selection", "invalid_entry_budget", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
-    "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run"}
+    "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run",
+    "snapshot_policy_superseded"}
 
 # A4 responsibilities and revisions remain separate from coverage run versions.
 from knowledge_audit.recommendation_api import router as recommendation_router

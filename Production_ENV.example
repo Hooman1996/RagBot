@@ -196,3 +196,5 @@ KNOWLEDGE_COVERAGE_BROADER_DEPTH=300
 KNOWLEDGE_COVERAGE_INITIAL_ENTRIES=50
 # Maximum distinct entries per question and default run entry budget; changing it changes audit results; integer 1–1000.
 KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET=300
+# Official public support emails, @domains and phone numbers kept in KB snapshots; anything else that looks personal is scrubbed.
+KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS=

@@ -69,8 +69,10 @@ async def run(args):
         from scripts.kb_signature import create_signature
         from knowledge_audit.snapshot import read_postgres_snapshot
         from new_architecture.app.services.history.database import DatabaseManager
+        from knowledge_audit.settings import load_coverage_settings
         manifest = capture_snapshot(directory, redactor, signature_provider=create_signature,
-            content_provider=lambda: read_postgres_snapshot(DatabaseManager().get_connection))
+            content_provider=lambda: read_postgres_snapshot(DatabaseManager().get_connection),
+            public_contacts=load_coverage_settings().public_contacts)
         snapshot_id = manifest["snapshot_id"]
     elif args.snapshot:
         snapshot_id = load_snapshot(args.snapshot)["snapshot_id"]

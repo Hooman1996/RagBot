@@ -28,8 +28,10 @@ def creation_lock(store, owner):
 
 def create_run(store, owner, did, sid, selected_ids, settings, versions, *, execution_mode, idempotency_key):
     from knowledge_audit.store import now
+    from knowledge_audit.snapshot import SNAPSHOT_VERSION
     data, _ = store.dataset(did, owner)
-    store.snapshot(sid, owner)
+    if store.snapshot(sid, owner).get("schema_version") != SNAPSHOT_VERSION:
+        raise AuditError("snapshot_policy_superseded")
     rows = store.preparations(did, owner)
     available = [e.source_row_id for e in data.selected]
     maximum = settings.get("max_run_rows", 10000)

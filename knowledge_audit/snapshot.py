@@ -14,6 +14,12 @@ from utils.faq_content import parse_faq_content
 from utils.read_only_audit import canonical_sha256, text_sha256
 
 
+# Version 1 snapshots ran KB text through the customer-query redactor. They stay
+# readable and exportable but cannot start new runs.
+SNAPSHOT_VERSION = "a1-kb-snapshot-2"
+READABLE_SNAPSHOT_VERSIONS = frozenset({"a1-kb-snapshot-1", SNAPSHOT_VERSION})
+
+
 def assert_compatible(reference: dict, current: dict) -> None:
     from scripts.kb_signature import compare_signatures
     if not compare_signatures(reference, current)["status"]["FULL_MATCH"]:
@@ -61,7 +67,7 @@ def _source_records(rows: list[dict]) -> list[dict]:
 
 
 def capture_snapshot(directory: Path, redactor: Redactor, *, signature_provider,
-                     content_provider) -> dict:
+                     content_provider, public_contacts=()) -> dict:
     before = signature_provider("a1-snapshot-before")
     if before["cross_store"].get("consistent") is not True:
         raise AuditError("snapshot_cross_store_inconsistent")
@@ -76,12 +82,13 @@ def capture_snapshot(directory: Path, redactor: Redactor, *, signature_provider,
         raise AuditError("snapshot_capture_mismatch")
     chunks = []
     for row in raw_rows:
-        content = redactor.text(row["content"])
+        # KB content policy, not the customer-query policy: public bank facts stay.
+        content = redactor.kb_text(row["content"], public_contacts)
         parts = parse_faq_content(content)
         chunk_id = str(row["chunk_id"])
         chunks.append({"chunk_id": chunk_id, "faq_entry_id": chunk_id if parts.is_qa else None,
             "document_id": str(row["document_id"]), "chunk_index": row["chunk_index"],
-            "document_title": redactor.text(row["document_title"]),
+            "document_title": redactor.kb_text(row["document_title"], public_contacts),
             "content": content, "question": parts.question, "answer": parts.answer,
             "main_category": parts.main_category, "sub_category": parts.sub_category,
             "taxonomy_status": "ambiguous" if parts.taxonomy_error else "parsed" if parts.is_qa else "not_faq",
@@ -90,9 +97,11 @@ def capture_snapshot(directory: Path, redactor: Redactor, *, signature_provider,
             "document_revision": capture["document_revisions"].get(str(row["document_id"]), 0),
             "latest_stored_version_id": capture["latest_stored_version_ids"].get(chunk_id)})
     chunks.sort(key=lambda c: c["chunk_id"])
-    snapshot = {"schema_version": "a1-kb-snapshot-1", "records": chunks,
+    snapshot = {"schema_version": SNAPSHOT_VERSION, "records": chunks,
                 "source_signature": before, "bracketing_signature": after,
                 "document_revisions": capture["document_revisions"], "redaction_version": redactor.version,
+                "kb_redaction_policy": {"version": redactor.kb_version,
+                                        "public_contacts_sha256": canonical_sha256(sorted(public_contacts))},
                 "consistency": "repeatable_read_verified_against_bracketing_signatures",
                 "retrieval_frozen": False, "faq_identity_policy": "one_recognized_faq_chunk; no inferred grouping",
                 "capture_code_sha256": {str(path.relative_to(Path(__file__).resolve().parents[1])):
@@ -101,7 +110,7 @@ def capture_snapshot(directory: Path, redactor: Redactor, *, signature_provider,
                      Path(__file__).resolve().parents[1] / "scripts/kb_signature.py")}}
     snapshot["snapshot_id"] = canonical_sha256(snapshot)
     private_json(directory / "kb-snapshot.json", snapshot)
-    manifest = {"schema_version": "a1-kb-manifest-1", "snapshot_id": snapshot["snapshot_id"],
+    manifest = {"schema_version": "a1-kb-manifest-2", "snapshot_id": snapshot["snapshot_id"],
                 "content_file": "kb-snapshot.json", "content_file_sha256": hashlib.sha256(
                     (directory / "kb-snapshot.json").read_bytes()).hexdigest(),
                 "record_count": len(chunks), "redacted_record_count": sum(c["redaction_changed"] for c in chunks),
@@ -118,7 +127,7 @@ def load_snapshot(path: Path) -> dict:
     try:
         snapshot = json.loads(path.read_text(encoding="utf-8"))
         identity = snapshot.pop("snapshot_id")
-        if snapshot.get("schema_version") != "a1-kb-snapshot-1" or canonical_sha256(snapshot) != identity:
+        if snapshot.get("schema_version") not in READABLE_SNAPSHOT_VERSIONS or canonical_sha256(snapshot) != identity:
             raise AuditError("snapshot_identity_mismatch")
         if any(text_sha256(row["content"]) != row["content_sha256"] for row in snapshot["records"]):
             raise AuditError("snapshot_content_mismatch")

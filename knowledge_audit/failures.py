@@ -15,6 +15,8 @@ TRANSPORT_CODES = frozenset({"admission_timeout", "outer_operation_deadline", "m
 VALIDATION_CODES = frozenset({"invalid_model_schema", "invalid_citation", "invalid_evidence_support",
     "invalid_full_claim", "invalid_aspect_identity", "invalid_reconciliation_identity", "invalid_conflict_identity",
     "incomplete_structured_output", "model_input_token_overflow", "token_count_serving_mismatch"})
+# Refusals before a run exists; never a row failure category.
+RUN_ADMISSION_CODES = frozenset({"snapshot_policy_superseded"})
 
 
 def causes(error):

@@ -11,7 +11,9 @@
         full: 'Verified full', partial: 'Partial support', unsupported: 'Unsupported in evaluated scope',
         uncertain: 'Uncertain', not_evaluated: 'Not evaluated', unavailable: 'No preceding history', user_only: 'User-only history',
         conflict_contradicts_proof: 'Evidence contradicts the proof', conflict_undetermined: 'A conflict could not be assessed',
-        conflict_limit_exceeded: 'Too many conflicts to verify'
+        conflict_limit_exceeded: 'Too many conflicts to verify',
+        kb_redaction_affected: 'Evidence contained scrubbed personal data or secrets',
+        snapshot_policy_superseded: 'Snapshot captured under an older privacy policy. Capture a new snapshot.'
     };
     function label(value) { return LABELS[value] || String(value || 'Not evaluated').replaceAll('_', ' '); }
     function headersFromCsv(text, delimiter) {
@@ -52,7 +54,7 @@
         async function api(path, options) {
             const response = await global.fetch('/api/knowledge-coverage/' + path, options);
             const body = await response.json();
-            if (!response.ok) throw new Error(typeof body.detail === 'string' ? body.detail : 'Check the import mapping and selected settings.');
+            if (!response.ok) throw new Error(typeof body.detail === 'string' ? LABELS[body.detail] || body.detail : 'Check the import mapping and selected settings.');
             return body;
         }
         function options(select, values, selectedValue, empty) {

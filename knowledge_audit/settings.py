@@ -4,7 +4,7 @@ import json
 import os
 from pathlib import Path
 
-from knowledge_audit.privacy import AuditError
+from knowledge_audit.privacy import AuditError, normalize_public_contact
 from knowledge_audit.operations import Limits
 
 CAPABILITIES = frozenset({"coverage_run_start", "coverage_results_view",
@@ -42,6 +42,7 @@ class CoverageSettings:
     broader_depth: int = 300
     initial_entries: int = 50
     max_entry_budget: int = 300
+    public_contacts: tuple[str, ...] = ()
 
     def __post_init__(self):
         if not isinstance(self.operational_limits,Limits):raise AuditError("invalid_operational_limits")
@@ -59,6 +60,8 @@ class CoverageSettings:
             raise AuditError("invalid_coverage_integer")
         if not 1 <= self.initial_entries <= self.initial_depth < self.broader_depth or not 1 <= self.max_entry_budget:
             raise AuditError("invalid_coverage_depths")
+        if type(self.public_contacts) is not tuple or any(type(c) is not str for c in self.public_contacts):
+            raise AuditError("invalid_coverage_public_contacts")
 
     def manifest(self):
         from utils.read_only_audit import canonical_sha256
@@ -104,6 +107,11 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         if not low <= value <= high:
             raise AuditError("invalid_coverage_integer")
         return value
+    raw_contacts = env.get("KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS", "")
+    if not isinstance(raw_contacts, str):
+        raise AuditError("invalid_coverage_public_contacts")
+    contacts = tuple(dict.fromkeys(normalize_public_contact(entry)
+                                   for entry in raw_contacts.split(","))) if raw_contacts.strip() else ()
     return CoverageSettings(path, grants,
         integer("KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", 5242880, 1024, 20971520),
         integer("KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS", 1200, 256, 4096),
@@ -121,7 +129,8 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         integer("KNOWLEDGE_COVERAGE_INITIAL_DEPTH",150,1,1000),
         integer("KNOWLEDGE_COVERAGE_BROADER_DEPTH",300,2,1000),
         integer("KNOWLEDGE_COVERAGE_INITIAL_ENTRIES",50,1,1000),
-        integer("KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET",300,1,1000))
+        integer("KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET",300,1,1000),
+        contacts)
 
 
 def grants_for(user_id: int) -> frozenset[str]:

@@ -48,7 +48,8 @@ def seed(tmp_path, *, owner=1, queries=('What is the duration and cutoff?','Dupl
     d=store.save_dataset(data,redactor,key,owner,rows)
     snap=snapshot({'1':'Duration two days, cutoff 18:00.'})
     # Fixture snapshot uses the complete versioned A1 identity envelope.
-    snap.update(schema_version='a1-kb-snapshot-1',source_signature={},retrieval_frozen=False)
+    snap.update(schema_version='a1-kb-snapshot-2',source_signature={},retrieval_frozen=False,
+                kb_redaction_policy={'version':Redactor.kb_version,'public_contacts_sha256':canonical_sha256([])})
     snap.pop('snapshot_id'); snap['snapshot_id']=canonical_sha256(snap)
     capture=tmp_path/'capture'; capture.mkdir(mode=0o700)
     private_json(capture/'kb-snapshot.json',snap)

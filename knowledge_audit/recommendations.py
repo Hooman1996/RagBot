@@ -53,6 +53,7 @@ def eligibility(row,meta,observations=()):
     if outcome=='possible_gap' and row.get('coverage_status')!='unsupported' or outcome=='possible_partial_gap' and row.get('coverage_status')!='partial':reasons.append('coverage_dimensions_inconsistent')
     if row.get('error_code') or row.get('review_codes') or any(row.get('review_codes_by_phase',{}).values()):reasons.append('unresolved_evaluation_issue')
     if row.get('verification_result') in {'rejected','uncertain'}:reasons.append('verification_unresolved')
+    if any('kb_redaction_affected' in (codes or []) for codes in (row.get('review_codes'),row.get('residual_review_codes'),*row.get('review_codes_by_phase',{}).values())):reasons.append('kb_redaction_unresolved')
     for name in ('audit_assessment','production_assessment'):
         if row.get(name,{}).get('conflicts') or row.get(name,{}).get('review_codes'):reasons.append('compatibility_or_evaluation_unresolved')
     if any(row.get(k) for k in ('conflicts','ambiguities')) or row.get('aspect_checklist',{}).get('ambiguities'):reasons.append('context_or_compatibility_unresolved')

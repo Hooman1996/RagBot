@@ -279,6 +279,9 @@ class CoverageEvaluator:
         # An uncertain joint batch cannot establish a certain subset verdict.
         if any(not set(b["entry_ids"]) <= allowed and b["result"]["coverage"] == "uncertain" for b in batches):
             codes.append("subset_batch_uncertainty")
+        # A scrubbed fact cannot be told apart from a missing one.
+        if any(self.index.records[cid].get("redaction_changed") for cid in allowed & self.evaluated_ids):
+            codes.append("kb_redaction_affected")
         for proof in inside:
             if proof["verdict"]["verdict"] != "accepted":
                 codes.append("verification_unresolved")
@@ -513,7 +516,7 @@ MAX_VIEW_CONFLICTS = 40
 BLOCKING_CODES = frozenset({"evidence_conflict", "verification_unresolved", "incompatible_conditions",
     "conflict_contradicts_proof", "conflict_undetermined", "conflict_limit_exceeded"})
 RESIDUAL_CODES = frozenset({"entry_too_long", "evaluation_failed", "subset_batch_uncertainty",
-    "batch_support_unresolved", "batch_uncertain"})
+    "batch_support_unresolved", "batch_uncertain", "kb_redaction_affected"})
 SEARCH_CODES = frozenset({"compatibility_unverified", "bounded_bundle_search_unresolved",
     "reconciliation_token_overflow", "verification_token_overflow"})
 

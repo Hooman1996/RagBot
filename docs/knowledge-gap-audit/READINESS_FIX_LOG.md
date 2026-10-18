@@ -595,3 +595,104 @@ exit 0
 ```
 
 The pytest count rose from 1020 in step 03a to 1034, from the 14 new tests in `tests/test_coverage_conflict_verdicts.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [05] KB snapshots keep public facts and scrub only secrets and validated personal identifiers
+
+Finding F2 (High). `capture_snapshot` ran every KB chunk through the customer-query redactor, so fees, limits, support numbers and procedure sentences became `[PRIVATE_…]`. A fee or limit question then could never be covered. If the model read a masked fact as missing, the row became a clean `possible_gap` that was eligible for recommendations.
+
+### Three policies (approved by the owner)
+
+| Policy | Code | This step |
+|---|---|---|
+| Customer queries | `Redactor.text` | Unchanged. `preparation.py` and `history.py` untouched. |
+| Logging | `utils/log_sanitizer.scrub_text` | Unchanged. KB text is never logged. |
+| KB content | new `Redactor.kb_text`, `kb_version = "kb-content-1"` | Scrubs only secrets (`_INLINE_SECRET`, `_BEARER`, `_JWT`), Luhn-valid cards, mod-97-valid IBANs, checksum-valid national IDs, mobiles and emails that are not on the public-contact allow-list, and the value (not the label) after `کد ملی`, `شماره حساب`, `شماره کارت` or `شبا` + `:`/`=` when it has 8 or more digits. Keeps amounts, limits, durations, dates, percentages, landlines, short codes, digit runs that fail their checksum, allow-listed contacts, and `نام:` and `رمز:` text. |
+
+`kb_text` does not call `scrub_text`. It uses the same `[PRIVATE_<12 hex>]` callback and placeholder-skipping loop as `text`, so a value gets the same placeholder under both policies.
+
+Rows that rely on a scrubbed entry go to review and are not eligible for recommendations. `view` adds `kb_redaction_affected` (a residual code) whenever an evaluated entry in the view has `redaction_changed`. With no witness the row is `needs_review`. A witness that uses no scrubbed entry stays `covered_*`, and the code appears only in `residual_review_codes`. A witness that uses a scrubbed entry is still downgraded by `verify`. `eligibility` adds `kb_redaction_unresolved` when the code appears in `review_codes`, `residual_review_codes` or any phase of `review_codes_by_phase`.
+
+### Files changed
+
+- `knowledge_audit/privacy.py`: `Redactor.kb_version`, `Redactor.kb_text`, `_valid_iban` (ISO 13616 mod-97 after Persian and Arabic digit normalisation), `normalize_public_contact`.
+- `knowledge_audit/settings.py`: `CoverageSettings.public_contacts`, parsed from `KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS`. Entries can be an exact email, an `@domain` or a phone number. Emails and domains are lower-cased. Phones are converted to ASCII digits, with spaces and hyphens removed and a leading `+98`/`0098` changed to `0`. Any other entry raises `invalid_coverage_public_contacts`. The setting is not in `manifest()`; the snapshot records it.
+- `knowledge_audit/snapshot.py`: `content` and `document_title` go through `kb_text`. `schema_version` is `a1-kb-snapshot-2`, with `kb_redaction_policy = {version, public_contacts_sha256}`, and the manifest is `a1-kb-manifest-2`. `load_snapshot` accepts versions 1 and 2. `privacy.py` is still in `capture_code_sha256`.
+- `knowledge_audit/execution.py`: `create_run` raises `snapshot_policy_superseded` for any snapshot that is not version 2.
+- `knowledge_audit/api.py`: passes `settings.public_contacts` to `capture_snapshot`; `snapshot_policy_superseded` added to `SAFE_API_CODES`.
+- `knowledge_audit/failures.py`: new `RUN_ADMISSION_CODES = {"snapshot_policy_superseded"}`.
+- `knowledge_audit/pipeline.py`: `kb_redaction_affected` in `view` and `RESIDUAL_CODES`.
+- `knowledge_audit/recommendations.py`: `kb_redaction_unresolved`.
+- `knowledge_audit/recommendation_fixtures.py`: the fictional A4 fixture snapshot is now `a1-kb-snapshot-2` with `kb_redaction_policy`. It was changed because `scripts/knowledge_recommendation_pilot.py` registers this fixture and calls `store.create_run` with it, which would now raise `snapshot_policy_superseded`.
+- `scripts/knowledge_audit_prepare.py`: passes `load_coverage_settings().public_contacts` when `--capture-snapshot` is given.
+- `scripts/validate_environment.py`: `KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS` spec (string, default empty, component `Knowledge coverage audit`, restart `FastAPI`, usage `Redactor.kb_text`).
+- `static/js/knowledge_coverage.js`: labels for `kb_redaction_affected` and `snapshot_policy_superseded`.
+- `env.example`, `.env.example.generated`, `Production_ENV.example`, plus the untracked local `Production_ENV` and `.env`: `KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS=` with an empty value and the agreed comment. No contacts were invented; the owner fills in the list.
+- `tests/test_kb_content_privacy.py`: new, covering command tests 1–10.
+- `tests/test_knowledge_coverage_access_jobs.py`: shared `seed` fixture (see below).
+
+### Old snapshots
+
+Snapshots captured before this step still load and export, but they can no longer start runs: `create_run` refuses them with `snapshot_policy_superseded`, and the page shows "Snapshot captured under an older privacy policy. Capture a new snapshot." Capture a new snapshot before the next run.
+
+### Changed test expectations
+
+One existing fixture changed; no assertion changed.
+
+- `tests/test_knowledge_coverage_access_jobs.py` `seed`, which the operations, execution-recovery, reliability, run-export and browser tests share. Old: `snap.update(schema_version='a1-kb-snapshot-1',source_signature={},retrieval_frozen=False)`. New: `snap.update(schema_version='a1-kb-snapshot-2',source_signature={},retrieval_frozen=False, kb_redaction_policy={'version':Redactor.kb_version,'public_contacts_sha256':canonical_sha256([])})`. Reason: `seed` creates a run, and a version 1 snapshot can no longer start one.
+
+`tests/test_knowledge_audit_a1.py` and `tests/test_knowledge_sources.py` have no assertion that amounts or digit runs are masked in KB snapshots, so neither changed. `test_snapshot_redacts_sensitive_content_without_truncation` checks that the mobile `09123456789` is scrubbed and `redacted_record_count == 1`, which still holds because that mobile is not allow-listed. No `Redactor.text` customer-query test changed.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- `failures.py` has only the model-failure lists `TRANSPORT_CODES` and `VALIDATION_CODES`. Adding `snapshot_policy_superseded` to either would make `category()` classify it as a row failure, but the code is raised before any run or row exists. It is in a new `RUN_ADMISSION_CODES` set instead, and a test checks that set is a subset of `SAFE_API_CODES`.
+- The page showed API error `detail` strings raw. `api()` in `knowledge_coverage.js` now shows `LABELS[detail]` when a label exists, so the new English message is displayed; other details are unchanged.
+- The labelled-identifier value is the digit token after the label (an optional `IR`, then digit groups separated by a single space or hyphen), not the rest of the line. "شماره حساب: شماره ۱۳ رقمی خود را وارد کنید." is kept.
+- The shared `_MOBILE` pattern also consumes one separator after the last digit. `kb_text` keeps that separator outside the placeholder so surrounding words stay intact.
+- `redaction_changed` still compares `content` only, as before; a scrub of `document_title` is not evidence.
+- An empty value gives an empty allow-list. A blank entry inside a non-empty list (for example `a@b.example,,c@d.example`) is rejected as `invalid_coverage_public_contacts`.
+
+### AGENTS.md note
+
+This changes only what the audit's KB snapshot keeps. The chatbot's retrieval, answers and logging are unchanged, so the chatbot's retrieval and answer-quality tests do not apply. No performance change; no benchmark was required.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_kb_content_privacy.py tests/test_knowledge_audit_a1.py tests/test_knowledge_sources.py tests/test_coverage_conflict_verdicts.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_recommendations.py tests/test_validate_environment.py
+183 passed, 3 warnings in 16.79s
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+The same files gave 142 passed before this step; the 41 new tests are in `tests/test_kb_content_privacy.py`.
+
+Clean-checkout command (conda `faq`), run on the initial unpushed `[05]` commit:
+
+```text
+git worktree add /tmp/faq-clean-05 HEAD
+cd /tmp/faq-clean-05 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-05; echo "exit $status"
+1075 passed, 26 deselected, 58 warnings, 291 subtests passed in 256.39s (0:04:16)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1034 in step 04 to 1075, from the 41 new tests in `tests/test_kb_content_privacy.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.

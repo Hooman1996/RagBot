@@ -26,7 +26,9 @@ def snapshot(spec):
             'content_sha256':text_sha256(content),'source_content_sha256':text_sha256(content),
             'document_title':'Synthetic_FableBank','document_id':'synthetic-a4','document_revision':1,'chunk_index':len(records),
             'main_category':s['category'],'sub_category':s['subcategory'],'taxonomy_status':'structured','redaction_changed':False})
-    value={'schema_version':'a1-kb-snapshot-1','source_signature':{'kind':'controlled_static_fictional_fixture'},'retrieval_frozen':True,'records':records}
+    from knowledge_audit.privacy import Redactor
+    value={'schema_version':'a1-kb-snapshot-2','source_signature':{'kind':'controlled_static_fictional_fixture'},'retrieval_frozen':True,'records':records,
+        'kb_redaction_policy':{'version':Redactor.kb_version,'public_contacts_sha256':canonical_sha256([])}}
     value['snapshot_id']=canonical_sha256(value)
     return value
 
