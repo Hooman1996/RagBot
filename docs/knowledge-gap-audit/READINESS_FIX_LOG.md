@@ -1179,3 +1179,132 @@ no output, exit 0
 ```
 
 After this log section was written, the amended commit was checked in a new clean worktree with the same clean-checkout command, at normal load, before push.
+
+## [10] Full and subset runs show a server-computed cost estimate and need explicit acceptance when it exceeds the limits
+
+### Problem (F8b, Medium)
+
+A full run started with no estimate of its cost, and the default limits (200 completions, 1,000,000 tokens, 3,600 seconds in `Limits`) stop it after one or two hard questions. In the A2 pilot, row 121 alone used 64 completions, 175,552 prompt tokens and 259 seconds, and step 08 added a second verification call per accepted proof. `create_run` required only `budget_acknowledged=True` for `full_input`, so the user confirmed "finite limits" without seeing how far they were from what the run needs.
+
+### Rule (approved by the owner)
+
+Before a `full_input` or `subset` run starts, the server computes an estimate from completed reference runs on the same snapshot, code and audit settings, and the page shows it next to the limits.
+
+- **No reference runs:** the user must explicitly acknowledge an unsized run (`sizing_acknowledged`), or the start returns 422 "No reference runs on this snapshot; run a pilot first or acknowledge an unsized run".
+- **Expected cost over any limit:** the user must explicitly accept that the run will pause partway (`accept_partial_run`), or the start returns 422 "Estimated cost exceeds run limits; raise limits or accept a partial run".
+- **Pilot runs** are unchanged and are not sized.
+
+The estimate is computed on the server at start; a client value is never trusted. What was shown is stored as a top-level `sizing` key in the run meta (`version`, `estimate`, `comparison`, `reference`, `sizing_acknowledged`, `accept_partial_run`), never in `settings`, which the drift check and the stability report compare.
+
+### What counts as the same setup
+
+`knowledge_audit/sizing.py` `comparable(meta_or_config)`:
+
+- **Settings:** the run's `settings` without `operational_limits` (limits only cap a run), `selection_method` (the only setting that legitimately differs between a pilot and a full run) and `sizing`.
+- **Versions:** only `prompts`, `code` and `code_id`, the keys `versions()` returns for a new run. A started run also gains `serving` and `runtime_configuration`, which a new run does not have yet; this is the trap fixed in step 09 Part A.
+
+A reference run must also be `completed` and have the same `snapshot_id` and `dataset_id`, and be owned by the same user.
+
+### Changes
+
+- New `knowledge_audit/sizing.py` (`VERSION = "coverage-sizing-1"`). It reads only budget ledgers, row outcomes and row durations, never a text field, and holds one shared artifact lock for the read.
+  - `reference_stats(store, owner, snapshot_id, dataset_id, settings, versions)`: for each finished selected row of each reference run, the outcome class (`covered`: `covered_reachable`, `covered_not_reachable`; `non_covered`: `possible_gap`, `possible_partial_gap`, `needs_review`; `other`: everything else), completions (ledger requests with that `source_row_id` whose state is not `not_sent`), tokens (their `charged_tokens`) and seconds (`duration_ms / 1000`). Pending rows are skipped. Per class it returns `rows`, `share`, and the total, mean and nearest-rank 90th percentile (position `ceil(0.9 * n)`) of each measure, plus `reference_run_ids` and `reference_row_count`. Fewer than 5 rows gives `None`.
+  - `estimate(row_count, stats, *, non_covered_share=None)`: `expected = row_count * sum(share_c * mean_c)` and `high = row_count * sum(share_c * p90_c)`, both rounded up. An override replaces the non-covered share and rescales the other classes in their ratio.
+  - `compare(estimate, limits)`: limit, expected, high, `fits_expected` and `fits_high` for completions, tokens and seconds, and `fits` when every `fits_expected` holds.
+- `knowledge_audit/api.py`: `RunScope` holds the fields shared by the estimate and the start; `RunPayload` adds `sizing_acknowledged` and `accept_partial_run`, `EstimatePayload` adds `non_covered_share` (0 to 1). `run_config` builds the config and effective limits for both routes, so they cannot drift apart. `sizing_view` counts the rows (for `full_input`, `execution.available_row_ids`, the helper `execution.create_run` now uses) and computes the estimate. New `POST /api/knowledge-coverage/runs/estimate` (`coverage_run_start` and `kb_read`) returns `{"row_count", "estimate", "comparison", "reference": {"run_ids", "row_count"}, "sizing_version"}`. `create_run` keeps the `budget_acknowledged` check, then applies the rule above for `full_input` and `subset`.
+- `knowledge_audit/execution.py`, `knowledge_audit/store.py`: `create_run(..., sizing=None)` stores `meta["sizing"]` when given.
+- `web_permissions.py`: `("POST", r"/api/knowledge-coverage/runs/estimate", "coverage_run_start")` next to the run-creation route. The patterns are matched with `re.fullmatch`, so `/api/knowledge-coverage/runs` never matched `/runs/estimate` and no anchoring was needed.
+- `templates/knowledge_coverage.html`, `static/js/knowledge_coverage.js`: for `full_input` and `subset`, the page requests the estimate whenever the dataset, snapshot, datasources, questions, mode, entry budget or limits change, and shows a table (completions, tokens, hours; limit, expected, high) after the limits section. Cells over the limit carry "over limit" in the existing error badge. With no estimate it shows "No reference runs on this snapshot. Run a pilot first, or confirm an unsized run." and the checkbox "I confirm an unsized run."; over the limits it shows "I accept that this run will pause before finishing". Start stays disabled until the estimate for the current selection has loaded and the required checkbox is ticked.
+- New `docs/knowledge-gap-audit/FULL_RUN_SIZING.md`: pilot first (with `--owner-id` set to the web user ID, because references are per owner), reading the estimate, raising the limits within the validated maxima, and very large inputs needing the step 11 continuation.
+
+Runs created before this step have no `sizing` key; nothing reads it except the record itself, so they are unaffected.
+
+### Existing tests changed
+
+| Test | Old | New | Why |
+|---|---|---|---|
+| `tests/test_knowledge_execution_recovery.py::test_full_mode_api_idempotency_csrf_owner_and_revoked_grant` | `full_input` payload with `budget_acknowledged: True` gives 202 | the same payload with `sizing_acknowledged: True` gives 202 | The test store has no completed reference run, so an unsized run must now be acknowledged. Every assertion is unchanged. |
+| `tests/test_web_permissions.py` route inventory `EXPECTED` | no estimate route | `('POST', '/api/knowledge-coverage/runs/estimate'): 'coverage_run_start'` | The inventory lists every browser route; the role matrix now also covers the new route. |
+| `tests/knowledge_operations.browser.cjs` | ticks the full-input limit confirmation, then starts | also waits for and ticks "I confirm an unsized run" before starting | No completed reference run exists in that fixture. Every check is unchanged. |
+| `tests/knowledge_execution.browser.cjs` | full-input and subset starts | both tick "I confirm an unsized run" (the full-input step first checks Start is disabled); one new step, below | No completed reference run exists before the subset finishes. |
+| `tests/knowledge_execution_browser_app.py` | the mocked model made no ledger entry | each mocked call is charged in the ledger (`audit_dispatch`, 10 prompt and 10 output tokens), as `tests/knowledge_operations_browser_app.py` already does | So the completed 9-row subset is a sizing reference with nonzero completions. |
+
+New browser check, after the 9-row subset finishes: switching to full input shows "from 9 reference rows in 1 completed runs", a three-row table with at least one cell over the limit, and Start stays disabled after the limit confirmation until "I accept that this run will pause before finishing" is ticked. It does not start the run.
+
+New tests: 11 in `tests/test_coverage_sizing.py` and 1 in `tests/knowledge_coverage.frontend.test.cjs`.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- `VERSION_KEYS` is a constant (`prompts`, `code`, `code_id`); a test checks it equals the keys of `versions()`, so a new version key cannot be silently ignored.
+- Only a reference run's `selected_row_ids` are read: rows it did not select were never evaluated.
+- Arithmetic uses exact fractions, so rounding up never adds one because of float error. Means and shares are returned as numbers; a row without `duration_ms` counts 0 seconds.
+- An override that gives a positive share to a class with no reference rows (for example `non_covered_share=0.5` when every reference row is non-covered) is refused with `sizing_class_without_reference` (409 through `safe_call`, as other audit codes), rather than estimating that class at zero.
+- `run_config` keeps the old order of checks: datasource, then the full-input limit confirmation, then the limit ceiling.
+- The run's idempotency identity does not include `sizing`, so a retried start with the same key returns the original run with the sizing recorded when it was created.
+- The page re-requests the estimate 250 ms after the last change, and a new estimate clears both sizing checkboxes, because the user confirmed a different estimate. Datasource checkboxes now refresh the selection summary and the estimate; before, they had no listener. The sizing block sits after the limits `<details>`, so a subset run, which needs no limit confirmation, shows it without opening that section. No CSS changed: the block reuses `coverage-settings`, `coverage-check` and the error `coverage-badge`.
+
+### AGENTS.md note
+
+This adds a pre-start estimate and a confirmation. It does not change how rows are evaluated, retrieval, prompts, models or the chatbot. The benchmark below shows that per-row work is unchanged: the estimate is one API call before a run starts.
+
+### Checks
+
+`scripts/benchmark_coverage_budgets.py` (mocked 918-row input, 12 boundaries per iteration, file I/O only):
+
+```text
+before, on 78832bb:
+{"boundaries_per_iteration": 12, "checkpoint_only": {"measurements_ms": [498.484, 480.258, 445.846], "median_ms": 480.258}, "checkpoint_with_allowance": {"measurements_ms": [683.969, 703.945, 740.557], "median_ms": 703.945}, "input_rows": 918, "iterations": 3, "live_dispatches": 0, "scope": "mocked_file_io_no_service_throughput", "version": "a62-file-io-1"}
+after:
+{"boundaries_per_iteration": 12, "checkpoint_only": {"measurements_ms": [503.639, 418.203, 421.93], "median_ms": 421.93}, "checkpoint_with_allowance": {"measurements_ms": [698.978, 753.576, 602.01], "median_ms": 698.978}, "input_rows": 918, "iterations": 3, "live_dispatches": 0, "scope": "mocked_file_io_no_service_throughput", "version": "a62-file-io-1"}
+```
+
+Medians: checkpoint only 480.258 ms before, 421.930 ms after; checkpoint with allowance 703.945 ms before, 698.978 ms after. The timed section (ledger reservations, row saves and progress reads) is not changed by this step; only the untimed `create_run` setup is. The difference is run-to-run noise, and there is no per-row cost.
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_sizing.py tests/test_knowledge_coverage_access_jobs.py tests/test_knowledge_execution_recovery.py tests/test_knowledge_operations.py tests/test_coverage_deployment_gate.py tests/test_coverage_stability_report.py
+145 passed, 9 warnings in 189.31s (0:03:09)
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+`tests/test_web_permissions.py` (24 passed), the three node frontend harnesses (6, 6 and 5 passed), the offline frontend audit (PASS) and the execution and operations browser harnesses were also run before commit.
+
+The full offline pytest suite was also run in the main checkout before commit: 1167 passed, 26 deselected, 58 warnings, 291 subtests passed in 250.18s (0:04:10).
+
+Clean-checkout command (conda `faq`), run on the unpushed `[10]` commit. `/tmp/faq-a21-browser-node` exists, so the browser stage ran with `REQUIRE_BROWSER=1`. `uptime` before the run showed a load average of 1.20, the host's normal level:
+
+```text
+uptime
+git worktree add /tmp/faq-clean-10 HEAD
+cd /tmp/faq-clean-10 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-10; echo "exit $status"
+```
+
+Run 1, on the first `[10]` commit:
+
+```text
+1167 passed, 26 deselected, 58 warnings, 291 subtests passed in 245.71s (0:04:05)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1156 in step 09 to 1167, from the 11 new tests in `tests/test_coverage_sizing.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. Only this log section changed after run 1. The amended commit was checked again in a new clean worktree with the same command before push.

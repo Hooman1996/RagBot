@@ -19,7 +19,8 @@ async function run(){
  await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
  await page.locator('#coverageMode').selectOption('full_input');assert.equal(await page.locator('#coverageStart').isDisabled(),true);
  await page.getByText('Finite execution limits',{exact:true}).click();await page.locator('#coverageLimit_completion_attempts').fill('2');await page.locator('#coverageLimit_completion_attempts').dispatchEvent('change');
- await page.locator('#coverageBudgetAck').check();await page.locator('#coverageStart').focus();await page.keyboard.press('Enter');
+ await page.locator('#coverageBudgetAck').check();await page.locator('#coverageSizingAckLabel').waitFor();await page.locator('#coverageSizingAck').check();
+ await page.locator('#coverageStart').focus();await page.keyboard.press('Enter');
  await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.startsWith('Paused'),{},{timeout:30000});
  assert.match(await page.locator('#coverageBudgetProgress').textContent(),/0 remaining/);assert.match(await page.locator('#coverageProgressText').textContent(),/0 of 918/);
  const rid=await page.locator('#coverageRuns').inputValue(),url='/api/knowledge-coverage/runs/'+rid;

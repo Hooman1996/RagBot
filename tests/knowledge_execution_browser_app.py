@@ -1,10 +1,12 @@
 """Isolated A6.1 Chromium fixture: synthetic account/input and mocked inference."""
 import asyncio
+from types import SimpleNamespace
 from tests.knowledge_run_export_browser_app import create_app as base_app
 from tests.knowledge_coverage_browser_app import SYNTHETIC_OWNER
 from tests.test_knowledge_coverage_pipeline import LabeledModel, Retrieval
 from knowledge_audit.pipeline import CoverageEvaluator
 from knowledge_audit.preparation import QueryPreparer
+from utils.audit_dispatch import audit_dispatch, completion_metadata
 
 
 def create_app(port):
@@ -20,6 +22,10 @@ def create_app(port):
                 if role=='scope' and 'interrupt synthetic' in data.get('original_question','').lower() and meta['run_id'] not in blocked:
                     blocked.add(meta['run_id']);await asyncio.sleep(60)
                 await asyncio.sleep(.03)
+                # Each mocked call is charged in the ledger, so a completed run is a sizing reference.
+                async def operation():
+                    return SimpleNamespace(usage=SimpleNamespace(prompt_tokens=10,completion_tokens=10))
+                with completion_metadata(role,10):await audit_dispatch('completion',operation,output_tokens=20)
                 return await super().call(role,data)
         preparer=QueryPreparer.from_answering_service(app.state.answering_service)
         engine=CoverageEvaluator(snapshot=snapshot,model=Model(snapshot,{'1':['a1'],'2':['a2']}),

@@ -62,16 +62,26 @@ class BudgetPayload(StrictModel):
     pace_ms: int = Field(strict=True,ge=0,le=60000)
 
 
-class RunPayload(StrictModel):
+class RunScope(StrictModel):
+    """What a run would evaluate, and under which limits; shared by estimate and start."""
     dataset_id: str = Field(pattern=r"^d_[0-9a-f]{32}$")
     snapshot_id: str = Field(pattern=r"^[0-9a-f]{64}$")
     row_ids: list[str] = Field(default_factory=list, max_length=100000)
     execution_mode: Literal["pilot", "subset", "full_input"] = "pilot"
-    idempotency_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,128}$")
     entry_budget: int | None = Field(default=None, ge=1)
     documents: list[str] = Field(min_length=1, max_length=50)
     operational_limits: BudgetPayload | None = None
+
+
+class RunPayload(RunScope):
+    idempotency_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,128}$")
     budget_acknowledged: bool = False
+    sizing_acknowledged: bool = False
+    accept_partial_run: bool = False
+
+
+class EstimatePayload(RunScope):
+    non_covered_share: float | None = Field(default=None, ge=0, le=1)
 
 
 class RecoveryPayload(StrictModel):
@@ -268,8 +278,8 @@ def resolve_entry_budget(requested, maximum):
     return budget
 
 
-@router.post("/api/knowledge-coverage/runs", status_code=202)
-async def create_run(payload: RunPayload, request: Request, user: WebUser):
+async def run_config(payload: RunScope, request: Request, user, *, before_limits=None):
+    """The run config and effective limits; the estimate and the start use this one path."""
     require(user, "coverage_run_start", "kb_read")
     settings, store, jobs = runtime(request)
     source = await safe_call(store.owned, "datasets", payload.dataset_id, user.id)
@@ -278,8 +288,8 @@ async def create_run(payload: RunPayload, request: Request, user: WebUser):
     snapshot = await safe_call(store.owned, "snapshots", payload.snapshot_id, user.id)
     if not set(payload.documents) <= set(snapshot["documents"]):
         raise HTTPException(422, detail="Choose a datasource from this snapshot")
-    if payload.execution_mode=='full_input' and not payload.budget_acknowledged:
-        raise HTTPException(422,detail='Confirm finite full-input limits; the run may pause before all rows are evaluated')
+    if before_limits:
+        before_limits()
     effective=payload.operational_limits.model_dump() if payload.operational_limits else asdict(settings.operational_limits)
     ceiling=asdict(settings.operational_limits)
     if any((v>ceiling[k] if k not in {'min_free_bytes','pace_ms'} else v<ceiling[k]) for k,v in effective.items()):
@@ -287,8 +297,53 @@ async def create_run(payload: RunPayload, request: Request, user: WebUser):
     entry_budget = await safe_call(resolve_entry_budget, payload.entry_budget, settings.max_entry_budget)
     config = {**settings.manifest(), "entry_budget": entry_budget, "documents": payload.documents,
               "selection_method": "server_all_user_query_rows" if payload.execution_mode == "full_input" else "explicit_source_row_ids", "operational_limits":effective}
+    return store, jobs, config
+
+
+def sizing_view(store, owner, payload: RunScope, config, *, non_covered_share=None):
+    """Server-computed estimate from completed reference runs; never a client value."""
+    from knowledge_audit.execution import available_row_ids
+    from knowledge_audit import sizing
+    if payload.execution_mode == "full_input":
+        data, _ = store.dataset(payload.dataset_id, owner)
+        row_count = len(available_row_ids(data))
+    else:
+        row_count = len(payload.row_ids)
+    stats = sizing.reference_stats(store, owner, payload.snapshot_id, payload.dataset_id, config, versions())
+    estimate = sizing.estimate(row_count, stats, non_covered_share=non_covered_share) if stats else None
+    return {"version": sizing.VERSION, "row_count": row_count, "estimate": estimate,
+            "comparison": sizing.compare(estimate, config["operational_limits"]) if estimate else None,
+            "reference": {"run_ids": stats["reference_run_ids"] if stats else [],
+                          "row_count": stats["reference_row_count"] if stats else 0}}
+
+
+@router.post("/api/knowledge-coverage/runs/estimate")
+async def estimate_run(payload: EstimatePayload, request: Request, user: WebUser):
+    store, _, config = await run_config(payload, request, user)
+    view = await safe_call(sizing_view, store, user.id, payload, config, non_covered_share=payload.non_covered_share)
+    return {"row_count": view["row_count"], "estimate": view["estimate"], "comparison": view["comparison"],
+            "reference": view["reference"], "sizing_version": view["version"]}
+
+
+@router.post("/api/knowledge-coverage/runs", status_code=202)
+async def create_run(payload: RunPayload, request: Request, user: WebUser):
+    def acknowledged():
+        if payload.execution_mode=='full_input' and not payload.budget_acknowledged:
+            raise HTTPException(422,detail='Confirm finite full-input limits; the run may pause before all rows are evaluated')
+    store, jobs, config = await run_config(payload, request, user, before_limits=acknowledged)
+    sizing = None
+    if payload.execution_mode in {"full_input", "subset"}:
+        view = await safe_call(sizing_view, store, user.id, payload, config)
+        if view["estimate"] is None and not payload.sizing_acknowledged:
+            raise HTTPException(422, detail="No reference runs on this snapshot; run a pilot first or acknowledge an unsized run")
+        if view["comparison"] is not None and not view["comparison"]["fits"] and not payload.accept_partial_run:
+            raise HTTPException(422, detail="Estimated cost exceeds run limits; raise limits or accept a partial run")
+        sizing = {"version": view["version"], "estimate": view["estimate"], "comparison": view["comparison"],
+                  "reference": view["reference"], "sizing_acknowledged": payload.sizing_acknowledged,
+                  "accept_partial_run": payload.accept_partial_run}
     meta = await safe_call(store.create_run, user.id, payload.dataset_id, payload.snapshot_id,
-                           payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key or canonical_sha256(payload.model_dump()))
+                           payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key or canonical_sha256(payload.model_dump()),
+                           sizing=sizing)
     jobs.start(meta["run_id"], user.id)
     return safe_meta(meta)
 
@@ -402,7 +457,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
 SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
-    "invalid_pilot_selection", "invalid_entry_budget", "invalid_verification_passes", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
+    "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run",
     "snapshot_policy_superseded"}

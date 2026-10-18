@@ -96,6 +96,7 @@ ROUTES = (
     ("GET", r"/api/knowledge-coverage/snapshots", "coverage_run_start"),
     ("POST", r"/api/knowledge-coverage/snapshots", "coverage_run_start"),
     ("POST", r"/api/knowledge-coverage/runs", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/runs/estimate", "coverage_run_start"),
     ("GET", r"/api/knowledge-coverage/runs", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/results", "coverage_results_view"),

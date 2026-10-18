@@ -25,6 +25,8 @@ async function run(){
   await page.locator('#coverageSnapshot').selectOption({label:await page.locator('#coverageSnapshot option').filter({hasText:'2 entries'}).textContent()});
   await page.waitForFunction(()=>!document.getElementById('coverageDatasetSummary').textContent.includes('Preparing input'));
   step='full_selection';await page.locator('#coverageMode').selectOption('full_input');await page.getByText('Finite execution limits',{exact:true}).click();await page.locator('#coverageBudgetAck').check();
+  // No completed reference run yet: the unsized run must be confirmed.
+  await page.locator('#coverageSizingAckLabel').waitFor();assert.equal(await page.locator('#coverageStart').isDisabled(),true);await page.locator('#coverageSizingAck').check();
   await page.waitForFunction(()=>document.getElementById('coverageStartSummary').textContent.includes('918 / 918'));
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]:disabled:checked').length===25);
   await page.locator('#coverageStart').focus();assert.equal(await page.locator('#coverageStart').evaluate(e=>document.activeElement===e),true);
@@ -51,6 +53,7 @@ async function run(){
   await page.waitForFunction(()=>document.querySelectorAll('#coverageRows input[type=checkbox]').length===25 && document.querySelectorAll('#coverageRows input[type=checkbox]:disabled').length===0 && document.querySelectorAll('#coverageRows input[type=checkbox]:checked').length===0);
   for(let i=1;i<=9;i++)await page.locator('#coverageRows input[type=checkbox]').nth(i).check();
   step='subset_selection_count';assert.match(await page.locator('#coverageStartSummary').textContent(),/9 \/ 918/);
+  await page.locator('#coverageSizingAckLabel').waitFor();await page.locator('#coverageSizingAck').check();
   await page.locator('#coverageStart').click();await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.toLowerCase().startsWith('completed'),{},{timeout:30000});
   step='subset_finished_counts';assert.match(await page.locator('#coverageProgressText').textContent(),/9 of 9 selected questions/);assert.match(await page.locator('#coverageProgressText').textContent(),/with errors/);
   const second=await page.locator('#coverageRuns').inputValue();assert.notEqual(first,second);
@@ -60,6 +63,16 @@ async function run(){
   assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
   await page.locator('#coverageCloseEvidence').focus();await page.keyboard.press('Enter');
   checks.push('nine_row_subset_finished_with_errors_evidence_keyboard_dark_rtl_mobile_no_overflow');
+  step='full_input_estimate';await page.locator('#coverageMode').selectOption('full_input');
+  await page.locator('#coverageBudgetAck').evaluate(e=>{e.closest('details').open=true;});
+  await page.locator('#coveragePartialAckLabel').waitFor();
+  assert.match(await page.locator('#coverageSizingStatus').textContent(),/from 9 reference rows in 1 completed runs/);
+  assert.equal(await page.locator('#coverageSizingTable table tbody tr').count(),3);
+  assert.equal(await page.locator('#coverageSizingTable td[data-over="true"]').count()>=1,true);
+  await page.locator('#coverageBudgetAck').check();assert.equal(await page.locator('#coverageStart').isDisabled(),true);
+  await page.locator('#coveragePartialAck').check();assert.equal(await page.locator('#coverageStart').isDisabled(),false);
+  await page.locator('#coverageSizing').scrollIntoViewIfNeeded();await shot('a10-full-input-estimate-dark-rtl-mobile.png');
+  checks.push('full_input_estimate_from_completed_subset_blocks_start_until_partial_run_accepted');
   assert.equal(errors,0);
   const summary={browser_version:browser.version(),source_rows:918,subset_rows:9,live_model_dispatches:0,checks,screenshots};
   fs.writeFileSync(path.join(output,'checks.json'),JSON.stringify(summary,null,2),{mode:0o600});for(const name of fs.readdirSync(output))fs.chmodSync(path.join(output,name),0o600);process.stdout.write(JSON.stringify(summary)+'\n');

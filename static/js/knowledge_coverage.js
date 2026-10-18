@@ -43,6 +43,26 @@
         if (className) n.className = className;
         return n;
     }
+    // Pre-start estimate: what the user must confirm before a full or subset run.
+    function sizingRequirement(view) { if (!view) return 'pending'; if (!view.estimate) return 'unsized'; return view.comparison && !view.comparison.fits ? 'partial' : ''; }
+    function sizingTable(document, view) {
+        const table = node(document, 'table'), head = node(document, 'thead'), body = node(document, 'tbody'), header = node(document, 'tr');
+        table.append(node(document, 'caption', 'Estimated cost against run limits'));
+        ['Measure', 'Limit', 'Expected', 'High'].forEach(name => header.append(node(document, 'th', name)));
+        head.append(header);
+        [['completions', 'Completions'], ['tokens', 'Tokens'], ['seconds', 'Hours']].forEach(([key, name]) => {
+            const c = view.comparison[key], row = node(document, 'tr'), show = v => key === 'seconds' ? (v / 3600).toFixed(1) : Number(v).toLocaleString('en-US');
+            const title = node(document, 'th', name); title.setAttribute('scope', 'row'); row.append(title, node(document, 'td', show(c.limit)));
+            [['expected', c.fits_expected], ['high', c.fits_high]].forEach(([field, fits]) => {
+                const cell = node(document, 'td');
+                if (fits) cell.textContent = show(c[field]);
+                else { cell.dataset.over = 'true'; const badge = node(document, 'span', show(c[field]) + ' · over limit', 'coverage-badge'); badge.dataset.tone = 'error'; cell.append(badge); }
+                row.append(cell);
+            });
+            body.append(row);
+        });
+        table.append(head, body); return table;
+    }
     function boot(document) {
         const root = document.getElementById('coverageRoot'); if (!root) return;
         const $ = id => document.getElementById('coverage' + id);
@@ -74,10 +94,55 @@
         function runLimits(){const defaults=JSON.parse(root.dataset.operationalLimits||'{}');return Object.fromEntries(limitKeys.filter(k=>$('Limit_'+k)).map(k=>[k,Number($('Limit_'+k).value||defaults[k])]));}
         const mode = () => $('Mode')?.value || 'pilot';
         const maximum = () => Number(root.dataset.maxRunRows || 10000);
+        function runScope() {
+            const docs=Array.from($('Documents').querySelectorAll('input:checked')).map(n=>n.value);
+            const payload={dataset_id:currentDataset,snapshot_id:$('Snapshot').value,row_ids:mode()==='full_input'?[]:Array.from(selected),execution_mode:mode(),entry_budget:Number($('Budget').value),documents:docs};
+            if(Object.keys(runLimits()).length)payload.operational_limits=runLimits();
+            return payload;
+        }
+        let sizing=null, sizingIdentity='', sizingRequested='', sizingTimer=null, sizingSequence=0, sizingIncomplete=true;
+        const currentSizing = () => sizingIdentity && sizingIdentity===sizingRequested ? sizing : null;
+        function sizingBlocked() {
+            if(mode()==='pilot') return false;
+            const need=sizingRequirement(currentSizing());
+            return need==='pending' || (need==='unsized' && !$('SizingAck')?.checked) || (need==='partial' && !$('PartialAck')?.checked);
+        }
+        function renderSizing() {
+            if(!$('Sizing')) return;
+            const view=currentSizing(), need=sizingRequirement(view);
+            $('Sizing').hidden=mode()==='pilot';
+            $('SizingTable').replaceChildren(...(view && view.estimate ? [sizingTable(document,view)] : []));
+            $('SizingAckLabel').hidden=need!=='unsized'; $('PartialAckLabel').hidden=need!=='partial';
+            $('SizingStatus').textContent=need==='pending' ? (sizingIncomplete ? 'Choose a dataset, snapshot, datasource and questions to see a cost estimate.' : 'Estimating cost from completed reference runs on this snapshot…')
+                : need==='unsized' ? 'No reference runs on this snapshot. Run a pilot first, or confirm an unsized run.'
+                : 'Estimate for '+view.row_count+' questions from '+view.reference.row_count+' reference rows in '+view.reference.run_ids.length+' completed runs. Expected uses means; high uses 90th percentiles.'+(need==='partial' ? ' The expected cost exceeds a limit, so the run will pause before finishing.' : '');
+        }
+        function scheduleSizing() {
+            if(mode()==='pilot'){sizingRequested='';sizingIdentity='';sizing=null;renderSizing();return;}
+            const scope=runScope(), identity=JSON.stringify(scope);
+            if(identity===sizingRequested) return;
+            sizingRequested=identity; sizing=null; sizingIdentity='';
+            if(sizingTimer){global.clearTimeout(sizingTimer);sizingTimer=null;}
+            const sequence=++sizingSequence;
+            sizingIncomplete=!scope.dataset_id || !scope.snapshot_id || !scope.documents.length || (scope.execution_mode==='subset' && !scope.row_ids.length);
+            renderSizing();
+            if(sizingIncomplete) return;
+            sizingTimer=global.setTimeout(async()=>{
+                sizingTimer=null;
+                try {
+                    const view=await api('runs/estimate',{method:'POST',headers:{'Content-Type':'application/json'},body:identity});
+                    if(sequence!==sizingSequence) return;
+                    // A new estimate needs a new confirmation.
+                    sizing=view; sizingIdentity=identity; if($('SizingAck'))$('SizingAck').checked=false; if($('PartialAck'))$('PartialAck').checked=false;
+                    renderSizing(); selection();
+                } catch(e) { if(sequence===sizingSequence){sizingRequested='';fail(e);} }
+            },250);
+        }
         function selection() {
+            scheduleSizing();
             const d=datasets.find(x=>x.dataset_id===currentDataset), count=mode()==='full_input' ? (d?.structure.selected_row_count||0) : selected.size;
             $('SelectionCount').textContent=count+' selected / '+(d?.structure.selected_row_count||0)+' imported queries';
-            $('Start').disabled=count<1 || count>maximum() || !currentDataset || !$('Snapshot').value || (mode()==='pilot' && count>5) || (mode()==='full_input' && !$('BudgetAck')?.checked);
+            $('Start').disabled=count<1 || count>maximum() || !currentDataset || !$('Snapshot').value || (mode()==='pilot' && count>5) || (mode()==='full_input' && !$('BudgetAck')?.checked) || sizingBlocked();
             $('Start').textContent=mode()==='pilot' ? 'Start selected pilot' : mode()==='full_input' ? 'Start full-input run' : 'Start selected subset';
             if($('StartSummary')) $('StartSummary').textContent=(d ? 'Dataset '+d.dataset_id.slice(-8) : 'Choose a dataset')+' · Snapshot '+($('Snapshot').value.slice(0,8)||'not selected')+' · '+count+' / '+(d?.structure.selected_row_count||0)+' queries · '+$('Budget').value+' distinct entries maximum per question · batch cap '+(root.dataset.batchMax||2)+' · sequential, potentially long duration. No precise ETA. '+(Object.keys(runLimits()).length ? 'Limits: '+Object.entries(runLimits()).map(([k,v])=>k.replaceAll('_',' ')+' '+v).join(' · ')+'. ' : '')+(count>maximum() ? 'Selection exceeds the configured maximum of '+maximum()+'.' : '');
         }
@@ -94,7 +159,7 @@
             $('Documents').replaceChildren();
             (snapshot ? snapshot.documents : []).forEach(title => {
                 const item = node(document, 'label'); const checkbox = node(document, 'input'); checkbox.type = 'checkbox'; checkbox.checked = true; checkbox.value = title;
-                item.append(checkbox, node(document, 'span', title)); $('Documents').append(item);
+                checkbox.addEventListener('change', selection); item.append(checkbox, node(document, 'span', title)); $('Documents').append(item);
             }); selection();
         }
         async function refreshSnapshots() {
@@ -331,13 +396,15 @@
             $('Mode')?.addEventListener('change',()=>{startKey=null;selection();refreshRows().catch(fail);});
             $('Budget').addEventListener('change',selection);
             $('BudgetAck')?.addEventListener('change',selection);
+            $('SizingAck')?.addEventListener('change',selection);
+            $('PartialAck')?.addEventListener('change',selection);
             limitKeys.forEach(k=>$('Limit_'+k)?.addEventListener('change',selection));
             $('Start').addEventListener('click', async () => {
                 $('Start').disabled=true; clearError(); try {
-                    const docs=Array.from($('Documents').querySelectorAll('input:checked')).map(n=>n.value);
-                    const payload={dataset_id:currentDataset,snapshot_id:$('Snapshot').value,row_ids:mode()==='full_input'?[]:Array.from(selected),execution_mode:mode(),entry_budget:Number($('Budget').value),documents:docs};
-                    if(Object.keys(runLimits()).length)payload.operational_limits=runLimits();
+                    const payload=runScope(), need=mode()==='pilot' ? '' : sizingRequirement(currentSizing());
                     payload.budget_acknowledged=!!$('BudgetAck')?.checked;
+                    payload.sizing_acknowledged=need==='unsized' && !!$('SizingAck')?.checked;
+                    payload.accept_partial_run=need==='partial' && !!$('PartialAck')?.checked;
                     const identity=JSON.stringify(payload), startEpoch=viewEpoch;
                     if(startIdentity!==identity){startKey=null;startIdentity=identity;}
                     payload.idempotency_key=startKey||(startKey=global.crypto?.randomUUID?.().replaceAll('-','')||('start_'+Date.now()+'_'+Math.random().toString(36).slice(2)));
@@ -353,7 +420,7 @@
         Promise.all([refreshDatasets(),refreshSnapshots(),refreshRuns()]).then(()=>status('Choose an imported dataset or upload questions to begin.')).catch(fail);
         return {refreshRows,progress,openEvidence};
     }
-    const api = {contractVersion:CONTRACT,headersFromCsv,label,boot};
+    const api = {contractVersion:CONTRACT,headersFromCsv,label,boot,sizingRequirement,sizingTable};
     if (typeof module !== 'undefined' && module.exports) module.exports=api;
     global.KnowledgeCoverage=api;
     if (global.document) { if(global.document.readyState==='loading') global.document.addEventListener('DOMContentLoaded',()=>boot(global.document)); else boot(global.document); }

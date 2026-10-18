@@ -249,10 +249,10 @@ class CoverageStore:
 
     @protected_method
     def create_run(self, owner, did, sid, selected_ids, settings, versions, *,
-                   execution_mode="pilot", idempotency_key=None):
+                   execution_mode="pilot", idempotency_key=None, sizing=None):
         from knowledge_audit.execution import create_run
         return create_run(self, owner, did, sid, selected_ids, settings, versions,
-                          execution_mode=execution_mode, idempotency_key=idempotency_key)
+                          execution_mode=execution_mode, idempotency_key=idempotency_key, sizing=sizing)
 
     @protected_method
     def row(self, rid, row_id, owner):

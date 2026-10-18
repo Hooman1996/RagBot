@@ -87,6 +87,12 @@
                     </div>
                     <label><input id="coverageBudgetAck" type="checkbox"> I confirm these finite limits for full-input execution; unfinished rows remain pending if a limit is reached.</label>
                 </details>
+                <div id="coverageSizing" class="coverage-settings" hidden>
+                    <p id="coverageSizingStatus" class="coverage-summary" aria-live="polite"></p>
+                    <div id="coverageSizingTable"></div>
+                    <label id="coverageSizingAckLabel" class="coverage-check" hidden><input id="coverageSizingAck" type="checkbox"> I confirm an unsized run.</label>
+                    <label id="coveragePartialAckLabel" class="coverage-check" hidden><input id="coveragePartialAck" type="checkbox"> I accept that this run will pause before finishing</label>
+                </div>
                 <p class="coverage-summary">Retention: manual operator cleanup only; automatic deletion is disabled. Default age threshold: {{ retention_days }} days. Holds, active work and referenced dependencies are protected. Age alone does not revoke access.</p>
                 <p id="coverageStartSummary" class="coverage-summary" aria-live="polite">Select a dataset and snapshot. Processing is sequential; larger runs may take a long time.</p>
                 <div class="coverage-selection-bar"><strong id="coverageSelectionCount">0 selected</strong><button id="coverageClearSelection" class="coverage-link" type="button">Clear selection</button>

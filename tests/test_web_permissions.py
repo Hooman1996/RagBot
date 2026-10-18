@@ -43,6 +43,7 @@ EXPECTED = {
     ('GET', '/api/knowledge-coverage/snapshots'): 'coverage_run_start',
     ('POST', '/api/knowledge-coverage/snapshots'): 'coverage_run_start',
     ('POST', '/api/knowledge-coverage/runs'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/runs/estimate'): 'coverage_run_start',
     ('GET', '/api/knowledge-coverage/runs'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/runs/{run_id}'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/runs/{run_id}/results'): 'coverage_results_view',

@@ -27,14 +27,19 @@ def creation_lock(store, owner):
         os.close(fd)
 
 
-def create_run(store, owner, did, sid, selected_ids, settings, versions, *, execution_mode, idempotency_key):
+def available_row_ids(data):
+    """The rows a full-input run selects; the estimate counts the same rows."""
+    return [e.source_row_id for e in data.selected]
+
+
+def create_run(store, owner, did, sid, selected_ids, settings, versions, *, execution_mode, idempotency_key, sizing=None):
     from knowledge_audit.store import now
     from knowledge_audit.snapshot import SNAPSHOT_VERSION
     data, _ = store.dataset(did, owner)
     if store.snapshot(sid, owner).get("schema_version") != SNAPSHOT_VERSION:
         raise AuditError("snapshot_policy_superseded")
     rows = store.preparations(did, owner)
-    available = [e.source_row_id for e in data.selected]
+    available = available_row_ids(data)
     maximum = settings.get("max_run_rows", 10000)
     if type(maximum) is not int or not 5 <= maximum <= 100000:
         raise AuditError("invalid_run_size_limit")
@@ -82,6 +87,8 @@ def create_run(store, owner, did, sid, selected_ids, settings, versions, *, exec
                 "processed_rows": 0, "attempt": 0, "error_code": "", "cancel_requested": False}
         if execution_mode == "pilot":
             meta["completed_pilot_rows"] = 0
+        if sizing is not None:
+            meta["sizing"] = sizing  # what the user saw; outside settings, so drift checks ignore it
         if [r["source_row_id"] for r in rows] != available:
             raise AuditError("input_row_accounting_mismatch")
         initial_rows = []

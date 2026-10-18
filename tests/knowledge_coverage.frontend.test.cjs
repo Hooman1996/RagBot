@@ -166,3 +166,53 @@ test('a delayed CSV upload never replaces a run selected while it was in flight'
         assert.match($('ProgressText').textContent,/17 rows retained/);assert.equal($('Runs').value,runId);
     }finally{Object.assign(global,saved);}
 });
+
+test('full-input estimate table marks cells over the limit and Start waits for the partial-run checkbox',async()=>{
+    const document=dom(), $=name=>document.getElementById('coverage'+name);
+    const did='d_'+'a'.repeat(32), sid='c'.repeat(64), rid='r_'+'b'.repeat(32);
+    const comparison={completions:{limit:200,expected:129,high:201,fits_expected:true,fits_high:false},
+        tokens:{limit:1000000,expected:121334,high:193667,fits_expected:true,fits_high:true},
+        seconds:{limit:3600,expected:5400,high:9000,fits_expected:false,fits_high:false},fits:false};
+    const view={row_count:918,estimate:{version:'coverage-sizing-1',row_count:918},comparison,reference:{run_ids:[rid],row_count:6},sizing_version:'coverage-sizing-1'};
+    const requests=[];
+    const saved={fetch:global.fetch,localStorage:global.localStorage,setInterval:global.setInterval,clearInterval:global.clearInterval,setTimeout:global.setTimeout,clearTimeout:global.clearTimeout};
+    global.localStorage={getItem(){return null;},setItem(){}};
+    global.setInterval=()=>1; global.clearInterval=()=>{}; global.setTimeout=fn=>{fn();return 1;}; global.clearTimeout=()=>{};
+    global.fetch=async (url,options={})=>{
+        const path=url.replace('/api/knowledge-coverage/',''); requests.push({path,options}); let value;
+        if(path==='datasets') value=[{dataset_id:did,structure:{selected_row_count:918,source_row_count:918},preparation_counts:{prepared:918},preparation_status:'ready'}];
+        else if(path.startsWith('datasets/')) value={state:'ready',total:918,rows:[]};
+        else if(path==='snapshots') value=[{snapshot_id:sid,record_count:2,documents:['Synthetic_FAQ']}];
+        else if(path==='runs/estimate') value=view;
+        else if(path==='runs' && options.method==='POST') value={run_id:rid};
+        else if(path==='runs') value=[];
+        else value={run_id:rid,state:'queued',selected_row_ids:[],input_row_count:918,stage:'waiting'};
+        return {ok:true,json:async()=>value};
+    };
+    try {
+        ui.boot(document); await flush();
+        $('Dataset').value=did; await $('Dataset').dispatch('change'); await flush();
+        $('Mode').value='full_input'; $('Mode').dispatch('change');
+        $('Snapshot').value=sid; $('Snapshot').dispatch('change'); await flush();
+        const estimates=requests.filter(r=>r.path==='runs/estimate');
+        assert(estimates.length>=1);
+        const sent=JSON.parse(estimates.at(-1).options.body);
+        assert.equal(sent.execution_mode,'full_input'); assert.deepEqual(sent.row_ids,[]); assert.deepEqual(sent.documents,['Synthetic_FAQ']);
+        const table=$('SizingTable').children[0]; assert.equal(table.tagName,'TABLE');
+        assert.match(text(table),/Completions/); assert.match(text(table),/Hours/); assert.match(text(table),/1\.5/);
+        const rows=table.children[2].children, over=rows.flatMap(r=>r.children.filter(c=>c.dataset.over==='true').map(c=>r.children[0].textContent+':'+text(c)));
+        assert.deepEqual(over,['Completions:201 · over limit','Hours:1.5 · over limit','Hours:2.5 · over limit']);
+        assert.equal(rows[0].children[3].children[0].dataset.tone,'error');
+        assert.equal($('PartialAckLabel').hidden,false); assert.equal($('SizingAckLabel').hidden,true);
+        assert.match($('SizingStatus').textContent,/will pause before finishing/);
+        $('BudgetAck').checked=true; $('BudgetAck').dispatch('change');
+        assert.equal($('Start').disabled,true);
+        $('PartialAck').checked=true; $('PartialAck').dispatch('change');
+        assert.equal($('Start').disabled,false);
+        await $('Start').dispatch('click'); await flush();
+        const start=JSON.parse(requests.find(r=>r.path==='runs' && r.options.method==='POST').options.body);
+        assert.equal(start.accept_partial_run,true); assert.equal(start.sizing_acknowledged,false); assert.equal(start.budget_acknowledged,true);
+        assert.equal(ui.sizingRequirement(null),'pending'); assert.equal(ui.sizingRequirement({estimate:null}),'unsized');
+        assert.equal(ui.sizingRequirement(view),'partial'); assert.equal(ui.sizingRequirement({...view,comparison:{...comparison,fits:true}}),'');
+    } finally {Object.assign(global,saved);}
+});
