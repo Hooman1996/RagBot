@@ -317,15 +317,18 @@ async def run_config(payload: RunScope, request: Request, user, *, before_limits
 def sizing_view(store, owner, payload: RunScope, config, *, non_covered_share=None):
     """Server-computed estimate from completed reference runs; never a client value."""
     from knowledge_audit.execution import available_row_ids
-    from knowledge_audit import sizing
+    from knowledge_audit import dedupe, sizing
     if payload.execution_mode == "full_input":
         data, _ = store.dataset(payload.dataset_id, owner)
-        row_count = len(available_row_ids(data))
+        row_ids = available_row_ids(data)
     else:
-        row_count = len(payload.row_ids)
+        row_ids = payload.row_ids
+    row_count = len(row_ids)
+    # Counts only. The estimate still multiplies by every row, so it stays an upper bound.
+    repeated = dedupe.preview(store.preparations(payload.dataset_id, owner), row_ids) if dedupe.enabled(config) else None
     stats = sizing.reference_stats(store, owner, payload.snapshot_id, payload.dataset_id, config, versions())
     estimate = sizing.estimate(row_count, stats, non_covered_share=non_covered_share) if stats else None
-    return {"version": sizing.VERSION, "row_count": row_count, "estimate": estimate,
+    return {"version": sizing.VERSION, "row_count": row_count, "estimate": estimate, "dedupe": repeated,
             "comparison": sizing.compare(estimate, config["operational_limits"]) if estimate else None,
             "reference": {"run_ids": stats["reference_run_ids"] if stats else [],
                           "row_count": stats["reference_row_count"] if stats else 0}}
@@ -336,7 +339,7 @@ async def estimate_run(payload: EstimatePayload, request: Request, user: WebUser
     store, _, config = await run_config(payload, request, user)
     view = await safe_call(sizing_view, store, user.id, payload, config, non_covered_share=payload.non_covered_share)
     return {"row_count": view["row_count"], "estimate": view["estimate"], "comparison": view["comparison"],
-            "reference": view["reference"], "sizing_version": view["version"]}
+            "reference": view["reference"], "sizing_version": view["version"], "dedupe": view["dedupe"]}
 
 
 async def sized(store, owner, scope: RunScope, config, *, sizing_acknowledged, accept_partial_run):
@@ -403,7 +406,7 @@ async def continuation_estimate(run_id: str, payload: ContinuationScope, request
     store, _, scope, config, truncation = await continuation(run_id, payload, request, user)
     view = await safe_call(sizing_view, store, user.id, scope, config)
     return {"row_count": view["row_count"], "estimate": view["estimate"], "comparison": view["comparison"],
-            "reference": view["reference"], "sizing_version": view["version"], **truncation}
+            "reference": view["reference"], "sizing_version": view["version"], "dedupe": view["dedupe"], **truncation}
 
 
 @router.post("/api/knowledge-coverage/runs/{run_id}/continuations", status_code=202)
@@ -565,7 +568,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
 SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
-    "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
+    "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_coverage_dedupe", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run",
     "snapshot_policy_superseded", "run_active", "run_already_continued", "continuation_identity_drift",

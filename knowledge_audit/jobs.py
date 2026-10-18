@@ -7,6 +7,7 @@ import os
 import secrets
 
 from mass_answer_jobs import MassAnswerJobManager
+from knowledge_audit import dedupe
 from knowledge_audit.privacy import AuditError
 from knowledge_audit.settings import require_coverage_enabled
 from knowledge_audit.prompts import prompt_identity
@@ -127,6 +128,16 @@ class CoverageJobs:
                     if budget:await self.runner.run(budget.check)
                 base_model.progress_callback = callback
                 events = {e.source_row_id: e for e in engine.dataset.selected}
+                # Repeated questions: sources come from this run's stored rows, never
+                # memory alone, so a restarted attempt finds the same ones.
+                sources = None
+                if getattr(engine, 'dedupe', False) and dedupe.enabled(meta['settings']):
+                    sources = await self.runner.run(dedupe.source_map, self.store, meta)
+                    engine.dedupe_identity = dedupe.run_identity(meta)
+                    async def lookup(key):
+                        source_id = sources.get(key)
+                        return None if source_id is None else await self.runner.run(self.store.row, rid, source_id, owner)
+                    engine.dedupe_lookup = lookup
                 for row_id in meta.get('processing_row_ids', meta['selected_row_ids']):
                     await callback('preparation')
                     row = await self.runner.run(self.store.row, rid, row_id, owner)
@@ -157,10 +168,15 @@ class CoverageJobs:
                                   checkpoint_reuse_count=journal.hits,
                                   unknown_completion_count=len(await self.runner.run(journal.unknowns)))
                     prior_ids = await self.runner.run(lambda: dispatched_entries(journal.records()))
-                    result['evaluated_entry_ids'] = sorted(prior_ids | set(result.get('evaluated_entry_ids', [])))
-                    result['evaluated_entry_count'] = len(result['evaluated_entry_ids'])
-                    result['entry_model_dispatched'] = bool(prior_ids)
-                    result['model_evaluated'] = bool(row.get('model_evaluated')) or any(status=='validated' for status in result.get('question_evidence', {}).get('entry_status', {}).values())
+                    copied = bool(result.get('deduplicated_from_row_id'))
+                    if copied:
+                        # The source's evaluation stands; this row evaluated nothing itself.
+                        result.update(model_evaluated=False, entry_model_dispatched=False)
+                    else:
+                        result['evaluated_entry_ids'] = sorted(prior_ids | set(result.get('evaluated_entry_ids', [])))
+                        result['evaluated_entry_count'] = len(result['evaluated_entry_ids'])
+                        result['entry_model_dispatched'] = bool(prior_ids)
+                        result['model_evaluated'] = bool(row.get('model_evaluated')) or any(status=='validated' for status in result.get('question_evidence', {}).get('entry_status', {}).values())
                     result['request_journal'] = await self.runner.run(journal_summary, self.store, meta, row_id)
                     result['validated_checkpoint_count'] = sum(r['state']=='validated' for r in result['request_journal'])
                     if result.get('stopping_reason') == 'snapshot_mismatch':
@@ -172,12 +188,14 @@ class CoverageJobs:
                     if hasattr(engine, 'observe_identities') and await engine.observe_identities() != observed:
                         raise AuditError('audit_runtime_identity_drift')
                     validated_ids = {cid for cid, status in result.get('question_evidence', {}).get('entry_status', {}).items() if status == 'validated'}
-                    if result.get('outcome') in {'possible_gap', 'possible_partial_gap'} and prior_ids - validated_ids:
+                    if not copied and result.get('outcome') in {'possible_gap', 'possible_partial_gap'} and prior_ids - validated_ids:
                         result.update(processing_status='needs_review', coverage_status='uncertain', outcome='needs_review',
                                       stopping_reason='retained_evaluation_unresolved')
                         result['review_codes'] = list(dict.fromkeys(result.get('review_codes', []) + ['retained_evaluation_unresolved']))
                     await self.runner.run(journal.archive_result, result)
                     await self.runner.run(self.store.save_row, rid, result, owner)
+                    if sources is not None:
+                        dedupe.register(sources, result)
                     active = None
                     counters = await self.runner.run(self.store.progress, rid, owner)
                     await self.runner.run(self.store.update_run, rid, owner, {'processed_rows': counters['processed_rows'], **({'completed_pilot_rows': counters['processed_rows']} if meta.get('execution_mode', 'pilot')=='pilot' else {})})

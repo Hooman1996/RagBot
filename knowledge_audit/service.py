@@ -4,6 +4,7 @@ import asyncio
 import os
 import re
 
+from knowledge_audit import dedupe
 from knowledge_audit.model import AuditModel
 from knowledge_audit.preparation import QueryPreparer
 from knowledge_audit.pipeline import CoverageEvaluator
@@ -81,7 +82,8 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
             redactor=redactor, dataset=dataset, entry_budget=meta["settings"]["entry_budget"],
             documents=meta["settings"].get("documents"), batch_max_entries=settings.batch_max_entries,
             initial_depth=pinned["initial_depths"][0], broader_depth=pinned["expanded_depths"][0],
-            max_entry_budget=pinned["maximum_distinct_entries"], verification_passes=pinned["verification_passes"])
+            max_entry_budget=pinned["maximum_distinct_entries"], verification_passes=pinned["verification_passes"],
+            dedupe=dedupe.enabled(pinned))
         from knowledge_audit.runtime import configuration_identity
         async def observe():
             preparation_config = configuration_identity(dataset.timestamp_policy, len(meta["selected_row_ids"]), redactor)

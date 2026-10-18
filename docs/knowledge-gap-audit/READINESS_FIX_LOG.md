@@ -1487,3 +1487,143 @@ exit 139
 - **Decision (owner, option 1 of 3):** `pytest.ini` `faulthandler_timeout = 300`. No test changes; a real hang still gets a traceback, after 5 minutes instead of 2. The alternatives were skipping disk flushes in that test, which would weaken a crash-recovery test, or re-running unchanged and accepting the flake.
 
 The commit amended with `pytest.ini` and this section was checked again in a new clean worktree with the same command before push.
+
+## [12] Evaluate a repeated question once per run, keyed on its texts, intent and prior turns
+
+### Problem
+
+- **F8d (Medium, cost):** `CoverageEvaluator.evaluate` (`knowledge_audit/pipeline.py`) ran scope, aspects, the production assessment, audit batches and verification for every row. A non-covered row costs about 64 completions, so every repeat of a question cost that again.
+- **A key on the query alone is wrong.** Scope and aspects read `standalone_query_redacted`, the scope call also reads `input_query_redacted` and the prior turns, and retrieval reads `canonical_retrieval_query_redacted`. Two rows that share only the canonical query can still be different questions.
+
+### Rule (approved by the owner in plan v2)
+
+1. **Same run only.** A row copies only from a row of the same run that ended `completed`. Nothing is copied across runs, including continuations.
+2. **The key covers everything row-specific the evaluation reads.**
+3. **Uncertain rows never copy and are never copied.**
+4. **Copies are marked.** A copy names its source, is not counted as model-evaluated and is not drafted for recommendations on its own.
+5. **Preparation still runs.** The key needs the prepared texts and the intent, so a copy still pays for its preparation calls; it saves everything after preparation.
+
+### The key and eligibility (`knowledge_audit/dedupe.py`, `VERSION = "repeated-question-1"`)
+
+- **`eligible(prepared)`** is true only when `preparation_status == "prepared"`, `uncertainty_codes == []`, `rewrite_status` is `no_prior_history` or `rewritten`, `existing_intent` is not empty, and the history is known and unambiguous: `history_provenance.history_status` is `unavailable` (no prior turns) or `user_only` (prior turns all the user's own), `prior_order_ambiguous` and `unresolved_peer_times` are false and `equal_timestamp_event_count == 0`. `incomplete` (an assistant turn, or unresolved peer times) and `ambiguous` (equal timestamps) history are never eligible.
+- **`key(identity, prepared)`** is `None` unless eligible, else `canonical_sha256` of `VERSION`, the run identity, `input_query_redacted`, `normalized_query_redacted`, `standalone_query_redacted`, `canonical_retrieval_query_redacted`, `existing_intent`, `scope_status` (the preparation's), `rewrite_status`, `history_status` and `history_provenance.history_digest` (the digest of the redacted prior turns, not of row IDs).
+- **`run_identity(meta)`** hashes `run_id`, `dataset_id`, `snapshot_id`, `run_identity_id`, `configuration_id`, `settings.documents`, `settings.entry_budget` and `versions`. It is computed after the run identity is pinned and is constant within a run. See decision 1 for `run_id`.
+- **Accepted provenance difference.** The scope prompt also carries `history_provenance`, which holds the row's own `cutoff_row_id`, `cutoff_timestamp` and `history_row_ids`. That metadata is not part of the key, so a copy's source saw different row IDs and times in its scope prompt. The prior-turn texts themselves are covered by `history_digest`, and eligible rows have no equal-timestamp exclusions.
+
+### Changes
+
+- **`knowledge_audit/dedupe.py`** (new): `eligible`, `key`, `run_identity`, `candidate_key`, `preview`, `copy_result`, plus `enabled(settings)` (`settings["dedupe_policy"] == VERSION`), `is_source`/`register` (first completed, non-copy row with a key, per key; row IDs only) and `source_map(store, meta)`, which walks `processing_row_ids` and reads the stored row files.
+  - **`copy_result(source, own)`** deep-copies the source and puts back the copy's own fields (`OWN_KEYS`): the `QueryPreparer.prepare` keys for identity, timestamps, preparation and `history_provenance`, plus `processing_ordinal`, `model_selected` and the attempt accounting (`attempt_count`, `run_identity_id`, `duration_ms`, `model_metrics`, `retrieval_metrics`, `validation_diagnostics`, `output_recovery_count`, `failure_diagnostics`, `request_journal`, `validated_checkpoint_count`, `checkpoint_reuse_count`, `unknown_completion_count`). An own key not yet present is removed rather than left as the source's; the evaluator's `finally` block and the job loop then set it. It sets `deduplicated_from_row_id`, `dedupe_key_sha256`, `model_evaluated = False` and `entry_model_dispatched = False`. See decision 3.
+  - **Why a copy keeps the source's `stopping_reason`:** the copy carries the source's `evaluation_scope`, which describes the search the source ran, and `stopping_reason` is why that search stopped. Recommendation eligibility reads both together (`evaluation_scope_not_established` unless `stopping_reason` is `candidate_exhausted` or `evaluation_limit`). The copy's own value would be the job loop's seed (`preparation`), which describes no evaluation.
+- **`knowledge_audit/settings.py`:** `CoverageSettings.dedupe: bool = True` from `KNOWLEDGE_COVERAGE_DEDUPE` (`true`/`false`, stripped, case-insensitive; anything else, including empty, raises `invalid_coverage_dedupe`, now in `SAFE_API_CODES`). The manifest gained `"dedupe_policy": "repeated-question-1"` or `"disabled"`, pinned per run like `verification_passes`.
+- **`knowledge_audit/pipeline.py`:** `CoverageEvaluator(..., dedupe=False)` with `dedupe_identity` and `dedupe_lookup`. Fresh rows default `deduplicated_from_row_id` to `""`. Right after the first preparation succeeds, when dedupe and a lookup are set and the key is not `None`, the key is stored in `dedupe_key_sha256` and looked up; a found source becomes the result through `copy_result` and no further model or retrieval call is made. The `finally` block leaves a copy's `question_evidence`, `batch_results`, `evaluated_entry_ids`, `evaluated_entry_count`, `verifications` and `review_codes` alone and still sets its own metrics, diagnostics and `duration_ms`. A row with a key but no source evaluates normally and keeps its key.
+- **`knowledge_audit/jobs.py`:** after the identity is pinned and before the row loop, when the engine has `dedupe` set and the run's pinned settings name the policy, the map is rebuilt with `dedupe.source_map` from the store, `engine.dedupe_identity = dedupe.run_identity(meta)` and `engine.dedupe_lookup` reads the source row from the store. After each saved row, `dedupe.register` adds it if it qualifies. For a copy the loop keeps `model_evaluated` and `entry_model_dispatched` false, keeps the source's `evaluated_entry_ids`, and skips the `retained_evaluation_unresolved` check. Engines without the attribute (test fakes) are unchanged.
+- **`knowledge_audit/service.py`:** `dedupe=dedupe.enabled(pinned)`.
+- **`knowledge_audit/export.py`:** `deduplicated_from_row_id` in `COVERAGE_FIELDS` (not `FIELDS`, so `attempt_seed` drops it) and in the `_redact` reference keys, so the restricted export keeps the row ID. Older rows export `""`. `dedupe_key_sha256` is not exported.
+- **`knowledge_audit/recommendations.py`:** `eligibility` adds `deduplicated_row_uses_source` for a copy; drafting happens once, on the source.
+- **`knowledge_audit/sizing.py`:** `_observe` skips copies, so reference per-row costs stay costs of real evaluations. The estimate still multiplies by every row, so it stays an upper bound.
+- **`knowledge_audit/api.py`:** `sizing_view` adds `"dedupe": dedupe.preview(store.preparations(...), row_ids)` over the run's row IDs (`None` when the config's policy is `disabled`), returned by `/runs/estimate` and `continuation-estimate`. `candidate_key` runs on the stored preparation rows (`pending_model` or `prepared`, no uncertainty codes, history passing the history checks) and hashes `input_query_redacted`, `normalized_query_redacted`, `history_status` and `history_digest`. The preview returns `policy`, `candidate_rows`, `distinct_questions` and `possible_copies` only, never text or keys.
+- **`static/js/knowledge_coverage.js`:** under the sizing table in the start and the continue panels, when `dedupe` is present: `Repeated questions: N rows may reuse an earlier row's result`.
+- **Environment:** `KNOWLEDGE_COVERAGE_DEDUPE=true` with the approved comment after `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES` in `.env`, `env.example`, `.env.example.generated`, `Production_ENV` and `Production_ENV.example` (`.env` and `Production_ENV` are local only and not staged). `scripts/validate_environment.py` has the `VariableSpec` (`kind="bool"`, `default="true"`, component `Knowledge coverage audit`, restart `FastAPI`, usage naming `knowledge_audit/dedupe.py` and `CoverageEvaluator.evaluate`). `tests/test_validate_environment.py` lists no coverage keys, so it is unchanged.
+
+### Decisions
+
+1. **`run_id` in `run_identity` (beyond the listed fields; please confirm).** The listed fields are identical for two runs on the same dataset, snapshot, settings and serving, so without `run_id` the key of a second run would equal the first run's. Copying across runs was already impossible (the map is rebuilt from this run's rows only), but "the key can never match across runs" would not hold. `test_runs_never_share_sources` asserts both.
+2. **Two gates.** The job loop sets the lookup only when the engine has `dedupe` set *and* the run's pinned settings name `repeated-question-1`. The factory already follows the pinned policy; the second gate makes the run's settings the authority even for an engine built another way. A run whose settings lack `dedupe_policy` is evaluated without copying (tested with an engine that has `dedupe=True`).
+3. **`processing_status`, `coverage_status` and `scope_status` are the source's.** `QueryPreparer.prepare` returns them too, but evaluation overwrites them, and the copy's are the source's evaluation results (`completed`, the coverage, the scope decision). `processing_ordinal` and `model_selected`, which the job loop seeds, stay the copy's own.
+4. **A copy's dispatch accounting.** If an earlier, interrupted attempt of a row dispatched batches before a later attempt copied it, the copy still reports `entry_model_dispatched = False` and the source's `evaluated_entry_ids`; the row's `request_journal` keeps the earlier dispatches.
+5. **Older runs.** The manifest gained `dedupe_policy`, so runs created before this step cannot resume (`audit_runtime_identity_drift` in `build_engine`), as in steps 07 and 08; `dedupe.enabled` would keep them off in any case. Completed runs from before this step are not comparable reference runs for sizing, and their continuations give `continuation_identity_drift`, until a new pilot runs.
+6. **The preview line shows with or without an estimate,** whenever `dedupe` is present.
+
+### AGENTS.md note
+
+This changes audit cost, not the chatbot. A copy carries the verdict its source reached on identical inputs. Retrieval, prompts, models and the chatbot's answers are unchanged, so the chatbot's retrieval and answer-quality tests do not apply. The live L2 stability protocol measures how often a fresh evaluation would differ.
+
+### Tests
+
+New `tests/test_coverage_dedupe.py` (9 tests), driving runs through `CoverageJobs` with a real `CoverageEvaluator`, `LabeledModel` and the mocked `Retrieval`:
+
+1. eligibility (`uncertain_preparation`, `needs_context`, an uncertainty code, `incomplete` history from an assistant turn, `ambiguous` history from equal timestamps, `fallback` rewrite, empty intent give `None`); equal inputs give equal keys; the cutoff row ID does not change the key; each of the four texts, the intent, the history digest and the run identity does;
+2. three identical history-free rows and one different row: the model is called after preparation only for row 1 and the different row (by role: 2 scope, 2 aspects, 2 batch, 4 verification); rows 2 and 3 name row 1, are not model-evaluated, equal row 1 on every key outside `OWN_KEYS`, and keep their own row ID, ordinals, timestamp and session;
+3. prior turns: the same text after identical user-only prior turns in two sessions is copied; after different prior turns it is evaluated again;
+4. a first row sent to review is not a source; the second is evaluated and the third copies from it;
+5. a child process dies (`os._exit`) right after row 1's completed row is written; a new worker recovers the run, rebuilds the map from the store and copies row 2 with no model call;
+6. a second run over the same rows evaluates its first occurrence again and has different keys;
+7. `KNOWLEDGE_COVERAGE_DEDUPE=false` gives `"disabled"` and evaluates every row; a run whose settings lack `dedupe_policy` evaluates every row; `yes`, `1` and `""` raise `invalid_coverage_dedupe`;
+8. the column is in the evidence and the restricted export, `dedupe_key_sha256` is not; eligibility gives `deduplicated_row_uses_source` for the copy only; `_observe` skips the copy; the estimate response has the exact preview counts on a synthetic 6-row dataset (3 repeats, 1 other, 2 rows with equal-time history: 4 candidates, 2 distinct, 2 possible copies; a 3-row subset gives 1), no question text, and `None` with the setting off.
+
+Changed existing tests:
+
+- `tests/test_coverage_sizing.py::test_estimate_endpoint_shape_and_permissions` asserts the exact estimate response, which now has the `dedupe` key (7 distinct questions in one session: 7 candidates, 0 possible copies).
+- `tests/knowledge_coverage.frontend.test.cjs` (full-input estimate table test): the fixture view gains `dedupe` and one assertion checks the new line under the table.
+
+A mutation check (the `finally` guard disabled) made test 2 fail; the guard was restored.
+
+### Benchmark
+
+`scripts/benchmark_coverage_dedupe.py`: a synthetic 50-row input (40 distinct history-free questions plus 10 exact repeats, each row in its own session) through `CoverageJobs` with a real `CoverageEvaluator`, `LabeledModel` and the mocked retrieval, with the setting off and then on, 3 iterations each; then the map rebuild on the 918-row `synthetic_918` store with 40 keys. The setting is the only variable. "Off" is the before measurement, because with the setting off no key is computed and nothing is copied.
+
+```text
+conda run --no-capture-output -n faq python scripts/benchmark_coverage_dedupe.py
+{"calls_by_role": {"aspects": 50, "batch": 50, "scope": 50, "verification": 100}, "copied_rows": 0, "distinct_questions": 40, "iterations": 3, "median_wall_ms": 14956.348, "model_calls": 250, "retrieval_fetches": 100, "rows": 50, "scope": "mocked_model_and_retrieval", "variant": "dedupe_off", "wall_ms": [14956.348, 14844.733, 15246.236]}
+{"calls_by_role": {"aspects": 40, "batch": 40, "scope": 40, "verification": 80}, "copied_rows": 10, "distinct_questions": 40, "iterations": 3, "median_wall_ms": 13421.604, "model_calls": 200, "retrieval_fetches": 80, "rows": 50, "scope": "mocked_model_and_retrieval", "variant": "dedupe_on", "wall_ms": [13559.23, 13304.386, 13421.604]}
+{"iterations": 3, "measurements_ms": [211.958, 189.378, 187.476], "median_ms": 189.378, "rows": 918, "sources": 40, "variant": "map_rebuild_918"}
+```
+
+Model calls fall from 250 to 200 and retrieval fetches from 100 to 80, exactly the 10 repeats' share. The mocked model answers instantly, so wall time (−10%) is dominated by the journal and row file writes and by preparation, which copies still pay; on live serving the saving follows the call counts. Rebuilding the map once per attempt costs about 0.19 s on 918 rows.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_dedupe.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_execution_recovery.py tests/test_knowledge_operations.py tests/test_knowledge_coverage_access_jobs.py tests/test_coverage_sizing.py tests/test_coverage_continuation.py tests/test_knowledge_recommendations.py tests/test_coverage_depth_settings.py tests/test_validate_environment.py
+207 passed, 10 warnings in 282.06s (0:04:42)
+
+conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file .env --mode staging | grep -i "summary"
+Summary: 0 critical, 27 warning, 4 informational
+
+conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file Production_ENV --mode production | grep -i "summary"
+Summary: 6 critical, 24 warning, 4 informational
+(validator exit 2; the same six pre-existing empty credential placeholders as in earlier steps)
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+Also run before commit: `node --test tests/knowledge_coverage.frontend.test.cjs` (6 passed).
+
+Clean-checkout command (conda `faq`), on the unpushed `[12]` commit:
+
+```text
+uptime
+git worktree add /tmp/faq-clean-12 HEAD
+cd /tmp/faq-clean-12 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-12; echo "exit $status"
+```
+
+`/tmp/faq-a21-browser-node` exists, so the browser stage ran with `REQUIRE_BROWSER=1`. `uptime` before the run showed a load average of 0.63, the host's normal level.
+
+Run 1, on the first `[12]` commit (`f808a67`):
+
+```text
+1186 passed, 26 deselected, 59 warnings, 291 subtests passed in 329.88s (0:05:29)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1177 in step 11 to 1186, from the 9 new tests in `tests/test_coverage_dedupe.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. Only this log section changed after run 1, and the amended commit was checked again in a new clean worktree with the same command before push.

@@ -67,7 +67,8 @@ def _observe(store, meta, observed):
     for row_id in meta.get("selected_row_ids", []):
         row = store.read(rows / (row_id + ".json"))
         outcome = row.get("outcome", "pending")
-        if outcome == "pending" or row.get("processing_status") in {"pending", "running"}:
+        # A copy evaluated nothing; reference costs stay costs of real evaluations.
+        if outcome == "pending" or row.get("processing_status") in {"pending", "running"} or row.get("deduplicated_from_row_id"):
             continue
         completions, tokens = use.get(row_id, (0, 0))
         seconds = Fraction(str(row.get("duration_ms") or 0)) / 1000

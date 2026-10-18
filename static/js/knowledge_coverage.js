@@ -63,6 +63,10 @@
         });
         table.append(head, body); return table;
     }
+    // Shown under the sizing table; the estimate above still counts every row.
+    function dedupeLine(document, view) {
+        return view && view.dedupe ? [node(document, 'p', 'Repeated questions: ' + view.dedupe.possible_copies + " rows may reuse an earlier row's result", 'coverage-summary')] : [];
+    }
     function boot(document) {
         const root = document.getElementById('coverageRoot'); if (!root) return;
         const $ = id => document.getElementById('coverage' + id);
@@ -112,7 +116,7 @@
             if(!$('Sizing')) return;
             const view=currentSizing(), need=sizingRequirement(view);
             $('Sizing').hidden=mode()==='pilot';
-            $('SizingTable').replaceChildren(...(view && view.estimate ? [sizingTable(document,view)] : []));
+            $('SizingTable').replaceChildren(...(view && view.estimate ? [sizingTable(document,view)] : []), ...dedupeLine(document,view));
             $('SizingAckLabel').hidden=need!=='unsized'; $('PartialAckLabel').hidden=need!=='partial';
             $('SizingStatus').textContent=need==='pending' ? (sizingIncomplete ? 'Choose a dataset, snapshot, datasource and questions to see a cost estimate.' : 'Estimating cost from completed reference runs on this snapshot…')
                 : need==='unsized' ? 'No reference runs on this snapshot. Run a pilot first, or confirm an unsized run.'
@@ -251,7 +255,7 @@
                 }
             }
             const view=currentContinueSizing(), need=count ? sizingRequirement(view) : '';
-            $('ContinueSizingTable').replaceChildren(...(view && view.estimate ? [sizingTable(document,view)] : []));
+            $('ContinueSizingTable').replaceChildren(...(view && view.estimate ? [sizingTable(document,view)] : []), ...dedupeLine(document,view));
             $('ContinueSizingAckLabel').hidden=need!=='unsized'; $('ContinuePartialAckLabel').hidden=need!=='partial';
             $('ContinueSizingStatus').textContent=!count ? 'No unfinished rows. Tick the box to re-run rows that need review.'
                 : need==='pending' ? 'Estimating cost from completed reference runs on this snapshot…'

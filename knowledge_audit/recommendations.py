@@ -64,6 +64,8 @@ def eligibility(row,meta,observations=()):
     if not scope or scope.get('whole_kb_absence_proven') is not False or row.get('stopping_reason') not in {'candidate_exhausted','evaluation_limit'}:reasons.append('evaluation_scope_not_established')
     if meta.get('state')=='incompatible' or row.get('kb_snapshot_id')!=meta.get('snapshot_id'):reasons.append('incompatible_snapshot_or_run')
     if observations:reasons.append('conflicting_full_coverage_observation')
+    # A copy repeats its source's verdict; drafting happens once, on the source.
+    if row.get('deduplicated_from_row_id'):reasons.append('deduplicated_row_uses_source')
     return {'version':'recommendation-eligibility-1','eligible':not reasons,'reason_codes':list(dict.fromkeys(reasons)),
         'independent_human_gap_confirmation':'not_reviewed','calibration_status':'real_query_calibration_pending',
         'contradictory_observations':list(observations)}

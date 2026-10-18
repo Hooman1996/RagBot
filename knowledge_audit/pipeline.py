@@ -3,6 +3,7 @@ from __future__ import annotations
 from collections import defaultdict
 import time
 
+from knowledge_audit import dedupe as repeated
 from knowledge_audit.evidence import EvidenceIndex
 from knowledge_audit.history import AuditHistoryProvider
 from knowledge_audit.privacy import AuditError
@@ -14,7 +15,7 @@ from utils.read_only_audit import canonical_sha256
 class CoverageEvaluator:
     def __init__(self, *, snapshot, model, retrieval, preparer, redactor, dataset,
                  entry_budget=None, documents=None, checkpoint=None, batch_max_entries=2,
-                 initial_depth=150, broader_depth=300, max_entry_budget=300, verification_passes=2):
+                 initial_depth=150, broader_depth=300, max_entry_budget=300, verification_passes=2, dedupe=False):
         entry_budget = max_entry_budget if entry_budget is None else entry_budget
         if type(entry_budget) is not int or not 1 <= entry_budget <= max_entry_budget:
             raise AuditError("invalid_entry_budget")
@@ -29,6 +30,8 @@ class CoverageEvaluator:
         if type(verification_passes) is not int or verification_passes not in {1, 2}:
             raise AuditError("invalid_verification_passes")
         self.verification_passes = verification_passes
+        # Jobs set the run identity and an async key -> source-row lookup per run.
+        self.dedupe, self.dedupe_identity, self.dedupe_lookup = dedupe, None, None
         self.history = AuditHistoryProvider(dataset, redactor)
 
     async def evaluate(self, event, initial):
@@ -50,7 +53,7 @@ class CoverageEvaluator:
                   "support_arrangement": "unknown", "production_context_sufficiency": "not_evaluated",
                   "production_reachability": "unknown", "verification_result": "not_run",
                   "kb_snapshot_id": self.index.snapshot_id, "batch_results": [], "review_codes": [],
-                  "residual_review_codes": []}
+                  "residual_review_codes": [], "deduplicated_from_row_id": ""}
         try:
             prepared = await self.preparer.prepare(event, self.history, self.redactor, model_prepare=True)
             result.update(prepared)
@@ -59,6 +62,15 @@ class CoverageEvaluator:
                 result.update(processing_status="invalid_input" if prepared["preparation_status"] == "invalid_input" else "failed",
                               outcome="error", stopping_reason="invalid_input")
                 return result
+            # A repeated eligible question copies the same run's completed result;
+            # preparation already ran because the key needs its texts and intent.
+            dedupe_key = repeated.key(self.dedupe_identity, prepared) if self.dedupe and self.dedupe_lookup else None
+            if dedupe_key is not None:
+                result["dedupe_key_sha256"] = dedupe_key
+                source = await self.dedupe_lookup(dedupe_key)
+                if source is not None:
+                    result = repeated.copy_result(source, result)
+                    return result
             context = self.history.before(event)
             scope = await self.model.call("scope", {"question": prepared["standalone_query_redacted"] or prepared["normalized_query_redacted"],
                 "original_question": prepared["input_query_redacted"], "existing_intent": prepared["existing_intent"],
@@ -153,12 +165,14 @@ class CoverageEvaluator:
             result.update(processing_status="failed", coverage_status="uncertain", outcome="error",
                           stopping_reason="processing_error", error_code=category(error))
         finally:
-            result.setdefault("question_evidence", {"version": "question-evidence-1", "batches": self.evidence_batches,
-                "entry_phases": dict(self.entry_phases), "entry_status": self.entry_status})
-            result["batch_results"] = self.evidence_batches
-            result.update(evaluated_entry_ids=sorted(self.evaluated_ids), evaluated_entry_count=len(self.evaluated_ids),
-                          verifications=self.verifications, review_codes=list(dict.fromkeys(result.get("review_codes", []) + self.review_codes)),
-                          model_metrics=self.model.metrics[metric_start:], retrieval_metrics=self.retrieval.metrics[retrieval_start:],
+            # A copy keeps its source's coverage fields; only its own accounting is set.
+            if not result.get("deduplicated_from_row_id"):
+                result.setdefault("question_evidence", {"version": "question-evidence-1", "batches": self.evidence_batches,
+                    "entry_phases": dict(self.entry_phases), "entry_status": self.entry_status})
+                result["batch_results"] = self.evidence_batches
+                result.update(evaluated_entry_ids=sorted(self.evaluated_ids), evaluated_entry_count=len(self.evaluated_ids),
+                              verifications=self.verifications, review_codes=list(dict.fromkeys(result.get("review_codes", []) + self.review_codes)))
+            result.update(model_metrics=self.model.metrics[metric_start:], retrieval_metrics=self.retrieval.metrics[retrieval_start:],
                           validation_diagnostics=[d for m in self.model.metrics[metric_start:] for d in m.get("validation_diagnostics", [])],
                           output_recovery_count=sum(m.get("attempt", 1) > 1 for m in self.model.metrics[metric_start:]),
                           recovery_policy="json-invalid-stop-one-fresh-response-1",

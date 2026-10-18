@@ -173,7 +173,8 @@ test('full-input estimate table marks cells over the limit and Start waits for t
     const comparison={completions:{limit:200,expected:129,high:201,fits_expected:true,fits_high:false},
         tokens:{limit:1000000,expected:121334,high:193667,fits_expected:true,fits_high:true},
         seconds:{limit:3600,expected:5400,high:9000,fits_expected:false,fits_high:false},fits:false};
-    const view={row_count:918,estimate:{version:'coverage-sizing-1',row_count:918},comparison,reference:{run_ids:[rid],row_count:6},sizing_version:'coverage-sizing-1'};
+    const view={row_count:918,estimate:{version:'coverage-sizing-1',row_count:918},comparison,reference:{run_ids:[rid],row_count:6},sizing_version:'coverage-sizing-1',
+        dedupe:{policy:'repeated-question-1',candidate_rows:900,distinct_questions:870,possible_copies:30}};
     const requests=[];
     const saved={fetch:global.fetch,localStorage:global.localStorage,setInterval:global.setInterval,clearInterval:global.clearInterval,setTimeout:global.setTimeout,clearTimeout:global.clearTimeout};
     global.localStorage={getItem(){return null;},setItem(){}};
@@ -199,6 +200,7 @@ test('full-input estimate table marks cells over the limit and Start waits for t
         const sent=JSON.parse(estimates.at(-1).options.body);
         assert.equal(sent.execution_mode,'full_input'); assert.deepEqual(sent.row_ids,[]); assert.deepEqual(sent.documents,['Synthetic_FAQ']);
         const table=$('SizingTable').children[0]; assert.equal(table.tagName,'TABLE');
+        assert.equal($('SizingTable').children[1].textContent,"Repeated questions: 30 rows may reuse an earlier row's result");
         assert.match(text(table),/Completions/); assert.match(text(table),/Hours/); assert.match(text(table),/1\.5/);
         const rows=table.children[2].children, over=rows.flatMap(r=>r.children.filter(c=>c.dataset.over==='true').map(c=>r.children[0].textContent+':'+text(c)));
         assert.deepEqual(over,['Completions:201 · over limit','Hours:1.5 · over limit','Hours:2.5 · over limit']);

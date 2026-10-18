@@ -34,7 +34,8 @@ def _redact(value, redactor, key=""):
                           "history_row_ids", "excluded_equal_timestamp_ids", "history_digest",
                           "input_id", "kb_snapshot_id", "configuration_id", "preparation_code_id",
                           "snapshot_id", "bundle_id", "content_sha256", "source_content_sha256",
-                          "run_identity_id", "export_revision_id", "run_id", "source_run_id"}
+                          "run_identity_id", "export_revision_id", "run_id", "source_run_id",
+                          "deduplicated_from_row_id"}
         if (key in reference_keys or key.endswith("_sha256")) and re.fullmatch(r"(?:row|query|session|r|rev)_[0-9a-f]{32}|[0-9a-f]{64}", value):
             return value
         if key in {"chunk_id", "faq_entry_id", "support_id", "entry_id", "supporting_chunk_ids", "supporting_faq_ids", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids", "related_faq_ids", "equivalent_faq_ids"} and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
@@ -126,7 +127,7 @@ COVERAGE_FIELDS = FIELDS + ("outcome", "support_arrangement", "production_contex
     "equivalent_existing_faq_ids", "rubric_version", "model_versions", "prompt_versions", "tokenizer_versions",
     "normalization_version", "alias_version", "classifier_version", "run_settings_version", "review_codes",
     "residual_review_codes", "run_identity_id", "export_revision_id", "review_codes_by_phase", "evidence_phases", "validation_diagnostics",
-    "output_recovery_count", "recovery_policy", "failure_diagnostics", "batch_max_entries")
+    "output_recovery_count", "recovery_policy", "failure_diagnostics", "batch_max_entries", "deduplicated_from_row_id")
 ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
     "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
     "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "failure_diagnostics", "request_journal",

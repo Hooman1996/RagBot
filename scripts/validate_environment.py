@@ -425,6 +425,10 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="2", minimum=1, maximum=2, component="Knowledge coverage audit", restart="FastAPI",
             usage="knowledge_audit/pipeline.py CoverageEvaluator.verify passes per accepted proof; 2 re-verifies in reversed evidence order",
         ),
+        "KNOWLEDGE_COVERAGE_DEDUPE": VariableSpec(
+            kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/dedupe.py repeated-question key and copy; knowledge_audit/pipeline.py CoverageEvaluator.evaluate reuses the same run's completed result",
+        ),
         "KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS": VariableSpec(
             default="", component="Knowledge coverage audit", restart="FastAPI",
             usage="knowledge_audit/privacy.py Redactor.kb_text public-contact allow-list for KB snapshots",

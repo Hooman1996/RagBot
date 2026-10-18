@@ -151,7 +151,10 @@ def test_estimate_endpoint_shape_and_permissions(client_runtime, monkeypatch):
     empty = client.post('/api/knowledge-coverage/runs/estimate', json=estimate_body(d, s, data), headers=csrf(client))
     assert empty.status_code == 200, empty.text
     assert empty.json() == {'row_count': len(data.selected), 'estimate': None, 'comparison': None,
-                            'reference': {'run_ids': [], 'row_count': 0}, 'sizing_version': sizing.VERSION}
+                            'reference': {'run_ids': [], 'row_count': 0}, 'sizing_version': sizing.VERSION,
+                            # Seven distinct questions in one session: nothing to copy.
+                            'dedupe': {'policy': 'repeated-question-1', 'candidate_rows': 7, 'distinct_questions': 7,
+                                       'possible_copies': 0}}
     run = reference(store, d, s, data)
     sized = client.post('/api/knowledge-coverage/runs/estimate', json=estimate_body(d, s, data, operational_limits=LOW),
                         headers=csrf(client)).json()
