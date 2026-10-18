@@ -44,6 +44,7 @@ class CoverageSettings:
     initial_entries: int = 50
     max_entry_budget: int = 300
     public_contacts: tuple[str, ...] = ()
+    verification_passes: int = 2
 
     def __post_init__(self):
         if not isinstance(self.operational_limits,Limits):raise AuditError("invalid_operational_limits")
@@ -63,6 +64,8 @@ class CoverageSettings:
             raise AuditError("invalid_coverage_depths")
         if type(self.public_contacts) is not tuple or any(type(c) is not str for c in self.public_contacts):
             raise AuditError("invalid_coverage_public_contacts")
+        if type(self.verification_passes) is not int or self.verification_passes not in {1, 2}:
+            raise AuditError("invalid_verification_passes")
 
     def manifest(self):
         from utils.read_only_audit import canonical_sha256
@@ -78,7 +81,9 @@ class CoverageSettings:
                 "initial_entries": self.initial_entries, "maximum_distinct_entries": self.max_entry_budget, "batch_entries": self.batch_max_entries,
                 "batch_max_entries": self.batch_max_entries, "batch_policy": "full-entries-configurable-1",
                 "pilot_query_limit": 5, "model_concurrency": 1, "referral_guard_version": referrals.VERSION,
-                "reachability_policy_version": "redaction-reachability-1"}
+                "reachability_policy_version": "redaction-reachability-1",
+                "verification_passes": self.verification_passes,
+                "verification_policy": "order-permuted-2" if self.verification_passes == 2 else "single-pass-1"}
 
 
 def load_coverage_settings(environ=None) -> CoverageSettings:
@@ -114,6 +119,10 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         raise AuditError("invalid_coverage_public_contacts")
     contacts = tuple(dict.fromkeys(normalize_public_contact(entry)
                                    for entry in raw_contacts.split(","))) if raw_contacts.strip() else ()
+    try:
+        passes = integer("KNOWLEDGE_COVERAGE_VERIFICATION_PASSES", 2, 1, 2)
+    except AuditError:
+        raise AuditError("invalid_verification_passes") from None
     return CoverageSettings(path, grants,
         integer("KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", 5242880, 1024, 20971520),
         integer("KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS", 1200, 256, 4096),
@@ -132,7 +141,7 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         integer("KNOWLEDGE_COVERAGE_BROADER_DEPTH",300,2,1000),
         integer("KNOWLEDGE_COVERAGE_INITIAL_ENTRIES",50,1,1000),
         integer("KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET",300,1,1000),
-        contacts)
+        contacts, verification_passes=passes)
 
 
 def grants_for(user_id: int) -> frozenset[str]:

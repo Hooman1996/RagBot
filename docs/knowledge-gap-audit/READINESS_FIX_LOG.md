@@ -919,3 +919,128 @@ exit 0
 ```
 
 The pytest count rose from 1097 in step 06 to 1110, from the 13 new tests. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after run 3. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [08] Accept a proof only when verification agrees in both evidence orders; add a stability report
+
+### Problem
+
+Verification uses the same served model as evaluation, with `temperature=0` and a fixed seed, so it is a self-consistency check, not independent evidence. Row 121 was `possible_partial_gap` in A2 and `covered_reachable` in A2.2; row 518 was `covered_not_reachable` in A2.1 and a schema error in A2.2. Those runs also changed rubric and code, so batch size cannot be shown to be the cause. `CoverageEvaluator.proof_payload` always presents evidence in one canonical order, so a verifier whose answer depends on that order was never detected.
+
+### Rule (approved by the owner)
+
+1. **Second verification pass**, configurable with `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES` (1 or 2, default 2). When the first pass accepts a proof, the same proof is verified again with `supports`, `source_evidence` and `observed_conflicts` in reversed order. Conflict IDs keep their numbers. The proof is accepted only when both passes accept it. The reversed pass runs every check of the first: the conflict-limit and token checks, aspect and conflict identity, the per-conflict verdicts from step 04, and the redaction downgrade.
+   - If the reversed pass does not accept, the final verdict is the primary verdict with `verdict: "uncertain"` and the explanation "Verification changed with evidence order; review required." Its proof codes are the union of both passes' codes plus `verification_order_unstable`, and `verification_unresolved` is added once.
+   - A primary verdict that is not `accepted` makes no second call.
+   - `verifications` holds both passes: `origin` and `origin + ":reversed"`, with the same `bundle_id`. Only the final verdict is cached and stored in the proof, so a cache hit makes no model call.
+   - With 1 pass, behaviour is the same as before this step.
+2. **Read-only stability report**, `scripts/knowledge_coverage_stability_report.py`, comparing completed runs of the same rows on one snapshot that differ only in batch size. The runbook is `docs/knowledge-gap-audit/STABILITY_PROTOCOL.md`.
+
+### Changes
+
+- `knowledge_audit/settings.py`: `CoverageSettings.verification_passes = 2`, validated as an `int` in `{1, 2}` (`invalid_verification_passes`). Loaded with `integer("KNOWLEDGE_COVERAGE_VERIFICATION_PASSES", 2, 1, 2)` and passed by keyword. The manifest gained `verification_passes` and `verification_policy` (`order-permuted-2` or `single-pass-1`).
+- `knowledge_audit/pipeline.py`: `CoverageEvaluator(verification_passes=2)`, validated like `batch_max_entries`. The body of `verify` after the cache check moved unchanged into `_verification_pass(payload, conflicts, entries) -> (verdict, codes)`; `verify` runs the primary pass, the reversed pass when the rule applies, and combines them. `verification_order_unstable` is in `BLOCKING_CODES`.
+- `knowledge_audit/service.py`: `build_engine` passes `verification_passes=pinned["verification_passes"]`, the run's pinned value.
+- `knowledge_audit/api.py`: `invalid_verification_passes` is in `SAFE_API_CODES`.
+- `static/js/knowledge_coverage.js`: label `verification_order_unstable: 'Verification depended on evidence order'`.
+- Env: `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES=2` with the agreed comment, after `KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET`, in `.env`, `env.example`, `.env.example.generated`, `Production_ENV` and `Production_ENV.example`. `.env` and `Production_ENV` are local and not staged. `scripts/validate_environment.py` has the `VariableSpec` (`int`, default 2, 1–2, Knowledge coverage audit, restart FastAPI, usage `knowledge_audit/pipeline.py CoverageEvaluator.verify`).
+- `scripts/knowledge_coverage_stability_report.py`: arguments `--owner-id` (default 0), repeatable `--run-id` (at least 2) and `--row-id` (at least 1), and `--output DIR`, which must pass `private_directory`. It reads runs with `store.owned` and rows with `store.row` only. Refusals exit 2 and print only `snapshot_mismatch`, `code_version_mismatch`, `run_not_completed` or `row_missing`. It writes `stability-report.json` and `stability-report.md`, mode 0600, with batch size, outcome, coverage status, aspect counts and supported aspect IDs, support triples, `chunk_id:sentence_number` refs, verification origins and verdicts, and completion and token counts. Aspect descriptions are compared in memory and only the boolean is written. A row passes when aspect checklists, outcomes and support triples (minimum pairwise Jaccard at least 0.9) all agree. Exit 0 when every row passes, 1 otherwise.
+
+Runs created before this step cannot resume (`audit_runtime_identity_drift`), because the manifest gained `verification_passes` and `verification_policy`. A run pinned at 2 passes also refuses to resume under 1, and the reverse.
+
+### Existing tests and calibration
+
+No outcome, coverage status or calibration result changed. `tests/test_knowledge_coverage_calibration.py` and the other focused files passed with no change to an expected label. Three tests count verification calls and now see exactly one more call per accepted proof, and one test counts the coverage CLIs:
+
+| Test | Before | After | Why |
+|---|---|---|---|
+| `tests/test_knowledge_coverage_pipeline.py::test_exact_and_paraphrase_verified_and_reachable` (both parameters) | 1 | 2 | One accepted production proof, verified in both orders. |
+| `tests/test_coverage_conflict_verdicts.py::test_assessed_conflict_lets_the_proof_stand` (both parameters) | 2 | 4 | Two accepted proofs (`initial:2` and `conflict_reverification`), each verified in both orders. |
+| `tests/test_knowledge_execution_recovery.py::test_completed_boundary_survives_process_death_without_repeat` (both parameters) | 1 verification | 2 verification | The process is killed after a validated batch or verification and the run is recovered. The accepted proof is verified in both orders, and neither call is repeated after recovery; `scope`, `aspects` and `batch` stay at 1. |
+| `tests/test_coverage_deployment_gate.py::test_cli_gate_coverage` | 9 scripts | 10 scripts | The new `scripts/knowledge_coverage_stability_report.py`. The test's rule that every coverage CLI except cleanup calls `require_coverage_enabled` after `load_dotenv` now covers it too. |
+
+No scripted fake model ran out of responses; the shared `LabeledModel` answers every verification call.
+
+### Cost
+
+- One extra verification completion per accepted proof. Proofs that the first pass does not accept add nothing. A row whose view gains new conflicts can have more than one accepted proof, and each one is verified twice.
+- The reversed pass also makes one token-count request (`AuditModel.fits`), which is not a completion.
+- The extra prompt is the same size as the first verification prompt, with the same content in a different order. On the staging runs recorded before this step (6 runs, 8 verification calls; token counts only were read), a verification call used 1,270–2,969 prompt tokens (median 2,010.5) and at most 152 completion tokens (median 130). Step 10 uses these numbers for sizing.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- `integer(..., 1, 2)` raises `invalid_coverage_integer` for an out-of-range value, while the test plan requires `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES=3` to raise `invalid_verification_passes`. The loader keeps the specified `integer` call and re-raises its error as `invalid_verification_passes`, so a malformed value (`two`) also gives that code.
+- Each pass's record is appended to `verifications` as soon as that pass returns, so if the reversed pass raises a validation error, the row (an error) still shows the primary record.
+- When the reversed pass rejects, `verification_result` of a row that is not covered is `rejected`, by the existing rule that any rejected verification sets it.
+- Stability report: a missing, foreign or unreadable run gives `run_not_completed`; a row not selected in a run, or still pending, gives `row_missing`. The checklist comparison uses `(aspect_id, description)` pairs. Two empty support sets have Jaccard 1.0. Prompt and completion token sums are reported separately. Repeated IDs are counted once. An existing report file is refused with `stability_report_exists`, and any unexpected error prints only `stability_report_failed`. It is gated like every coverage CLI except cleanup: `main` loads `.env` and calls `require_coverage_enabled` before opening the store, as `test_cli_gate_coverage` requires. The tests pass a temporary store to `main` instead, which skips that loading so the real `.env` never enters the test process. Opening the store takes the shared retention lock file, as every store reader does.
+- `tests/test_coverage_order_verification.py` tests `build_engine` by replacing its service collaborators with fakes and stopping at the `CoverageEvaluator` construction, so no network or model is used. It also checks that a run without a pinned pass count (created before this step) cannot resume.
+- `scripts/validate_environment.py --env-file Production_ENV --mode production` exits 2 with the same 6 critical placeholder findings as in steps 03a and 07; this step adds none.
+
+### AGENTS.md note
+
+This step changes the audit's judgement and cost: a proof whose acceptance depends on evidence order now goes to review, and each accepted proof costs one more verification call. It does not change retrieval, prompts, models or the chatbot. No performance change to the chatbot; no benchmark was required. The live L2 experiment is out of scope and is run by the operator on staging using the runbook.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_order_verification.py tests/test_coverage_stability_report.py tests/test_coverage_redacted_reachability.py tests/test_coverage_referral_guard.py tests/test_coverage_conflict_verdicts.py tests/test_coverage_depth_settings.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_coverage_calibration.py tests/test_knowledge_recommendations.py tests/test_validate_environment.py
+194 passed, 3 warnings in 18.22s
+
+conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file .env --mode staging | tail -1
+- [INFORMATIONAL] REQUEST_CONCURRENCY_LIMIT, ... QDRANT_CONCURRENCY: overlap (concurrency and pools): Each limit applies at a different queue or resource boundary.
+Summary line: Summary: 0 critical, 27 warning, 4 informational; validator exit 0
+
+conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file Production_ENV --mode production | tail -1
+- [INFORMATIONAL] REQUEST_CONCURRENCY_LIMIT, ... QDRANT_CONCURRENCY: overlap (concurrency and pools): Each limit applies at a different queue or resource boundary.
+Summary line: Summary: 6 critical, 24 warning, 4 informational; validator exit 2 (pre-existing placeholders)
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+`tail -1` prints the validator's last item, an informational line; the `Summary` line was read from the same output with `grep '^Summary'`. Both reports list `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES` as set, with no finding. The 24 new tests are 14 in `tests/test_coverage_order_verification.py` and 10 in `tests/test_coverage_stability_report.py`.
+
+Clean-checkout command (conda `faq`), run on the unpushed `[08]` commit:
+
+```text
+git worktree add /tmp/faq-clean-08 HEAD
+cd /tmp/faq-clean-08 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-08; echo "exit $status"
+```
+
+Run 1, on the first `[08]` commit:
+
+```text
+3 failed, 1131 passed, 26 deselected, 58 warnings, 291 subtests passed in 258.01s (0:04:18)
+pytest: FAIL
+exit 1
+```
+
+The three failures were `tests/test_knowledge_execution_recovery.py::test_completed_boundary_survives_process_death_without_repeat[batch]` and `[verification]` (verification calls counted 2, expected 1) and `tests/test_coverage_deployment_gate.py::test_cli_gate_coverage` (10 coverage scripts, expected 9; the new script was not gated). The fixes are in "Existing tests and calibration" and "Implementation decisions" above; the report script now calls `require_coverage_enabled`. They were amended into the `[08]` commit, and the focused set above was run again after them.
+
+Run 2, on the amended `[08]` commit:
+
+```text
+1134 passed, 26 deselected, 58 warnings, 291 subtests passed in 257.04s (0:04:17)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1110 in step 07 to 1134, from the 24 new tests. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after run 2. The amended commit was checked again in a new clean worktree with the same command before push.

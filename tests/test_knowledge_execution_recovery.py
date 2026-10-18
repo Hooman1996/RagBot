@@ -237,7 +237,8 @@ def test_completed_boundary_survives_process_death_without_repeat(tmp_path,cut):
     assert result['outcome']=='covered_reachable' and result['attempt_count']==2
     assert result['checkpoint_reuse_count']>=3
     recorded=calls.read_text().splitlines()
-    assert recorded.count('scope')==recorded.count('aspects')==recorded.count('batch')==recorded.count('verification')==1
+    # The accepted proof is verified in both evidence orders; neither call repeats.
+    assert recorded.count('scope')==recorded.count('aspects')==recorded.count('batch')==1 and recorded.count('verification')==2
     assert len(store.rows(meta['run_id'],1))==3
 
 

@@ -159,7 +159,7 @@ def test_exact_and_paraphrase_verified_and_reachable(question):
     assert row['coverage_status']=='full' and row['outcome']=='covered_reachable'
     assert row['support_arrangement']=='single_entry'
     assert row['verification_result']=='accepted'
-    assert len([c for c in model.calls if c[0]=='verification'])==1  # one immutable production proof, no duplicate verification
+    assert len([c for c in model.calls if c[0]=='verification'])==2  # one immutable production proof, verified in both evidence orders
     assert not any(m['purpose']=='broader_audit' for m in row['retrieval_metrics'])
 
 

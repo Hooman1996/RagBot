@@ -63,7 +63,7 @@ def test_assessed_conflict_lets_the_proof_stand(assessment):
     assert row['review_codes'] == []
     assert 'evidence_conflict' in row['audit_assessment']['resolved_review_codes']
     assert row['audit_assessment']['conflict_assessments'][0]['assessment'] == assessment
-    assert len(verification_calls(model)) == 2
+    assert len(verification_calls(model)) == 4  # two accepted proofs, each verified in both evidence orders
 
 
 class NoAssessments(ConflictModel):

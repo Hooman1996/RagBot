@@ -14,7 +14,7 @@ from utils.read_only_audit import canonical_sha256
 class CoverageEvaluator:
     def __init__(self, *, snapshot, model, retrieval, preparer, redactor, dataset,
                  entry_budget=None, documents=None, checkpoint=None, batch_max_entries=2,
-                 initial_depth=150, broader_depth=300, max_entry_budget=300):
+                 initial_depth=150, broader_depth=300, max_entry_budget=300, verification_passes=2):
         entry_budget = max_entry_budget if entry_budget is None else entry_budget
         if type(entry_budget) is not int or not 1 <= entry_budget <= max_entry_budget:
             raise AuditError("invalid_entry_budget")
@@ -26,6 +26,9 @@ class CoverageEvaluator:
         if type(batch_max_entries) is not int or not 1 <= batch_max_entries <= 5:
             raise AuditError("invalid_coverage_batch_max_entries")
         self.batch_max_entries = batch_max_entries
+        if type(verification_passes) is not int or verification_passes not in {1, 2}:
+            raise AuditError("invalid_verification_passes")
+        self.verification_passes = verification_passes
         self.history = AuditHistoryProvider(dataset, redactor)
 
     async def evaluate(self, event, initial):
@@ -443,6 +446,32 @@ class CoverageEvaluator:
         if identity in self.verification_cache:
             self.last_verdict = self.verification_cache[identity]
             return self.last_verdict
+        verdict, proof_codes = await self._verification_pass(payload, conflicts, entries)
+        self.verifications.append({"origin": origin, "bundle_id": identity, **verdict})
+        if verdict["verdict"] == "accepted" and self.verification_passes == 2:
+            # The same model checks its own work; an acceptance that depends on
+            # evidence order is not evidence. Conflict IDs keep their numbers.
+            reversed_payload = {**payload, "supports": payload["supports"][::-1],
+                                "source_evidence": payload["source_evidence"][::-1],
+                                "observed_conflicts": payload["observed_conflicts"][::-1]}
+            second, second_codes = await self._verification_pass(reversed_payload, conflicts, entries)
+            self.verifications.append({"origin": origin + ":reversed", "bundle_id": identity, **second})
+            if second["verdict"] != "accepted":
+                verdict = {**verdict, "verdict": "uncertain", "explanation": "Verification changed with evidence order; review required."}
+                proof_codes = list(dict.fromkeys(proof_codes + second_codes + ["verification_order_unstable"]))
+        if verdict["verdict"] != "accepted":
+            proof_codes.append("verification_unresolved")
+        self.verification_cache[identity] = verdict
+        self.last_verdict = verdict
+        self.proofs.append({"entry_ids": [e["chunk_id"] for e in entries],
+                            "witness_entry_ids": sorted({s["entry_id"] for s in supports}),
+                            "witness": list(supports), "verdict": verdict, "bundle_id": identity, "codes": proof_codes,
+                            "conflict_ids_seen": frozenset(conflict_key(r) for r in conflicts)})
+        self.review_codes.extend(proof_codes)
+        return verdict
+
+    async def _verification_pass(self, payload, conflicts, entries) -> tuple[dict, list]:
+        """One verification of one evidence order; the verdict and its proof codes."""
         proof_codes = []
         if len(conflicts) > MAX_VIEW_CONFLICTS:
             proof_codes.append("conflict_limit_exceeded")
@@ -471,17 +500,7 @@ class CoverageEvaluator:
                     verdict = {**verdict, "verdict": "rejected" if "contradicts" in found else "uncertain"}
             if verdict["verdict"] == "accepted" and any(entry["redaction_changed"] for entry in entries):
                 verdict = {**verdict, "verdict": "uncertain", "explanation": "Source redaction may affect conditions; review required."}
-        if verdict["verdict"] != "accepted":
-            proof_codes.append("verification_unresolved")
-        self.verifications.append({"origin": origin, "bundle_id": identity, **verdict})
-        self.verification_cache[identity] = verdict
-        self.last_verdict = verdict
-        self.proofs.append({"entry_ids": [e["chunk_id"] for e in entries],
-                            "witness_entry_ids": sorted({s["entry_id"] for s in supports}),
-                            "witness": list(supports), "verdict": verdict, "bundle_id": identity, "codes": proof_codes,
-                            "conflict_ids_seen": frozenset(conflict_key(r) for r in conflicts)})
-        self.review_codes.extend(proof_codes)
-        return verdict
+        return verdict, proof_codes
 
     def apply_result(self, result, audit, production, broadened):
         if production["coverage"] == "full":
@@ -548,7 +567,7 @@ MAX_VIEW_CONFLICTS = 40
 # search that did not finish; note codes are informational residual codes.
 BLOCKING_CODES = frozenset({"evidence_conflict", "verification_unresolved", "incompatible_conditions",
     "conflict_contradicts_proof", "conflict_undetermined", "conflict_limit_exceeded",
-    "referral_support_unclassified"})
+    "referral_support_unclassified", "verification_order_unstable"})
 RESIDUAL_CODES = frozenset({"entry_too_long", "evaluation_failed", "subset_batch_uncertainty",
     "batch_support_unresolved", "batch_uncertain", "kb_redaction_affected"})
 SEARCH_CODES = frozenset({"compatibility_unverified", "bounded_bundle_search_unresolved",

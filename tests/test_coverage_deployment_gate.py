@@ -77,7 +77,7 @@ def test_cli_gate_coverage():
     paths=sorted({*ROOT.glob('scripts/knowledge_audit_*.py'),
                   *ROOT.glob('scripts/knowledge_coverage_*.py'),
                   *ROOT.glob('scripts/knowledge_recommendation_*.py')})
-    assert len(paths)==9
+    assert len(paths)==10
     for path in paths:
         tree=ast.parse(path.read_text())
         main=next(n for n in tree.body if isinstance(n,ast.FunctionDef) and n.name=='main')

@@ -15,6 +15,7 @@
         kb_redaction_affected: 'Evidence contained scrubbed personal data or secrets',
         referral_only_support: 'A ticket referral was not counted as evidence for a fact',
         referral_support_unclassified: 'A ticket referral supports an aspect that could not be classified',
+        verification_order_unstable: 'Verification depended on evidence order',
         redaction_changed_production_query: 'Question was redacted; production reachability not measurable',
         production_reachability_unresolved: 'Production reachability could not be determined',
         redaction_changed_history: 'Earlier conversation turns were redacted',
