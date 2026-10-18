@@ -64,6 +64,7 @@ class RerankerBatchingTests(unittest.IsolatedAsyncioTestCase):
         search._http=client
         search.tei_rerank_url='http://synthetic.test'
         search.rerank_max_client_batch_size=limit
+        search.rerank_verified_max_batch_size=None
         search._tei_reranker_active=search._tei_pool_timeout_total=0
         return search,server
 
@@ -263,10 +264,13 @@ class RerankerBatchingTests(unittest.IsolatedAsyncioTestCase):
         for server_limit,client_limit,allowed in ((20,50,False),(64,65,False),(20,10,True),(200,150,True)):
             with self.subTest(server=server_limit,client=client_limit):
                 search,server=self.search(Server(limit=server_limit),limit=client_limit)
-                if allowed:await self.invoke(search,'context',1)
-                else:
-                    with self.assertRaises(ServiceProtocolError):await self.invoke(search,'context',1)
-                    self.assertEqual(server.posts,[])
+                observer=Observer()
+                with bind_pipeline_observer(observer):
+                    await self.invoke(search,'context',1 if allowed else 150)
+                expected = [1] if allowed else ([20]*7+[10] if server_limit==20 else [64,64,22])
+                self.assertEqual([len(p['texts']) for p in server.posts],expected)
+                self.assertEqual(observer.records[0].metrics['batch_limit_source'],'server')
+                self.assertEqual(observer.records[0].metrics['effective_batch_size'],min(client_limit,server_limit))
                 self.assertEqual(search._tei_reranker_active,0)
 
     async def test_invalid_capabilities_fail_closed_and_are_not_cached(self):
@@ -303,6 +307,121 @@ class RerankerBatchingTests(unittest.IsolatedAsyncioTestCase):
             self.assertEqual(search._tei_pool_timeout_total,int(failure=='pool'))
             self.assertEqual(search._rerank_server_limits,{})
 
+    async def test_invalid_capabilities_use_verified_contract_without_caching_success(self):
+        for info in ({},{'max_client_batch_size':0},{'max_client_batch_size':True},{'max_client_batch_size':'64'},[]):
+            for path in ('context','related'):
+                with self.subTest(info=info,path=path):
+                    search,server=self.search(Server(info=info))
+                    search.rerank_verified_max_batch_size=40
+                    observer=Observer()
+                    with bind_pipeline_observer(observer):await self.invoke(search,path,150)
+                    self.assertEqual([len(p['texts']) for p in server.posts],[40,40,40,30])
+                    metrics=observer.records[0].metrics
+                    if path=='related':metrics=metrics['auxiliary_related_questions']
+                    self.assertEqual(metrics['batch_limit_source'],'contract')
+                    self.assertEqual(metrics['client_batch_size'],50)
+                    self.assertEqual(metrics['effective_batch_size'],40)
+                    self.assertEqual(metrics['verified_batch_limit'],40)
+                    self.assertIsNone(metrics['server_batch_limit'])
+                    self.assertEqual(search._rerank_server_limits,{})
+                    self.assertEqual(search._tei_reranker_active,0)
+
+    async def test_capability_failures_use_contract_but_cancellation_propagates(self):
+        for failure in ('json','http','pool','cancel'):
+            for path in ('context','related'):
+                with self.subTest(failure=failure,path=path):
+                    reached=asyncio.Event()
+                    server=Server()
+                    async def handler(request):
+                        if request.method=='POST':return await server.handle(request)
+                        server.gets+=1
+                        if failure=='json':return httpx.Response(200,text='{invalid')
+                        if failure=='http':return httpx.Response(503)
+                        if failure=='pool':raise httpx.PoolTimeout('synthetic',request=request)
+                        reached.set()
+                        await asyncio.Event().wait()
+                    search,_=self.search(server)
+                    search.rerank_verified_max_batch_size=40
+                    client=httpx.AsyncClient(transport=httpx.MockTransport(handler))
+                    self.clients.append(client); search._http=client
+                    observer=Observer()
+                    with bind_pipeline_observer(observer):
+                        if failure=='cancel':
+                            task=asyncio.create_task(self.invoke(search,path,150))
+                            await asyncio.wait_for(reached.wait(),1)
+                            task.cancel()
+                            with self.assertRaises(asyncio.CancelledError):await task
+                            self.assertEqual(server.posts,[])
+                            self.assertEqual(search._rerank_capability_failed_at,{})
+                        else:
+                            await self.invoke(search,path,150)
+                            self.assertEqual([len(p['texts']) for p in server.posts],[40,40,40,30])
+                            metrics=observer.records[0].metrics
+                            if path=='related':metrics=metrics['auxiliary_related_questions']
+                            self.assertEqual(metrics['batch_limit_source'],'contract')
+                            self.assertEqual(metrics['capability_request_count'],1)
+                            self.assertGreaterEqual(metrics['capability_duration_ms'],0)
+                    self.assertEqual(server.gets,1)
+                    self.assertEqual(search._tei_reranker_active,0)
+                    self.assertEqual(search._rerank_server_limits,{})
+
+    async def test_capability_failure_retry_window_is_per_url(self):
+        search,server=self.search(Server(info={}))
+        search.rerank_verified_max_batch_size=40
+        settings=replace(PERFORMANCE_SETTINGS,tei_rerank_capability_retry_seconds=30)
+        with patch('utils.persian_hybrid_search.PERFORMANCE_SETTINGS',settings),patch('utils.persian_hybrid_search.time.monotonic') as clock:
+            clock.return_value=1000
+            await self.invoke(search,'context',150)
+            clock.return_value=1029
+            await self.invoke(search,'related',150)
+            self.assertEqual(server.gets,1)
+            clock.return_value=1030
+            await self.invoke(search,'context',150)
+            self.assertEqual(server.gets,2)
+            search.tei_rerank_url='http://other.synthetic.test'
+            await self.invoke(search,'context',150)
+            self.assertEqual(server.gets,3)
+        self.assertEqual([len(p['texts']) for p in server.posts],[40,40,40,30]*4)
+        self.assertEqual(search._rerank_server_limits,{})
+
+    async def test_successful_capability_expires_and_picks_up_changed_limit(self):
+        search,server=self.search(Server(limit=64),limit=65)
+        settings=replace(PERFORMANCE_SETTINGS,tei_rerank_capability_ttl_seconds=600)
+        with patch('utils.persian_hybrid_search.PERFORMANCE_SETTINGS',settings),patch('utils.persian_hybrid_search.time.monotonic') as clock:
+            clock.return_value=1000
+            await self.invoke(search,'context',150)
+            clock.return_value=1599
+            await self.invoke(search,'related',150)
+            self.assertEqual(server.gets,1)
+            server.limit=32
+            clock.return_value=1600
+            await self.invoke(search,'context',150)
+            self.assertEqual(server.gets,2)
+        self.assertEqual([len(p['texts']) for p in server.posts],[64,64,22]*2+[32,32,32,32,22])
+        self.assertEqual(search._rerank_server_limits[search.tei_rerank_url],32)
+
+    async def test_server_below_contract_uses_server_limit(self):
+        for path in ('context','related'):
+            search,server=self.search(Server(limit=32))
+            search.rerank_verified_max_batch_size=50
+            observer=Observer()
+            with bind_pipeline_observer(observer):await self.invoke(search,path,150)
+            self.assertEqual([len(p['texts']) for p in server.posts],[32,32,32,32,22])
+            metrics=observer.records[0].metrics
+            if path=='related':metrics=metrics['auxiliary_related_questions']
+            self.assertEqual(metrics['batch_limit_source'],'server_below_contract')
+            self.assertEqual((metrics['client_batch_size'],metrics['effective_batch_size'],
+                metrics['server_batch_limit'],metrics['verified_batch_limit']),(50,32,32,50))
+
+    async def test_rerank_capability_returns_effective_limit_or_none(self):
+        for info,contract,expected in (({'max_client_batch_size':32},50,32),
+                ({'max_client_batch_size':64},None,50),({},40,40),({},None,None)):
+            search,server=self.search(Server(info=info))
+            search.rerank_verified_max_batch_size=contract
+            self.assertEqual(await search.rerank_capability(),expected)
+            self.assertEqual(server.gets,1)
+            self.assertEqual(server.posts,[])
+
     async def test_closed_client_sends_no_request(self):
         search,server=self.search()
         search._closed=True
@@ -316,16 +435,34 @@ class RerankBatchConfigurationTests(unittest.TestCase):
         with patch.dict(os.environ,{},clear=True):
             settings=load_performance_settings()
         self.assertEqual(settings.tei_rerank_max_client_batch_size,50)
+        self.assertIsNone(settings.tei_rerank_verified_max_batch_size)
+        self.assertEqual(settings.tei_rerank_capability_ttl_seconds,600)
+        self.assertEqual(settings.tei_rerank_capability_retry_seconds,30)
+        keys={'TEI_RERANK_VERIFIED_MAX_BATCH_SIZE':None,
+              'TEI_RERANK_CAPABILITY_TTL_SECONDS':'600',
+              'TEI_RERANK_CAPABILITY_RETRY_SECONDS':'30'}
+        for key,default in keys.items():
+            spec=_specs()[key]
+            self.assertEqual((spec.kind,spec.default,spec.minimum),('int',default,1))
+        self.assertEqual(_specs()['TEI_RERANK_VERIFIED_MAX_BATCH_SIZE'].required,('production',))
         spec=_specs()['TEI_RERANK_MAX_CLIENT_BATCH_SIZE']
         self.assertEqual((spec.kind,spec.default,spec.minimum),('int','50',1))
         for name in ('env.example','Production_ENV','.env.example.generated'):
             text=(Path(__file__).resolve().parents[1]/name).read_text()
             self.assertEqual(text.count('TEI_RERANK_MAX_CLIENT_BATCH_SIZE=50'),1)
+            for key in keys:
+                self.assertEqual(len(re.findall(r'^'+key+'=',text,re.MULTILINE)),1)
 
     def test_invalid_values_and_embedding_independence(self):
         for value in ('0','-1','1.5','true','bad'):
             with self.subTest(value=value),patch.dict(os.environ,{'TEI_RERANK_MAX_CLIENT_BATCH_SIZE':value},clear=True):
                 with self.assertRaises(ValueError):load_performance_settings()
+        for key in ('TEI_RERANK_VERIFIED_MAX_BATCH_SIZE','TEI_RERANK_CAPABILITY_TTL_SECONDS','TEI_RERANK_CAPABILITY_RETRY_SECONDS'):
+            for value in ('0','-1','1.5','bad'):
+                with self.subTest(key=key,value=value),patch.dict(os.environ,{key:value},clear=True):
+                    with self.assertRaises(ValueError):load_performance_settings()
+        with patch.dict(os.environ,{'TEI_RERANK_VERIFIED_MAX_BATCH_SIZE':''},clear=True):
+            self.assertIsNone(load_performance_settings().tei_rerank_verified_max_batch_size)
         with patch.dict(os.environ,{'TEI_RERANK_MAX_CLIENT_BATCH_SIZE':'64','TEI_EMBED_MAX_CLIENT_BATCH_SIZE':'50'},clear=True):
             settings=load_performance_settings()
             self.assertEqual((settings.tei_rerank_max_client_batch_size,settings.tei_embed_max_client_batch_size),(64,50))

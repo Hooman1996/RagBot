@@ -17,6 +17,13 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _optional_positive_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    return _positive_int(name, 1)
+
+
 def validate_retrieval_depth(name: str, value: int) -> int:
     """Validate internal request overrides without coercion or shared mutation."""
     if isinstance(value, bool) or not isinstance(value, int) or value < 1:
@@ -116,6 +123,9 @@ class PerformanceSettings:
     tei_embed_insert_batch_size: int
     tei_embed_max_client_batch_size: int
     tei_rerank_max_client_batch_size: int
+    tei_rerank_verified_max_batch_size: int | None
+    tei_rerank_capability_ttl_seconds: int
+    tei_rerank_capability_retry_seconds: int
     vllm_http_max_connections: int
     vllm_http_max_keepalive_connections: int
     vllm_http_keepalive_expiry_seconds: float
@@ -242,6 +252,15 @@ def load_performance_settings() -> PerformanceSettings:
         ),
         tei_rerank_max_client_batch_size=_positive_int(
             "TEI_RERANK_MAX_CLIENT_BATCH_SIZE", 50
+        ),
+        tei_rerank_verified_max_batch_size=_optional_positive_int(
+            "TEI_RERANK_VERIFIED_MAX_BATCH_SIZE"
+        ),
+        tei_rerank_capability_ttl_seconds=_positive_int(
+            "TEI_RERANK_CAPABILITY_TTL_SECONDS", 600
+        ),
+        tei_rerank_capability_retry_seconds=_positive_int(
+            "TEI_RERANK_CAPABILITY_RETRY_SECONDS", 30
         ),
         vllm_http_max_connections=_positive_int(
             "VLLM_HTTP_MAX_CONNECTIONS", 32

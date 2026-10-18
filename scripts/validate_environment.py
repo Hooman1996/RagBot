@@ -344,6 +344,18 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="50", minimum=1,
             component="TEI reranker client", restart="FastAPI",
         ),
+        "TEI_RERANK_VERIFIED_MAX_BATCH_SIZE": VariableSpec(
+            kind="int", minimum=1, required=("production",),
+            component="TEI reranker client", restart="FastAPI",
+        ),
+        "TEI_RERANK_CAPABILITY_TTL_SECONDS": VariableSpec(
+            kind="int", default="600", minimum=1,
+            component="TEI reranker client", restart="FastAPI",
+        ),
+        "TEI_RERANK_CAPABILITY_RETRY_SECONDS": VariableSpec(
+            kind="int", default="30", minimum=1,
+            component="TEI reranker client", restart="FastAPI",
+        ),
         "KNOWLEDGE_COVERAGE_ARTIFACT_DIR": VariableSpec(
             kind="path", default="/root/projects/faq-private/knowledge-coverage", component="Knowledge coverage", restart="FastAPI",
         ),

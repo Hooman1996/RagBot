@@ -89,6 +89,7 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 - vLLM client: `utils/RagSystem.py` creates an OpenAI-compatible `AsyncOpenAI` client using `VLLM_URL` and calls `chat.completions.create`.
 - Embedding client: `utils/persian_hybrid_search.py` implements the async TEI `/embed` request in `PersianHybridSearch._encode_query`, using `TEI_EMBED_URL`.
 - Reranking client: `utils/persian_hybrid_search.py` implements a batched async TEI `/rerank` request in `PersianHybridSearch.rerank`, using the TEI reranking URL. `utils/RagSystem.py` also carries `TEI_RERANK_URL`.
+- Reranking uses `min(TEI_RERANK_MAX_CLIENT_BATCH_SIZE, server /info limit)`, falls back to `TEI_RERANK_VERIFIED_MAX_BATCH_SIZE` when `/info` is unavailable, and otherwise fails closed.
 - The staging `.env` currently assigns `TEI_EMBED_URL` to port `7997` and `TEI_RERANK_URL` to port `7998`.
 
 ### Data-service clients

@@ -198,7 +198,7 @@ class CoverageJobs:
                     if str(exc) in {'source_or_index_drift', 'audit_serving_drift', 'audit_version_drift', 'audit_runtime_identity_drift', 'audit_identity_unpinned', 'snapshot_identity_mismatch', 'input_artifact_drift', 'candidate_snapshot_mismatch'}:
                         await self.invalidate(rid, owner, str(exc))
                     else:
-                        await self.interrupt(rid, owner, active, 'failed', str(exc) if str(exc) in {'budget_ledger_missing', 'audit_access_revoked', 'checkpoint_identity_mismatch', 'checkpoint_content_mismatch', 'unknown_remote_completion_requires_choice'} else 'audit_failed')
+                        await self.interrupt(rid, owner, active, 'failed', str(exc) if str(exc) in {'reranker_capability_unavailable', 'budget_ledger_missing', 'audit_access_revoked', 'checkpoint_identity_mismatch', 'checkpoint_content_mismatch', 'unknown_remote_completion_requires_choice'} else 'audit_failed')
             except Exception:
                 if lease is not None:
                     await self.interrupt(rid, owner, active, 'failed', 'checkpoint_or_worker_failure')

@@ -246,3 +246,21 @@ def test_audit_http_bodies_never_log_base64_messages_or_evidence():
     for path in ('/knowledge-coverage','/api/knowledge-coverage/datasets','/api/knowledge-coverage/runs/r_x/rows/row_x','/api/knowledge-coverage/runs/r_x/export'):
         policy=route_log_policy(path)
         assert policy.emit_events and not policy.request_body and not policy.response_body
+
+
+@pytest.mark.parametrize('result',[None,32,RuntimeError('synthetic'),asyncio.CancelledError()])
+def test_require_reranker_capability(monkeypatch,result):
+    from knowledge_audit.privacy import AuditError
+    from knowledge_audit.service import _require_reranker_capability
+    search=SimpleNamespace()
+    async def capability():
+        if isinstance(result,BaseException):raise result
+        return result
+    monkeypatch.setattr(search,'rerank_capability',capability,raising=False)
+    if isinstance(result,asyncio.CancelledError):
+        with pytest.raises(asyncio.CancelledError):asyncio.run(_require_reranker_capability(search))
+    elif result is None or isinstance(result,Exception):
+        with pytest.raises(AuditError,match='^reranker_capability_unavailable$'):
+            asyncio.run(_require_reranker_capability(search))
+    else:
+        asyncio.run(_require_reranker_capability(search))

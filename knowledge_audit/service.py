@@ -23,6 +23,16 @@ class AdmittedPreparer:
             acquire_timeout=PERFORMANCE_SETTINGS.request_admission_timeout_seconds), PERFORMANCE_SETTINGS.application_request_timeout_seconds)
 
 
+async def _require_reranker_capability(search):
+    from knowledge_audit.privacy import AuditError
+    try:
+        limit = await search.rerank_capability()
+    except Exception as exc:
+        raise AuditError("reranker_capability_unavailable") from exc
+    if limit is None:
+        raise AuditError("reranker_capability_unavailable")
+
+
 async def build_engine(store, meta, settings, *, answering, runner, limiter):
     import httpx
     from scripts.kb_signature import create_signature
@@ -38,6 +48,7 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
     if target != dotenv_values(ROOT / ".env").get("TEI_RERANK_URL") or urlsplit(target).hostname not in {"localhost", "127.0.0.1", "::1"}:
         from knowledge_audit.privacy import AuditError
         raise AuditError("unconfirmed_service_target")
+    await _require_reranker_capability(answering.agent_service.rag_system.search_engine)
     dataset, redactor = await runner.run(store.dataset, meta["dataset_id"], meta["owner_id"])
     snapshot = await runner.run(store.snapshot, meta["snapshot_id"], meta["owner_id"])
     limiter=AuditAdmission(limiter,Limits.from_settings(meta["settings"]).pace_ms) if limiter else None

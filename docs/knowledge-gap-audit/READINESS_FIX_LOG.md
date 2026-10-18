@@ -136,3 +136,53 @@ Frontend results:
 ### Branch cleanup authorization
 
 After publishing this commit, delete the eight original remote feature branches and 15 original local branches other than `main`. Every branch scheduled for deletion has been verified as contained in `knowledge-gap-audit`. Preserve local and remote `main` at `681cc95`; retain only `main` and `knowledge-gap-audit`. No rebase, history rewrite, or forced push is required. Final remote cleanup is verified after this commit is pushed.
+
+
+## [01] Rerank uses server batch limit with verified fallback contract
+
+Reranking now slices both context and related-question requests at the smaller of the configured size and the server capability. Valid capabilities expire after the configured TTL; failed lookups use only the verified contract and are suppressed for the retry window. Cancellation propagates, failure without a contract still fails closed, and POST response validation/global merging are unchanged. The audit checks for an effective capability before building the engine and preserves `reranker_capability_unavailable` in its error allowlists.
+
+Files changed:
+
+- `utils/performance_config.py`
+- `utils/persian_hybrid_search.py`
+- `knowledge_audit/service.py`
+- `knowledge_audit/pipeline.py`
+- `knowledge_audit/jobs.py`
+- `scripts/validate_environment.py`
+- `env.example`
+- `.env.example.generated`
+- `Production_ENV`
+- `AGENTS.md`
+- `tests/test_reranker_batching.py`
+- `tests/test_p0_p1_repairs.py`
+- `tests/test_knowledge_coverage_access_jobs.py`
+- `docs/knowledge-gap-audit/READINESS_FIX_LOG.md`
+
+`.env` was updated locally with the three new keys and their contract comment; it is not staged or committed. No production contact, live services, benchmarks, or full-suite run was performed. All Python checks used conda environment `faq`.
+
+Checks and exact result lines:
+
+```text
+timeout 600 python -m pytest -p tests.offline_guard -q tests/test_reranker_batching.py tests/test_p0_p1_repairs.py tests/test_validate_environment.py tests/test_retrieval_depths.py
+66 passed, 4 warnings, 159 subtests passed in 12.53s
+Exit: 0
+
+timeout 600 python -m pytest -p tests.offline_guard -q tests/test_knowledge_coverage_access_jobs.py
+17 passed, 4 warnings in 14.87s
+Exit: 0
+
+python scripts/validate_environment.py --env-file .env --mode staging
+Summary: 0 critical, 27 warning, 4 informational
+Exit: 0
+
+python scripts/validate_environment.py --env-file Production_ENV --mode production
+Summary: 6 critical, 24 warning, 4 informational
+Exit: 2
+
+git diff --check
+(no output)
+Exit: 0
+```
+
+The production validator's six critical findings concern existing configuration; neither mode reported findings for any of the three new keys. No unrelated configuration was changed. The audit test command initially stalled after four tests inside the sandbox; the identical command passed outside the sandbox with the offline guard still enabled. The stalled duplicate was then terminated (exit 143); that incomplete run is not reported as passing.

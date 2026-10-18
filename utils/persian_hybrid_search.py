@@ -784,13 +784,26 @@ class PersianHybridSearch:
         return scores, candidates
 
 
-    async def _rerank_server_limit(self, metrics: dict) -> int:
-        """Cache the target's declared limit; never infer it from embedding TEI."""
+    async def _rerank_server_limit(self, metrics: dict) -> int | None:
+        """Refresh target capabilities; only a verified contract covers failures."""
         if not hasattr(self, "_rerank_capability_lock"):
             self._rerank_capability_lock = asyncio.Lock()
             self._rerank_server_limits = {}
+            self._rerank_server_limit_at = {}
+            self._rerank_capability_failed_at = {}
+        contract = getattr(self, "rerank_verified_max_batch_size",
+            PERFORMANCE_SETTINGS.tei_rerank_verified_max_batch_size)
         async with self._rerank_capability_lock:
-            if self.tei_rerank_url not in self._rerank_server_limits:
+            url = self.tei_rerank_url
+            now = time.monotonic()
+            fetched_at = self._rerank_server_limit_at.get(url)
+            if fetched_at is not None and now - fetched_at < PERFORMANCE_SETTINGS.tei_rerank_capability_ttl_seconds:
+                return self._rerank_server_limits[url]
+            failed_at = self._rerank_capability_failed_at.get(url)
+            if (contract is not None and failed_at is not None and
+                    now - failed_at < PERFORMANCE_SETTINGS.tei_rerank_capability_retry_seconds):
+                return None
+            else:
                 start = time.perf_counter()
                 metrics["capability_request_count"] += 1
                 try:
@@ -804,10 +817,32 @@ class PersianHybridSearch:
                     limit = info.get("max_client_batch_size") if isinstance(info, dict) else None
                     if isinstance(limit, bool) or not isinstance(limit, int) or limit < 1:
                         raise ServiceProtocolError("Reranking service returned invalid capabilities")
-                    self._rerank_server_limits[self.tei_rerank_url] = limit
+                    self._rerank_server_limits[url] = limit
+                    self._rerank_server_limit_at[url] = now
+                    self._rerank_capability_failed_at.pop(url, None)
+                except Exception:
+                    if contract is None:
+                        raise
+                    self._rerank_capability_failed_at[url] = time.monotonic()
+                    return None
                 finally:
                     metrics["capability_duration_ms"] += (time.perf_counter() - start) * 1000
-            return self._rerank_server_limits[self.tei_rerank_url]
+            return self._rerank_server_limits[url]
+
+    async def rerank_capability(self) -> int | None:
+        """Return the effective batch limit, or None if no safe limit is known."""
+        self._ensure_open()
+        metrics = {"capability_request_count": 0, "capability_duration_ms": 0.0}
+        try:
+            server_limit = await self._rerank_server_limit(metrics)
+        except Exception:
+            return None
+        known_limit = server_limit if server_limit is not None else getattr(
+            self, "rerank_verified_max_batch_size", PERFORMANCE_SETTINGS.tei_rerank_verified_max_batch_size)
+        if known_limit is None:
+            return None
+        return min(getattr(self, "rerank_max_client_batch_size",
+            PERFORMANCE_SETTINGS.tei_rerank_max_client_batch_size), known_limit)
 
     async def _rerank_scores_batched(
         self, query: str, texts: list[str], *, raw_scores: bool | None,
@@ -821,6 +856,8 @@ class PersianHybridSearch:
         limit = validate_retrieval_depth("TEI_RERANK_MAX_CLIENT_BATCH_SIZE", getattr(
             self, "rerank_max_client_batch_size", PERFORMANCE_SETTINGS.tei_rerank_max_client_batch_size
         ))
+        contract = getattr(self, "rerank_verified_max_batch_size",
+            PERFORMANCE_SETTINGS.tei_rerank_verified_max_batch_size)
         metrics.update(client_batch_size=limit, batch_count=0, completed_batch_count=0,
             request_sizes=[], batch_duration_ms=[], capability_request_count=0, capability_duration_ms=0.0)
         if not texts:
@@ -829,12 +866,14 @@ class PersianHybridSearch:
         self._tei_reranker_active = getattr(self, "_tei_reranker_active", 0) + 1
         try:
             server_limit = await self._rerank_server_limit(metrics)
-            metrics["server_batch_limit"] = server_limit
-            if limit > server_limit:
-                raise ServiceProtocolError("Configured reranker client batch size exceeds the server limit")
+            effective_limit = min(limit, server_limit if server_limit is not None else contract)
+            source = ("contract" if server_limit is None else "server_below_contract"
+                if contract is not None and server_limit < contract else "server")
+            metrics.update(server_batch_limit=server_limit, verified_batch_limit=contract,
+                effective_batch_size=effective_limit, batch_limit_source=source)
             merged = []
-            for offset in range(0, len(texts), limit):
-                batch = texts[offset:offset + limit]
+            for offset in range(0, len(texts), effective_limit):
+                batch = texts[offset:offset + effective_limit]
                 payload = {"query": query, "texts": batch}
                 if raw_scores is not None:
                     payload["raw_scores"] = raw_scores

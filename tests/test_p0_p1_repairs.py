@@ -430,6 +430,9 @@ class TeiContractTests(unittest.IsolatedAsyncioTestCase):
             def __init__(self):
                 self.calls = []
 
+            async def get(self, url):
+                return Response({"max_client_batch_size": 64})
+
             async def post(self, url, json):
                 self.calls.append((url, json))
                 if url.endswith("/embed"):
@@ -488,6 +491,12 @@ class TeiContractTests(unittest.IsolatedAsyncioTestCase):
                 return [{"index": 4, "score": 1.0}]
 
         class Http:
+            async def get(self, url):
+                return types.SimpleNamespace(
+                    json=lambda: {"max_client_batch_size": 64},
+                    raise_for_status=lambda: None,
+                )
+
             async def post(self, _url, json):
                 return Response()
 
