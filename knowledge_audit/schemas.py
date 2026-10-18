@@ -2,7 +2,7 @@
 from typing import Literal
 from pydantic import BaseModel, ConfigDict, Field, field_validator
 
-VERSION = "coverage-rubric-4"
+VERSION = "coverage-rubric-5"
 
 
 class StrictModel(BaseModel):
@@ -73,11 +73,18 @@ class CompatibilityDecision(StrictModel):
     explanation: str = Field(max_length=700)
 
 
+class ConflictAssessment(StrictModel):
+    conflict_id: str = Field(pattern=r"^c[1-9][0-9]?$")
+    assessment: Literal["not_applicable", "compatible", "contradicts", "cannot_determine"]
+    explanation: str = Field(max_length=300)
+
+
 class VerificationDecision(StrictModel):
-    version: Literal["verification-1"]
+    version: Literal["verification-2"]
     verdict: Literal["accepted", "rejected", "uncertain"]
     supported_aspect_ids: list[str] = Field(max_length=12)
     unresolved_aspect_ids: list[str] = Field(max_length=12)
+    conflict_assessments: list[ConflictAssessment] = Field(max_length=40)
     explanation: str = Field(max_length=700)
 
 

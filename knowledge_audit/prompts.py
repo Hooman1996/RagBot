@@ -54,7 +54,8 @@ but compatibility is unproved. Do not invent missing facts from a search heurist
 Use cited numbered sentences AND their complete supplied answers for surrounding conditions
 and exceptions. Reject invalid/unsupported references, subject changes, incompatible cases,
 generic referrals used for missing facts or any unmet aspect. Accept only if every required
-aspect is actually established together. Failed or ambiguous checks cannot be accepted.""",
+aspect is actually established together. Failed or ambiguous checks cannot be accepted.
+observed_conflicts lists every conflict and every uncertain support observed in this evidence view, each with a conflict_id and its source entries. Return exactly one conflict_assessment per conflict_id: not_applicable if it does not concern the question's conditions, compatible if it concerns them but is consistent with this proof, contradicts if it contradicts this proof, cannot_determine otherwise. Accept only if every conflict is assessed and none is contradicts or cannot_determine.""",
 }
 
 

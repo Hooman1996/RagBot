@@ -44,7 +44,8 @@ class CoverageEvaluator:
                   "evaluated_entry_ids": [], "evaluated_entry_count": 0,
                   "support_arrangement": "unknown", "production_context_sufficiency": "not_evaluated",
                   "production_reachability": "unknown", "verification_result": "not_run",
-                  "kb_snapshot_id": self.index.snapshot_id, "batch_results": [], "review_codes": []}
+                  "kb_snapshot_id": self.index.snapshot_id, "batch_results": [], "review_codes": [],
+                  "residual_review_codes": []}
         try:
             prepared = await self.preparer.prepare(event, self.history, self.redactor, model_prepare=True)
             result.update(prepared)
@@ -241,7 +242,9 @@ class CoverageEvaluator:
                 "entry_ids": batch_ids, "result": batch, "supports": current})
             self.review_codes = []
             if batch["coverage"] == "full":
-                await self.verify(question, aspects, current, batch["conflicts"], label)
+                # A full batch has no conflicts (validate_batch). Each wider
+                # view re-verifies the proof against all of its own conflicts.
+                await self.verify(question, aspects, current, [], label)
             assessment = await self.view(ids, question, aspects, phase)
             if assessment["coverage"] == "full":
                 return assessment
@@ -260,6 +263,7 @@ class CoverageEvaluator:
         usable = [s for s in supports if s["applicability"] != "uncertain"]
         supported = {s["aspect_id"] for s in usable}
         conflicts = [c for b in batches for c in b["result"]["conflicts"]]
+        inside = [p for p in self.proofs if set(p["entry_ids"]) <= allowed]
         codes = []
         if allowed.intersection(self.oversized_ids):
             codes.append("entry_too_long")
@@ -275,32 +279,68 @@ class CoverageEvaluator:
         # An uncertain joint batch cannot establish a certain subset verdict.
         if any(not set(b["entry_ids"]) <= allowed and b["result"]["coverage"] == "uncertain" for b in batches):
             codes.append("subset_batch_uncertainty")
-        for proof in self.proofs:
-            if set(proof["entry_ids"]) <= allowed and proof["verdict"]["verdict"] != "accepted":
+        for proof in inside:
+            if proof["verdict"]["verdict"] != "accepted":
                 codes.append("verification_unresolved")
+            # Each proof keeps its own codes, so a later view cannot drop them.
+            codes.extend(proof["codes"])
         self.review_codes = codes
-        witness, explanation = [], ""
+        self.last_verdict = None
+        witness, explanation, accepted = [], "", None
         search = {"method": "greedy-seeds-1", "seed_limit": 8, "exhaustive": False,
                   "candidate_entry_count": len({s["entry_id"] for s in usable}), "bundles_considered": 0,
                   "model_calls": 0, "cache_hits": 0}
-        for proof in self.proofs:
-            if proof["verdict"]["verdict"] == "accepted" and set(proof["entry_ids"]) <= allowed:
-                witness, explanation = proof["witness"], proof["verdict"]["explanation"]
+        for proof in inside:
+            if proof["verdict"]["verdict"] != "accepted":
+                continue
+            # A proof stands in this view only after the verifier gave every
+            # conflict of this view an explicit verdict.
+            records = self.view_conflicts(batches, supports, allowed, {s["aspect_id"] for s in proof["witness"]},
+                                          set(proof["witness_entry_ids"]))
+            verdict = proof["verdict"]
+            if not {conflict_key(r) for r in records} <= proof["conflict_ids_seen"]:
+                verdict = await self.verify(question, aspects, proof["witness"], records, "conflict_reverification")
+            if verdict["verdict"] == "accepted":
+                witness, explanation, accepted = proof["witness"], verdict["explanation"], verdict
                 break
         if not witness and supported == self.required:
-            witness, explanation = await self.reconcile(question, aspects, usable, conflicts, search)
+            records = self.view_conflicts(batches, supports, allowed, self.required, set())
+            witness, explanation = await self.reconcile(question, aspects, usable, records, search)
             if not witness:
                 self.review_codes.extend(["compatibility_unverified", "bounded_bundle_search_unresolved"])
+        final = accepted or self.last_verdict or (inside[-1]["verdict"] if inside else {})
         review = list(dict.fromkeys(self.review_codes))
+        residual = sorted(c for c in review if c in RESIDUAL_CODES)
         coverage = "full" if witness else "uncertain" if review else "partial" if supported else "unsupported"
         return {"phase": phase, "coverage": coverage, "supports": supports, "witness": witness,
                 "supported_aspect_ids": sorted(self.required if witness else supported),
                 "unresolved_aspect_ids": sorted(set() if witness else self.required - supported),
                 "batches": batches, "conflicts": conflicts, "explanation": explanation,
-                "review_codes": [] if witness else review, "resolved_review_codes": review if witness else [],
+                "review_codes": [] if witness else review,
+                "resolved_review_codes": [c for c in review if c in BLOCKING_CODES] if witness else [],
+                "residual_review_codes": residual, "conflict_assessments": final.get("conflict_assessments", []),
                 "bundle_search": search,
                 "budget_exhausted": bool(allowed - self.evaluated_ids - self.oversized_ids) and len(self.evaluated_ids) >= self.entry_budget,
                 "candidates_exhausted": not (allowed - self.evaluated_ids - self.oversized_ids)}
+
+    def view_conflicts(self, batches, supports, allowed, witness_aspects, proof_entry_ids):
+        """Conflict records of one evidence view, deduplicated, ordered and numbered."""
+        keys = set()
+        for batch in batches:
+            sources = tuple(sorted(cid for cid in batch["entry_ids"] if cid in allowed))
+            keys.update(("batch_conflict", text, sources, "") for text in batch["result"]["conflicts"])
+        # Uncertain support for an aspect the witness relies on, from an entry
+        # outside the proof, is a conflict that the verifier must assess.
+        keys.update(("uncertain_support", s["explanation"], (s["entry_id"],), s["aspect_id"]) for s in supports
+                    if s["applicability"] == "uncertain" and s["aspect_id"] in witness_aspects
+                    and s["entry_id"] not in proof_entry_ids)
+        records = []
+        for number, (kind, text, sources, aspect_id) in enumerate(sorted(keys), 1):
+            record = {"conflict_id": "c" + str(number), "kind": kind, "text": text, "source_entry_ids": list(sources)}
+            if kind == "uncertain_support":
+                record["aspect_id"] = aspect_id
+            records.append(record)
+        return records
 
     def bundles(self, supports):
         by_entry = defaultdict(list)
@@ -331,9 +371,10 @@ class CoverageEvaluator:
         # production and audit reuse the actual validated proof, not its label.
         stable = [{k: v for k, v in s.items() if k not in {"batch_id", "source_phase"}} for s in supports]
         stable.sort(key=lambda s: s["support_id"])
+        sources = {s["entry_id"] for s in supports} | {cid for r in conflicts for cid in r["source_entry_ids"]}
         return {"question": question, "aspects": aspects, "supports": stable,
-                "source_evidence": [self.index.entry(cid) for cid in sorted({s["entry_id"] for s in supports})],
-                "observed_conflicts": sorted(set(conflicts))}
+                "source_evidence": [self.index.entry(cid) for cid in sorted(sources)],
+                "observed_conflicts": list(conflicts)}
 
     async def reconcile(self, question, aspects, supports, conflicts, search):
         fit = False
@@ -375,30 +416,53 @@ class CoverageEvaluator:
         entries = payload["source_evidence"]
         identity = canonical_sha256(payload)
         if identity in self.verification_cache:
-            return self.verification_cache[identity]
-        if not await self.model.fits("verification", payload):
-            self.review_codes.append("verification_token_overflow")
-            verdict = {"verdict": "uncertain", "explanation": "Evidence exceeds the verified context budget."}
+            self.last_verdict = self.verification_cache[identity]
+            return self.last_verdict
+        proof_codes = []
+        if len(conflicts) > MAX_VIEW_CONFLICTS:
+            proof_codes.append("conflict_limit_exceeded")
+            verdict = {"verdict": "uncertain", "conflict_assessments": [], "explanation": "Too many observed conflicts to verify."}
+        elif not await self.model.fits("verification", payload):
+            proof_codes.append("verification_token_overflow")
+            verdict = {"verdict": "uncertain", "conflict_assessments": [], "explanation": "Evidence exceeds the verified context budget."}
         else:
             verdict = await self.model.call("verification", payload)
             if not set(verdict["supported_aspect_ids"]) <= self.required or not set(verdict["unresolved_aspect_ids"]) <= self.required:
                 raise AuditError("invalid_aspect_identity")
             if verdict["verdict"] == "accepted" and (set(verdict["supported_aspect_ids"]) != self.required or verdict["unresolved_aspect_ids"]):
                 raise AuditError("invalid_full_claim")
+            assessed = [a["conflict_id"] for a in verdict["conflict_assessments"]]
+            if len(assessed) != len(set(assessed)) or not set(assessed) <= {r["conflict_id"] for r in conflicts}:
+                raise AuditError("invalid_conflict_identity")
+            # The code, not the model's verdict, decides that every conflict was
+            # explicitly assessed and none contradicts or remains undetermined.
+            found = {a["assessment"] for a in verdict["conflict_assessments"]}
+            if verdict["verdict"] == "accepted":
+                if "contradicts" in found:
+                    proof_codes.append("conflict_contradicts_proof")
+                if "cannot_determine" in found or len(assessed) != len(conflicts):
+                    proof_codes.append("conflict_undetermined")
+                if proof_codes:
+                    verdict = {**verdict, "verdict": "rejected" if "contradicts" in found else "uncertain"}
             if verdict["verdict"] == "accepted" and any(entry["redaction_changed"] for entry in entries):
                 verdict = {**verdict, "verdict": "uncertain", "explanation": "Source redaction may affect conditions; review required."}
+        if verdict["verdict"] != "accepted":
+            proof_codes.append("verification_unresolved")
         self.verifications.append({"origin": origin, "bundle_id": identity, **verdict})
         self.verification_cache[identity] = verdict
+        self.last_verdict = verdict
         self.proofs.append({"entry_ids": [e["chunk_id"] for e in entries],
-                            "witness": list(supports), "verdict": verdict, "bundle_id": identity})
-        if verdict["verdict"] != "accepted":
-            self.review_codes.append("verification_unresolved")
+                            "witness_entry_ids": sorted({s["entry_id"] for s in supports}),
+                            "witness": list(supports), "verdict": verdict, "bundle_id": identity, "codes": proof_codes,
+                            "conflict_ids_seen": frozenset(conflict_key(r) for r in conflicts)})
+        self.review_codes.extend(proof_codes)
         return verdict
 
     def apply_result(self, result, audit, production, broadened):
         if production["coverage"] == "full":
             audit = production
         coverage = audit["coverage"]
+        result["residual_review_codes"] = list(audit.get("residual_review_codes", []))
         # Partial support is still evidence, without asserting that its
         # conditions form a compatible full proof.
         witness = audit["witness"] if coverage == "full" else [s for s in audit["supports"] if s["applicability"] != "uncertain"]
@@ -437,12 +501,29 @@ class CoverageEvaluator:
         result["evaluation_scope"] = {"initial_depths": [self.initial_depth] * 3, "broader_depths": [self.broader_depth] * 3 if broadened else [],
             "distinct_entry_budget": self.entry_budget, "whole_kb_absence_proven": False,
             "snapshot_id": self.index.snapshot_id, "bundle_search": audit.get("bundle_search", {}),
-            "proof_reuse_version": "question-ledger-1"}
+            "proof_reuse_version": "question-ledger-2"}
         result["verification_reason"] = audit["explanation"] if coverage == "full" else "; ".join(audit.get("review_codes", []))
 
 
+MAX_VIEW_CONFLICTS = 40
+# Every review code that view can emit belongs to exactly one set. Blocking
+# codes concern the proof itself; residual codes are shown but never block a
+# verified proof and are never called resolved; search codes describe a proof
+# search that did not finish.
+BLOCKING_CODES = frozenset({"evidence_conflict", "verification_unresolved", "incompatible_conditions",
+    "conflict_contradicts_proof", "conflict_undetermined", "conflict_limit_exceeded"})
+RESIDUAL_CODES = frozenset({"entry_too_long", "evaluation_failed", "subset_batch_uncertainty",
+    "batch_support_unresolved", "batch_uncertain"})
+SEARCH_CODES = frozenset({"compatibility_unverified", "bounded_bundle_search_unresolved",
+    "reconciliation_token_overflow", "verification_token_overflow"})
+
+
+def conflict_key(record):
+    return (record["kind"], record["text"], tuple(record["source_entry_ids"]), record.get("aspect_id", ""))
+
+
 ERROR_CODES = frozenset({"coverage_disabled", "coverage_enabled_in_production", "invalid_citation", "invalid_evidence_support", "invalid_full_claim", "invalid_aspect_identity",
-    "invalid_reconciliation_identity", "invalid_model_schema", "model_input_token_overflow", "incomplete_structured_output",
+    "invalid_reconciliation_identity", "invalid_conflict_identity", "invalid_model_schema", "model_input_token_overflow", "incomplete_structured_output",
     "token_count_serving_mismatch", "unsupported_snapshot_entry", "reranker_capability_unavailable", "unverified_context_limit", "input_artifact_drift"}) | TRANSPORT_CODES
 
 

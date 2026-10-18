@@ -485,3 +485,113 @@ exit 0
 ```
 
 The pytest count rose from 1014 in step 03 to 1020, from the six new tests in `tests/test_coverage_depth_settings.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's value scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [04] Accept a coverage proof only after every conflict in its view has an explicit verdict
+
+Fixes F1 (High, false "covered" rows) and F16a (Low, lost `verification_token_overflow`).
+
+### Rule (approved by the owner)
+
+- Every conflict in an evidence view goes to the verifier together with its source entries. The verifier gives each conflict exactly one verdict: `not_applicable`, `compatible`, `contradicts` or `cannot_determine`.
+- A proof is accepted only when the model says `accepted`, every conflict has a verdict, and none is `contradicts` or `cannot_determine`. The code enforces this whatever the model's verdict: `contradicts` downgrades to `rejected` (`conflict_contradicts_proof`); `cannot_determine` or a missing assessment downgrades to `uncertain` (`conflict_undetermined`). An unknown or duplicate `conflict_id` raises `invalid_conflict_identity`.
+- An `uncertain` support for an aspect the witness relies on, from an entry outside the proof, is a conflict record.
+- More than 40 conflict records: no verification call; the proof is unresolved with `conflict_limit_exceeded`.
+- Failures not linked to the proof's aspects are residual codes (`residual_review_codes`). They are shown, never block full coverage and are never reported as resolved.
+
+`view` now re-verifies each accepted proof wholly inside the view when the view's conflict records are not a subset of the records that proof's verifier saw (`conflict_ids_seen`). The cache keeps this to one call per distinct payload. Each proof keeps its own `codes`, and `view` adds them, so `verification_token_overflow` is no longer overwritten (F16a).
+
+Code sets in `knowledge_audit/pipeline.py`:
+
+| Set | Codes |
+|---|---|
+| `BLOCKING_CODES` | `evidence_conflict`, `verification_unresolved`, `incompatible_conditions`, `conflict_contradicts_proof`, `conflict_undetermined`, `conflict_limit_exceeded` |
+| `RESIDUAL_CODES` | `entry_too_long`, `evaluation_failed`, `subset_batch_uncertainty`, `batch_support_unresolved`, `batch_uncertain` |
+| `SEARCH_CODES` | `compatibility_unverified`, `bounded_bundle_search_unresolved`, `reconciliation_token_overflow`, `verification_token_overflow` |
+
+With a witness, `resolved_review_codes` holds only the blocking codes present. Without one, `review_codes` is unchanged from before (residual codes included) and `resolved_review_codes` is empty.
+
+### Files changed
+
+- `knowledge_audit/schemas.py`: `ConflictAssessment`; `VerificationDecision` is `verification-2` with `conflict_assessments`; `VERSION` is `coverage-rubric-5`.
+- `knowledge_audit/prompts.py`: the approved sentence appended to the `verification` task only.
+- `knowledge_audit/pipeline.py`: `view_conflicts`, `conflict_key`, the code sets, `MAX_VIEW_CONFLICTS = 40`, conflict records in `proof_payload`, the verdict rule in `verify`, witness selection in `view`, `residual_review_codes` in `apply_result`, `proof_reuse_version` `question-ledger-2`, `invalid_conflict_identity` in `ERROR_CODES`.
+- `knowledge_audit/settings.py`: `manifest()` `proof_reuse_version` `question-ledger-2`.
+- `knowledge_audit/export.py`: `residual_review_codes` after `review_codes` in `COVERAGE_FIELDS`, in `ARRAY_FIELDS`, and kept in restricted exports.
+- `knowledge_audit/jobs.py`: `invalid_conflict_identity` in the interrupt allow-list.
+- `knowledge_audit/failures.py`: `invalid_conflict_identity` in `VALIDATION_CODES`, next to `invalid_reconciliation_identity`, so its failure diagnostic is `semantic_validation`.
+- `static/js/knowledge_coverage.js`: English labels for the three new review codes, and an "Unexamined evidence notes" line for `residual_review_codes`.
+- `tests/test_coverage_conflict_verdicts.py`: new, 14 tests.
+- `tests/test_knowledge_coverage_pipeline.py`: the fake verifier returns `verification-2` and one assessment per `observed_conflicts` item, default `not_applicable` (`conflict_assessment=` keyword). No expectation changed.
+- `tests/test_knowledge_recommendations.py`: rubric-version pin.
+
+`evidence_conflict` appeared only in `knowledge_audit/pipeline.py`; no other review-code list exists in `knowledge_audit/` or `static/js/knowledge_coverage.js`.
+
+### Changed test expectations
+
+One expectation changed. It pins the rubric version and does not encode F1:
+
+```text
+tests/test_knowledge_recommendations.py:360
+old: assert prompt_identity()['rubric_version']=='coverage-rubric-4' and ...
+new: assert prompt_identity()['rubric_version']=='coverage-rubric-5' and ...
+```
+
+No pipeline, calibration, corrections or export expectation changed. `test_conflicting_conditions_cannot_be_combined_into_full` passes unmodified.
+
+### Versions and resumption
+
+`verification-1` → `verification-2`, `coverage-rubric-4` → `coverage-rubric-5`, `question-ledger-1` → `question-ledger-2` (row `evaluation_scope` and settings manifest). Runs created before this step no longer resume; they stop with `audit_runtime_identity_drift` or `audit_version_drift`. This is intended.
+
+### Implementation decisions not covered by the command
+
+These were not put to the owner; they are recorded for review.
+
+- Persian labels were not added. The coverage UI has a single English `LABELS` map and no Persian text anywhere, so there is no existing style to follow. The English labels and the "Unexamined evidence notes" heading were added. The Persian strings from the command are «شواهد با اثبات در تناقض است», «یک تعارض قابل ارزیابی نبود», «تعارض‌ها برای بررسی بیش از حد است» and «یادداشت‌های شواهد بررسی‌نشده».
+- An accepted proof must cover every required aspect, so an uncertain support for an aspect outside the witness cannot occur end to end. Test 6 therefore checks that aspect rule on `view_conflicts` directly, and checks end to end that an uncertain batch about other entries creates no record, does not block, and appears only in `residual_review_codes`.
+- A proof record keeps `entry_ids` as all entries in its `source_evidence` (witness plus conflict sources), used for the "wholly inside the view" test, and `witness_entry_ids` for the uncertain-support rule.
+- When the model says `accepted` with both `contradicts` and `cannot_determine`, both codes are recorded and the verdict is `rejected`. The downgrade codes are recorded only when the model said `accepted`.
+- The batch's own verification in `assess` passes no conflict records, because `validate_batch` forbids conflicts on a full batch; each view then re-verifies against its own records.
+- With more than 40 records, reconciliation is still called; only verification is skipped.
+- Without a witness, `conflict_assessments` is from the last verification run in that view, or else the last proof wholly inside it.
+
+### AGENTS.md note
+
+This changes the audit's own verification prompt and schema, not the chatbot. Chatbot retrieval and answers are unchanged, so the chatbot's retrieval and answer-quality tests do not apply. The audit's live behaviour is re-checked in the Gate A pilot. No performance change; no benchmark was required.
+
+### Checks
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_conflict_verdicts.py tests/test_knowledge_coverage_pipeline.py tests/test_knowledge_coverage_calibration.py tests/test_knowledge_coverage_corrections.py tests/test_knowledge_run_export.py tests/test_coverage_depth_settings.py
+121 passed, 3 warnings in 39.13s
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+Clean-checkout command (conda `faq`), run on the initial unpushed `[04]` commit:
+
+```text
+git worktree add /tmp/faq-clean-04 HEAD
+cd /tmp/faq-clean-04 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-04; echo "exit $status"
+1034 passed, 26 deselected, 58 warnings, 291 subtests passed in 258.26s (0:04:18)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1020 in step 03a to 1034, from the 14 new tests in `tests/test_coverage_conflict_verdicts.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. The 26 deselections are the existing integration and artifact marker exclusions. Only this log section changed after that run. The amended commit was checked again in a new clean worktree with the same command before push.

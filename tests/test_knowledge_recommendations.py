@@ -357,7 +357,7 @@ def test_custom_model_schema_strict_output_safe_diagnostics_and_coverage_prompt_
     from knowledge_audit.recommendation_schemas import SCHEMAS
     from knowledge_audit.prompts import prompt_identity
     from knowledge_audit.calibration import load_inputs
-    assert prompt_identity()['rubric_version']=='coverage-rubric-4' and set(prompt_identity()['roles'])=={'scope','aspects','batch','reconciliation','verification'}
+    assert prompt_identity()['rubric_version']=='coverage-rubric-5' and set(prompt_identity()['roles'])=={'scope','aspects','batch','reconciliation','verification'}
     sent=[]
     class Rag:
         model_id='fixture'

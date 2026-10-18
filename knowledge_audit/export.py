@@ -124,14 +124,14 @@ COVERAGE_FIELDS = FIELDS + ("outcome", "support_arrangement", "production_contex
     "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "related_existing_faq_ids",
     "equivalent_existing_faq_ids", "rubric_version", "model_versions", "prompt_versions", "tokenizer_versions",
     "normalization_version", "alias_version", "classifier_version", "run_settings_version", "review_codes",
-    "run_identity_id", "export_revision_id", "review_codes_by_phase", "evidence_phases", "validation_diagnostics",
+    "residual_review_codes", "run_identity_id", "export_revision_id", "review_codes_by_phase", "evidence_phases", "validation_diagnostics",
     "output_recovery_count", "recovery_policy", "failure_diagnostics", "batch_max_entries")
 ARRAY_FIELDS = {"requested_aspects", "supported_aspects", "unresolved_aspects", "supporting_faq_ids", "supporting_chunk_ids",
     "supporting_sentence_refs", "verifications", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids",
     "recommendations", "proposed_question", "category", "subcategory", "proposed_new_category", "proposed_new_subcategory", "failure_diagnostics", "request_journal",
-    "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "preparation_errors", "uncertainty_codes", "validation_diagnostics"}
+    "related_existing_faq_ids", "equivalent_existing_faq_ids", "review_codes", "residual_review_codes", "preparation_errors", "uncertainty_codes", "validation_diagnostics"}
 MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", "model_versions", "prompt_versions", "tokenizer_versions", "review_codes_by_phase", "evidence_phases", "operational_budget", "retention_policy"}
-RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes", "failure_diagnostics", "request_journal"}
+RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes", "residual_review_codes", "failure_diagnostics", "request_journal"}
 
 
 def coverage_export(meta, results, redactor, *, evidence_visible):

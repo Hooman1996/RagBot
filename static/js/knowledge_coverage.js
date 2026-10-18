@@ -9,7 +9,9 @@
         possible_partial_gap: 'Possible partial KB gap', possible_gap: 'Possible KB gap',
         excluded: 'Excluded', pending: 'Pending / not evaluated', error: 'Error',
         full: 'Verified full', partial: 'Partial support', unsupported: 'Unsupported in evaluated scope',
-        uncertain: 'Uncertain', not_evaluated: 'Not evaluated', unavailable: 'No preceding history', user_only: 'User-only history'
+        uncertain: 'Uncertain', not_evaluated: 'Not evaluated', unavailable: 'No preceding history', user_only: 'User-only history',
+        conflict_contradicts_proof: 'Evidence contradicts the proof', conflict_undetermined: 'A conflict could not be assessed',
+        conflict_limit_exceeded: 'Too many conflicts to verify'
     };
     function label(value) { return LABELS[value] || String(value || 'Not evaluated').replaceAll('_', ' '); }
     function headersFromCsv(text, delimiter) {
@@ -207,6 +209,7 @@
                 appendText(overview, 'Why', row.explanation || (row.scope_decision || {}).explanation || 'This row has not been evaluated.', 'auto');
                 if (row.error_code) appendText(overview, 'Error code', row.error_code);
                 if ((row.review_codes || []).length) appendText(overview, 'Review required', row.review_codes.map(label).join(' · '));
+                if ((row.residual_review_codes || []).length) appendText(overview, 'Unexamined evidence notes', row.residual_review_codes.map(label).join(' · '));
                 (row.requested_aspects || []).forEach(aspect => {
                     const item = node(document, 'div', undefined, 'coverage-aspect'); item.append(node(document, 'span', aspect.aspect_id, 'coverage-aspect-id'));
                     const description = node(document, 'p', aspect.description); description.dir = 'auto'; item.append(description);

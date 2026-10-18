@@ -13,7 +13,7 @@ TRANSPORT_CODES = frozenset({"admission_timeout", "outer_operation_deadline", "m
     "model_connect_timeout", "model_write_timeout", "model_pool_timeout", "model_timeout_unknown",
     "model_connection_failure", "model_service_failure", "model_http_rejection", "model_protocol_rejection"})
 VALIDATION_CODES = frozenset({"invalid_model_schema", "invalid_citation", "invalid_evidence_support",
-    "invalid_full_claim", "invalid_aspect_identity", "invalid_reconciliation_identity",
+    "invalid_full_claim", "invalid_aspect_identity", "invalid_reconciliation_identity", "invalid_conflict_identity",
     "incomplete_structured_output", "model_input_token_overflow", "token_count_serving_mismatch"})
 
 

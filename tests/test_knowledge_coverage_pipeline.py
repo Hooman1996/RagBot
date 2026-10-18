@@ -91,8 +91,10 @@ def test_actual_retrieval_preserves_production_and_global_audit_scoring(monkeypa
 class LabeledModel:
     """Predetermined factual supports; independent expected outcomes in tests."""
     def __init__(self, snap, labels, *, aspects=2, scope='kb_question', verification='accepted',
-                 force_full=False, invalid_citation=False, overflow_ids=(), conflicts=False):
+                 force_full=False, invalid_citation=False, overflow_ids=(), conflicts=False,
+                 conflict_assessment='not_applicable'):
         self.snap, self.labels, self.aspects, self.scope = snap, labels, aspects, scope
+        self.conflict_assessment = conflict_assessment
         self.verification, self.force_full, self.invalid_citation = verification, force_full, invalid_citation
         self.overflow_ids, self.conflicts = set(overflow_ids), conflicts
         self.metrics, self.calls, self.serving = [], [], {'fixture':'synthetic'}
@@ -130,9 +132,11 @@ class LabeledModel:
                 'conflicts':['Different mutually exclusive customer conditions.'] if self.conflicts else [],
                 'explanation':'Synthetic compatible evidence.'}
         else:
-            value={'version':'verification-1','verdict':self.verification,
+            value={'version':'verification-2','verdict':self.verification,
                 'supported_aspect_ids':required if self.verification=='accepted' else [],
                 'unresolved_aspect_ids':[] if self.verification=='accepted' else required,
+                'conflict_assessments':[{'conflict_id':c['conflict_id'],'assessment':self.conflict_assessment,
+                    'explanation':'Synthetic conflict assessment.'} for c in data['observed_conflicts']],
                 'explanation':'Synthetic independent check.'}
         return SCHEMAS[role].model_validate(value).model_dump()
 
