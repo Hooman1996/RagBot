@@ -107,7 +107,18 @@
                 <p id="coverageBudgetProgress" class="coverage-summary" role="status" aria-live="polite"></p>
                 <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel run</button>
                     <button id="coverageResume" class="coverage-secondary" type="button" hidden>Resume remaining rows</button>
+                    {% if 'coverage_run_start' in permissions %}<button id="coverageContinue" class="coverage-secondary" type="button" hidden>Continue unfinished rows</button>{% endif %}
                 </div>
+                {% if 'coverage_run_start' in permissions %}
+                <div id="coverageContinuation" class="coverage-settings" hidden>
+                    <p class="coverage-summary">A continuation is a new subset run over the rows this run did not finish, on the same dataset, snapshot and datasources. Limits come from the finite execution limits above.</p>
+                    <label class="coverage-check"><input id="coverageContinueReview" type="checkbox"> Also re-run rows that need review</label>
+                    <p id="coverageContinueSizingStatus" class="coverage-summary" aria-live="polite"></p>
+                    <div id="coverageContinueSizingTable"></div>
+                    <label id="coverageContinueSizingAckLabel" class="coverage-check" hidden><input id="coverageContinueSizingAck" type="checkbox"> I confirm an unsized run.</label>
+                    <label id="coverageContinuePartialAckLabel" class="coverage-check" hidden><input id="coverageContinuePartialAck" type="checkbox"> I accept that this run will pause before finishing</label>
+                </div>
+                {% endif %}
                 <div id="coverageRecovery" class="coverage-summary" hidden>
                     <p id="coverageRecoveryText"></p>
                     <label>Recovery choice<select id="coverageRecoveryChoice">
@@ -120,7 +131,10 @@
                 <details class="coverage-legacy-download"><summary>Coverage-only download · no draft recommendations</summary><div class="coverage-run-actions">
                     <button id="coveragePrepareExport" class="coverage-secondary" type="button" hidden>Prepare download</button>
                     <a id="coverageExport" class="coverage-primary" hidden>Download all rows · CSV</a>
-                    <a id="coverageManifest" class="coverage-link" download="coverage-manifest.json" hidden>Export manifest</a></div>
+                    <a id="coverageManifest" class="coverage-link" download="coverage-manifest.json" hidden>Export manifest</a>
+                    <button id="coverageChainExport" class="coverage-secondary" type="button" hidden>Download whole input (all runs)</button>
+                    <a id="coverageChainCsv" class="coverage-link" hidden>Whole-input CSV</a>
+                    <a id="coverageChainManifest" class="coverage-link" download="coverage-chain-manifest.json" hidden>Whole-input manifest</a></div>
                 <p id="coverageExportState" class="coverage-summary" aria-live="polite">No download revision prepared.</p></details>
             </section>
             <section id="coverageRunExport" class="coverage-card coverage-run-export" aria-label="Run-level CSV and review selection" hidden></section>

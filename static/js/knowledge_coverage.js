@@ -71,8 +71,9 @@
         let datasets = [], snapshots = [], currentDataset = '', currentRun = '', offset = 0, total = 0;
         let selected = new Set(), fileBytes = null, lastEvidenceButton = null, poll = null, loading = false, querySequence = 0;
         let exportRevisionRun = '', evidenceSequence=0, progressSequence=0, recommendationPanel=null, selectedEvidenceRow='', progressInFlight=null, viewEpoch=0, inputPoll=null;
-        let runExport=null;
-        function viewChanged() { viewEpoch++;if(inputPoll){global.clearInterval(inputPoll);inputPoll=null;}querySequence++; progressSequence++; closeEvidence(false); exportRevisionRun=''; if(runExport)runExport.setRun(currentRun); }
+        let runExport=null, runList=[], chainExportRun='';
+        let continuation=null, continueSizing=null, continueSizingIdentity='', continueRequested='', continueSequence=0;
+        function viewChanged() { continuation=null;continueRequested='';continueSequence++;viewEpoch++;if(inputPoll){global.clearInterval(inputPoll);inputPoll=null;}querySequence++; progressSequence++; closeEvidence(false); exportRevisionRun=''; if(runExport)runExport.setRun(currentRun); }
         const status = message => { $('Status').textContent = message; };
         const fail = error => { $('Error').hidden = false; $('Error').textContent = error.message || 'The operation could not complete. Try again.'; };
         const clearError = () => { $('Error').hidden = true; $('Error').textContent = ''; };
@@ -169,7 +170,7 @@
             documents();
         }
         async function refreshRuns() {
-            const runs = await api('runs');
+            const runs = await api('runs'); runList = runs;
             options($('Runs'), runs.map(r => ({value:r.run_id,label:label(r.state) + ' · ' + r.selected_row_ids.length + ' questions · ' + r.run_id.slice(-8)})), currentRun, 'Select a previous run');
         }
         function badge(text, value) {
@@ -220,6 +221,53 @@
             if (sequence !== querySequence) return;
             total = data.total; renderRows(data.rows);
         }
+        // Continue a stopped run: a new subset run over the rows it did not finish.
+        function continuationBody() {
+            const body={include_needs_review:!!$('ContinueReview')?.checked};
+            if(Object.keys(runLimits()).length) body.operational_limits=runLimits();
+            return body;
+        }
+        const continuationCount = () => continuation ? continuation.unfinished + ($('ContinueReview')?.checked ? continuation.needs_review : 0) : 0;
+        const currentContinueSizing = () => continueSizingIdentity && continueSizingIdentity===continueRequested ? continueSizing : null;
+        function continueBlocked() {
+            const need=sizingRequirement(currentContinueSizing());
+            return !continuationCount() || need==='pending' || (need==='unsized' && !$('ContinueSizingAck').checked) || (need==='partial' && !$('ContinuePartialAck').checked);
+        }
+        function renderContinuation() {
+            if(!$('Continue')) return;
+            const offered=!!continuation && continuation.unfinished+continuation.needs_review>0, count=continuationCount();
+            $('Continue').hidden=!offered; $('Continuation').hidden=!offered;
+            $('Continue').textContent='Continue unfinished rows ('+count+')';
+            if(offered && count) {
+                const identity=currentRun+'|'+JSON.stringify(continuationBody());
+                if(identity!==continueRequested) {
+                    const run=currentRun, sequence=++continueSequence;
+                    continueRequested=identity; continueSizing=null; continueSizingIdentity='';
+                    api('runs/'+encodeURIComponent(run)+'/continuation-estimate',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(continuationBody())}).then(view=>{
+                        if(sequence!==continueSequence) return;
+                        // A new estimate needs a new confirmation.
+                        continueSizing=view; continueSizingIdentity=identity; $('ContinueSizingAck').checked=false; $('ContinuePartialAck').checked=false; renderContinuation();
+                    }).catch(e=>{ if(sequence===continueSequence){continueRequested='';fail(e);} });
+                }
+            }
+            const view=currentContinueSizing(), need=count ? sizingRequirement(view) : '';
+            $('ContinueSizingTable').replaceChildren(...(view && view.estimate ? [sizingTable(document,view)] : []));
+            $('ContinueSizingAckLabel').hidden=need!=='unsized'; $('ContinuePartialAckLabel').hidden=need!=='partial';
+            $('ContinueSizingStatus').textContent=!count ? 'No unfinished rows. Tick the box to re-run rows that need review.'
+                : need==='pending' ? 'Estimating cost from completed reference runs on this snapshot…'
+                : (need==='unsized' ? 'No reference runs on this snapshot. Run a pilot first, or confirm an unsized run.'
+                : 'Estimate for '+view.row_count+' questions from '+view.reference.row_count+' reference rows in '+view.reference.run_ids.length+' completed runs. Expected uses means; high uses 90th percentiles.'+(need==='partial' ? ' The expected cost exceeds a limit, so the run will pause before finishing.' : ''))
+                + (view && view.truncated ? ' Only the first '+view.row_count+' rows fit the run maximum; '+view.remaining_rows+' remain for a later continuation.' : '');
+            $('Continue').disabled=continueBlocked();
+        }
+        async function refreshContinuation(run) {
+            if(!canStart || !$('Continue')) return;
+            const requested=currentRun, epoch=viewEpoch;
+            const stopped=run.execution_version && !['queued','running'].includes(run.state) && !runList.some(r=>r.continues_run_id===requested);
+            const value=stopped ? await api('runs/'+encodeURIComponent(requested)+'/continuation-preview') : null;
+            if(requested!==currentRun || epoch!==viewEpoch) return;
+            continuation=value; renderContinuation();
+        }
         async function progress() {
             if (!currentRun) return;
             const requestedRun=currentRun, epoch=viewEpoch;
@@ -243,6 +291,11 @@
             if($('Recovery')) {
                 $('Recovery').hidden=$('Resume').hidden;
                 $('RecoveryText').textContent=(run.unknown_completion_count||0)+' request(s) have unknown remote completion · '+(run.validated_checkpoint_count||0)+' structured checkpoints retained. '+(run.operational_budget?.remaining_completions===0 || run.operational_budget?.remaining_tokens===0 || ['budget_elapsed','budget_failures'].includes(run.pause_reason) ? 'This allowance cannot be extended; create a new explicitly configured run. Retained checkpoints remain historical.' : run.execution_version ? 'Explicit compatible recovery is available within remaining allowance.' : 'Historical implementation identity must match; create a new run rather than migrating old work.');
+            }
+            await refreshContinuation(run).catch(fail);
+            if($('ChainExport')) {
+                $('ChainExport').hidden = root.dataset.canExport !== 'true' || !(run.chain_root_run_id || runList.some(r=>r.continues_run_id===currentRun));
+                $('ChainCsv').hidden = $('ChainExport').hidden || chainExportRun !== currentRun; $('ChainManifest').hidden = $('ChainCsv').hidden;
             }
             $('PrepareExport').hidden = root.dataset.canExport !== 'true';
             $('Export').hidden = root.dataset.canExport !== 'true' || exportRevisionRun !== currentRun; $('Manifest').hidden = $('Export').hidden;
@@ -365,6 +418,38 @@
                 $('ExportState').textContent = 'Frozen ' + revision.export_captured_at + ' · ' + label(revision.state) + ' run · ' + revision.row_count + ' rows. Prepare again to include newer progress.';
             } catch(e) { fail(e); } finally { $('PrepareExport').disabled = false; }
         });
+        $('ChainExport')?.addEventListener('click', async () => {
+            const run = currentRun; $('ChainExport').disabled = true; clearError();
+            try {
+                const revision = await api('runs/' + encodeURIComponent(run) + '/chain-export-revisions', {method:'POST'});
+                if (run !== currentRun) return;
+                const suffix = '?revision_id=' + encodeURIComponent(revision.export_revision_id);
+                $('ChainCsv').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(run) + '/chain-export' + suffix;
+                $('ChainManifest').href = '/api/knowledge-coverage/runs/' + encodeURIComponent(run) + '/chain-export-manifest' + suffix;
+                $('ChainCsv').textContent = 'Whole-input CSV · ' + revision.row_count + ' rows from ' + revision.chain_run_ids.length + ' runs';
+                chainExportRun = run; $('ChainCsv').hidden = false; $('ChainManifest').hidden = false;
+                $('ChainCsv').click();
+            } catch(e) { fail(e); } finally { $('ChainExport').disabled = false; }
+        });
+        if (canStart && $('Continue')) {
+            $('ContinueReview').addEventListener('change', renderContinuation);
+            $('ContinueSizingAck').addEventListener('change', renderContinuation);
+            $('ContinuePartialAck').addEventListener('change', renderContinuation);
+            limitKeys.forEach(k=>$('Limit_'+k)?.addEventListener('change',renderContinuation));
+            $('Continue').addEventListener('click', async () => {
+                $('Continue').disabled=true; clearError();
+                try {
+                    const source=currentRun, epoch=viewEpoch, need=sizingRequirement(currentContinueSizing());
+                    const payload={...continuationBody(), sizing_acknowledged:need==='unsized' && $('ContinueSizingAck').checked,
+                        accept_partial_run:need==='partial' && $('ContinuePartialAck').checked,
+                        idempotency_key:global.crypto?.randomUUID?.().replaceAll('-','')||('continue_'+Date.now()+'_'+Math.random().toString(36).slice(2))};
+                    const run=await api('runs/'+encodeURIComponent(source)+'/continuations',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(payload)});
+                    if(epoch!==viewEpoch) return;
+                    currentRun=run.run_id; viewChanged(); offset=0; await refreshRuns(); startPoll(); await progress();
+                    if(run.truncated) status('Continuation started with '+run.selected_row_ids.length+' rows; '+run.remaining_rows+' rows remain for a later continuation.');
+                } catch(e) { fail(e); } finally { renderContinuation(); }
+            });
+        }
         if (canStart) {
             function mapHeaders() {
                 if (!fileBytes) return;

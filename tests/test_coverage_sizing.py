@@ -1,6 +1,7 @@
 """F8b: pre-start cost estimate from completed reference runs. Synthetic runs, rows and ledgers only."""
 from dataclasses import asdict
 import json
+import secrets
 
 import pytest
 from fastapi.testclient import TestClient
@@ -136,11 +137,12 @@ def client_runtime(seeded, setup, monkeypatch):
 def body(d, s, data, mode='full_input', **extra):
     rows = [] if mode == 'full_input' else [e.source_row_id for e in data.selected][:6]
     return {'dataset_id': d['dataset_id'], 'snapshot_id': s['snapshot_id'], 'row_ids': rows, 'execution_mode': mode,
-            'entry_budget': 300, 'documents': ['Synthetic_FAQ'], 'budget_acknowledged': mode == 'full_input', **extra}
+            'entry_budget': 300, 'documents': ['Synthetic_FAQ'], 'budget_acknowledged': mode == 'full_input',
+            'idempotency_key': 'synthetic_' + secrets.token_hex(16), **extra}
 
 
 def estimate_body(d, s, data, mode='full_input', **extra):
-    return {k: v for k, v in body(d, s, data, mode, **extra).items() if k != 'budget_acknowledged'}
+    return {k: v for k, v in body(d, s, data, mode, **extra).items() if k not in {'budget_acknowledged', 'idempotency_key'}}
 
 
 def test_estimate_endpoint_shape_and_permissions(client_runtime, monkeypatch):

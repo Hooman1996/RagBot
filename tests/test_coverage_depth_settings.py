@@ -138,8 +138,8 @@ def test_api_entry_budget_defaults_to_and_is_bounded_by_configured_maximum(audit
         login(client, 'alice')
         page = client.get('/knowledge-coverage'); assert page.status_code == 200
         assert 'id="coverageBudget" type="number" min="1" max="120" value="120"' in page.text
-        rejected = client.post('/api/knowledge-coverage/runs', json={**body, 'entry_budget': 121}, headers=csrf(client))
+        rejected = client.post('/api/knowledge-coverage/runs', json={**body, 'entry_budget': 121, 'idempotency_key': 'synthetic_depth_rejected'}, headers=csrf(client))
         assert rejected.status_code == 409 and rejected.json()['detail'] == 'invalid_entry_budget'
-        started = client.post('/api/knowledge-coverage/runs', json=body, headers=csrf(client))
+        started = client.post('/api/knowledge-coverage/runs', json={**body, 'idempotency_key': 'synthetic_depth_started'}, headers=csrf(client))
         assert started.status_code == 202, started.text
         assert started.json()['settings']['entry_budget'] == 120

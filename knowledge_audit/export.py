@@ -34,7 +34,7 @@ def _redact(value, redactor, key=""):
                           "history_row_ids", "excluded_equal_timestamp_ids", "history_digest",
                           "input_id", "kb_snapshot_id", "configuration_id", "preparation_code_id",
                           "snapshot_id", "bundle_id", "content_sha256", "source_content_sha256",
-                          "run_identity_id", "export_revision_id", "run_id"}
+                          "run_identity_id", "export_revision_id", "run_id", "source_run_id"}
         if (key in reference_keys or key.endswith("_sha256")) and re.fullmatch(r"(?:row|query|session|r|rev)_[0-9a-f]{32}|[0-9a-f]{64}", value):
             return value
         if key in {"chunk_id", "faq_entry_id", "support_id", "entry_id", "supporting_chunk_ids", "supporting_faq_ids", "production_candidate_ids", "production_context_ids", "evaluated_entry_ids", "related_faq_ids", "equivalent_faq_ids"} and re.fullmatch(r"[A-Za-z0-9_.:-]{1,128}", value):
@@ -135,10 +135,12 @@ MAP_FIELDS = {"timestamp_provenance", "history_provenance", "evaluation_scope", 
 RESTRICTED_FIELDS = ARRAY_FIELDS - {"preparation_errors", "uncertainty_codes", "review_codes", "residual_review_codes", "failure_diagnostics", "request_journal"}
 
 
-def coverage_export(meta, results, redactor, *, evidence_visible):
+def coverage_export(meta, results, redactor, *, evidence_visible, sources=None):
+    """sources maps each row to the run meta it came from (chain exports only)."""
     new_execution = bool(meta.get("execution_version"))
     fields = COVERAGE_FIELDS + (("execution_mode", "selected_for_execution", "execution_selected_row_count", "checkpoint_reuse_count", "unknown_completion_count", "validated_checkpoint_count", "request_journal", "model_evaluated", "entry_model_dispatched") if new_execution else ())
     if meta.get('operational_policy'):fields+=('operational_budget','retention_policy','pause_reason')
+    if sources is not None:fields+=('source_run_id',)
     scope = ("full_input" if meta.get("execution_mode") == "full_input" else "explicit_subset_full_input_export" if meta.get("execution_mode") == "subset" else "pilot_subset_full_input_export")
     rows = []
     for source in results:
@@ -153,8 +155,11 @@ def coverage_export(meta, results, redactor, *, evidence_visible):
             tokenizer_versions={"method": "served_tokenize", "immutable_revision": "unverified"},
             recommendations=[], recommendation_status="unassessed", run_settings_version=meta["configuration_id"],
             preparation_code_id=meta["versions"].get("code_id", ""), production_baseline_version="production-selection-1")
+        origin = sources[source["source_row_id"]] if sources is not None else meta
         if meta.get('operational_policy'):
-            row.update(operational_budget=meta.get('operational_budget',{}),retention_policy=meta['settings'].get('retention_policy',{'automatic_deletion':False}),pause_reason=meta.get('pause_reason',''))
+            row.update(operational_budget=origin.get('operational_budget',{}),retention_policy=meta['settings'].get('retention_policy',{'automatic_deletion':False}),pause_reason=origin.get('pause_reason',''))
+        if sources is not None:
+            row["source_run_id"] = origin["run_id"]
         if new_execution:
             row.update(execution_mode=meta["execution_mode"], selected_for_execution=source["source_row_id"] in meta["selected_row_ids"],
                 execution_selected_row_count=len(meta["selected_row_ids"]), checkpoint_reuse_count=source.get("checkpoint_reuse_count", 0),

@@ -228,7 +228,7 @@ def test_upload_mapping_no_arbitrary_paths_and_full_input_pilot_export(audit_run
             time.sleep(.01)
         assert data['total']==3
         body={'dataset_id':did,'snapshot_id':s['snapshot_id'],'row_ids':[data['rows'][0]['source_row_id']],
-              'entry_budget':300,'documents':['Synthetic_FAQ']}
+              'entry_budget':300,'documents':['Synthetic_FAQ'],'idempotency_key':'synthetic_access_jobs_run'}
         assert client.post('/api/knowledge-coverage/runs',json=body,headers={**csrf(client),'Origin':'http://wrong-origin'}).status_code==403
         response=client.post('/api/knowledge-coverage/runs',json=body,headers=csrf(client)); assert response.status_code==202,response.text
         rid=response.json()['run_id']

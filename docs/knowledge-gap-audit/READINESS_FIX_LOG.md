@@ -1308,3 +1308,182 @@ exit 0
 ```
 
 The pytest count rose from 1156 in step 09 to 1167, from the 11 new tests in `tests/test_coverage_sizing.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. Only this log section changed after run 1. The amended commit was checked again in a new clean worktree with the same command before push.
+
+## [11] Continue a paused run's unfinished rows, export the whole chain, and require idempotency keys
+
+### Problem
+
+- **F8c (Medium):** a paused run could not practically be finished. `RowJournal.binding` (`knowledge_audit/recovery.py`) includes the run ID, so a new run cannot reuse another run's checkpoints; nothing created a run from the rows a previous run did not finish (continuing a 918-row run paused at row 40 meant ticking about 880 boxes in a subset run); each run exported on its own, with no single CSV for the whole input; and `failed` is in `TERMINAL` although it is retryable.
+- **F15 (Low):** `create_run` used `payload.idempotency_key or canonical_sha256(payload.model_dump())`. A script resending the same payload after a run was exhausted got the old run back, and after a code or settings change the same payload failed with `idempotency_request_conflict`. The page always sent a random key and was not affected.
+
+### Rule (approved by the owner)
+
+- **Continue:** a "continue" action creates a new `subset` run from the unfinished rows of a source run, on the same dataset, snapshot and documents.
+- **Chains:** runs linked this way form a chain, and one immutable, hash-bound export covers the whole input of the chain.
+- **Idempotency:** every run-creating request carries an explicit idempotency key.
+- **No cross-run checkpoint reuse:** `RowJournal.binding` is unchanged. A continuation selects only unfinished rows, so it needs no checkpoint reuse.
+
+### Which rows a continuation selects
+
+`knowledge_audit/execution.py` `continuation_rows(store, owner, source_run_id, *, include_needs_review=False)` returns the source's `selected_row_ids`, in that order, whose progress-index summary is unfinished (`unfinished(row, include_needs_review)`):
+
+- `processing_status` is not in `TERMINAL` (`pending`, `running`, `interrupted`, `cancelled`); or
+- `processing_status == "failed"`; or
+- `unknown_completion_count > 0` and the status is not `completed`; or
+- `include_needs_review` is set and the status is `needs_review`.
+
+`completed`, `excluded`, `invalid_input` and `needs_context` (the new `FINAL` set) are never selected, whatever their unknown-completion count. In practice the unknown-completion clause therefore adds only `needs_review` rows with an unknown remote completion.
+
+- **`needs_context` is final:** `CoverageEvaluator.evaluate` already retries such a row once with `context_reviewed=True`, so running it again gives the same result.
+- **`needs_review` only on request:** running these again is only useful after something has changed, such as the KB or the limits.
+
+`continuation_counts` gives the preview: `unfinished` (the default selection), `needs_review` (rows the checkbox would add), and `failed` and `unknown` within the default selection. Both read the progress index under the run's metadata lock, never row text.
+
+### What "same setup" and `merge_identity` compare
+
+New `knowledge_audit/chain_export.py`:
+
+- **`same_setup(source, config, versions)`**, for a new continuation: `sizing.comparable(source) == sizing.comparable({"settings": config, "versions": versions()})`, else `AuditError("continuation_identity_drift")` (409). That is the source's settings without `operational_limits`, `selection_method` and `sizing`, and only the `prompts`, `code` and `code_id` versions, against the config the server builds now. `versions` are not compared directly: a started run also holds `serving` and `runtime_configuration`, which a new run does not have yet (the step 09 Part A trap).
+- **`merge_identity(meta)`**, for the chain export: `sizing.comparable(meta)`, plus `versions["serving"]`, plus `versions["runtime_configuration"]` without `model_limit` (the row count), `model_sample_rule` (see decisions) and `audit_runtime_settings.operational_limits`. A run that never started has neither key and contributes `None` for both. Every run of a chain must have an equal `merge_identity`, `dataset_id`, `snapshot_id` and `row_ids`, else `chain_identity_drift`. So runs that differ only in row count or limits merge, and runs that differ in code, settings or serving model do not.
+
+### Changes
+
+- **F15, `knowledge_audit/api.py`:** `RunPayload.idempotency_key` is required (same pattern, `IDEMPOTENCY_KEY`) and `create_run` passes it directly; the unused `canonical_sha256` import is removed. The new `ContinuationPayload` also requires a key. A search of `knowledge_audit/` found no other endpoint with the payload-hash fallback: recommendation drafts (`recommendation_api.create`) take a fresh random ID per request and have no idempotency key, and calibrations have no HTTP creation endpoint. Both are unchanged.
+- **`knowledge_audit/execution.py`, `knowledge_audit/store.py`:** `create_run(..., chain=None)`. With `chain`, `continues_run_id` and `chain_root_run_id` go into the top-level meta (never `settings`), the chain is part of the creation request identity, and a second continuation of the same source is refused with `run_already_continued` inside the per-owner creation lock (see decisions). Without `chain`, run creation is unchanged.
+- **`knowledge_audit/jobs.py`:** `CoverageJobs.idle(rid, owner)` settles a stale state with `inspect_state`, then holds the run's lease, as `recover` (the retry endpoint) does, and refuses with `run_active` when the lease is held, the task is active or the state is `queued`/`running`. The continuation is created while this lease is held, so the source cannot be resumed meanwhile.
+- **`knowledge_audit/api.py`, routes:**
+  - `POST /api/knowledge-coverage/runs/{run_id}/continuations` (`coverage_run_start`): body `{"idempotency_key", "include_needs_review": false, "operational_limits": null, "sizing_acknowledged": false, "accept_partial_run": false}`. Source owned by the user (else 404) and idle (else 409 `run_active`); rows from `continuation_rows`; none gives 422 "No unfinished rows"; more than `max_run_rows` takes the first `max_run_rows` and returns `"truncated": true` with `remaining_rows`. The run is built with the step 10 `run_config` from the source's `dataset_id`, `snapshot_id`, `settings["documents"]` and `settings["entry_budget"]`, `execution_mode="subset"`, then `same_setup`, then the step 10 sizing rules through a new shared `sized(...)` helper (the old `create_run` block, moved unchanged) with `sizing` recorded as in step 10.
+  - `GET .../continuation-preview` (`coverage_results_view`): `{"unfinished", "needs_review", "failed", "unknown"}`, counts only.
+  - `POST .../continuation-estimate` (`coverage_run_start`, see decisions): the `runs/estimate` shape for the continuation's selection and limits, plus `truncated` and `remaining_rows`.
+  - `POST .../chain-export-revisions`, `GET .../chain-export`, `GET .../chain-export-manifest` (`coverage_export_download`, as the run export), for any run of the chain.
+  - `safe_meta` adds `continues_run_id` and `chain_root_run_id`. New allowlisted codes: `run_active`, `run_already_continued`, `continuation_identity_drift`, `ambiguous_run_chain`, `chain_identity_drift`, `run_chain_changed`.
+- **Chain export, `knowledge_audit/chain_export.py`:**
+  - `chain(store, owner, run_id)`: follows `continues_run_id` to the root, collects the root and every run with that `chain_root_run_id`, root first then creation order. Two runs continuing one source, a cycle or a link outside the chain give `ambiguous_run_chain`.
+  - `merged_rows(store, owner, runs)`: the root's `row_ids`; each row from the latest run that finished it (status in `TERMINAL` and not `failed`), else its latest copy; plus a `provenance` map. Only runs that selected the row are considered when any did (see decisions).
+  - `export_revision(...)`: holds every chain run's metadata lock (sorted, so no lock-order cycle), re-reads the chain (a run that joined meanwhile gives `run_chain_changed`), captures each run's rows and budget summary, and writes `runs/<root>/chain-exports/{evidence|restricted}/rev_<32 hex>/{coverage.csv,manifest.json}` plus `latest.json`. Reads verify the CSV hash, projection and version, exactly like run export revisions.
+  - The CSV is `coverage_export(...)` over the merged rows, so the BOM, quoting, formula protection and restricted fields are the run export's. The meta is the latest run's, with the root's `run_id`, `execution_mode` and `row_ids` and the union of selected rows. One column is added, `source_run_id`; each row's `operational_budget` and `pause_reason` come from its source run.
+  - The manifest adds `chain_export_version: "coverage-chain-export-1"`, `chain_root_run_id`, `chain_run_ids`, `chain_results_sha256` (each run's `canonical_sha256` of its row copies), `chain_runs` (state, mode, selected count, identities and budget per run), `merge_identity_sha256` and `source_run_row_counts`.
+- **`knowledge_audit/export.py`:** `coverage_export(..., sources=None)`. With `sources` (row ID → source run meta) it adds `source_run_id` and takes the budget columns per row; without it the output is byte-for-byte unchanged. `source_run_id` joins the opaque reference keys that redaction leaves alone.
+- **Retention, `knowledge_audit/retention.py`:** `chain-exports/` is a known run layout. The export lives with the root run and its manifest names every chain run, so a retained root keeps every run its chain export references. Every continuation's meta names the root, so a retained continuation keeps the root.
+- **`web_permissions.py`:** the six routes above. `tests/test_web_permissions.py` route inventory: the same six entries.
+- **Page (`templates/knowledge_coverage.html`, `static/js/knowledge_coverage.js`), English text and existing styles only:**
+  - On a stopped run that has not already been continued, the preview drives "Continue unfinished rows (N)" and the "Also re-run rows that need review" checkbox. The continuation estimate fills the step 10 sizing table and the same two checkboxes ("I confirm an unsized run.", "I accept that this run will pause before finishing"), using the finite execution limits on the page. Continue is disabled until the estimate for the current choice has loaded and the required checkbox is ticked. Each click sends a new random idempotency key. On success the page opens the new run.
+  - A run in a chain shows "Download whole input (all runs)" in the existing download actions. It freezes a revision, downloads the CSV and shows "Whole-input CSV" and "Whole-input manifest" links.
+
+### Decisions not covered by the command
+
+Approved by the person running this step:
+
+- **`merge_identity` also removes `runtime_configuration.model_sample_rule`.** It is the run's selection method (`server_all_user_query_rows` for a full run, `explicit_source_row_ids` for a subset), which `sizing.comparable` already ignores. Without this, a paused full run and its subset continuation, the main use case, could never merge.
+- **New route `POST /runs/{run_id}/continuation-estimate`.** The page needs the step 10 sizing table before a continuation starts, the preview is counts only, and the page never sees the unfinished row IDs. It takes the continuation body without the key or acknowledgements, runs the same selection, config and setup checks as the continuation, and creates nothing.
+
+Not put to the owner; recorded for review:
+
+- **A source can be continued once (`run_already_continued`, 409).** A second continuation of one source would branch the chain and make `chain` refuse the whole chain with `ambiguous_run_chain`. A replay with the same key still returns the first continuation. The page hides Continue on a run that already has a continuation; the latest run of a chain can be continued.
+- **Merge provenance prefers runs that selected the row.** A continuation's unselected copy of an `invalid_input` row is terminal and identical to the root's, so the literal rule would credit a run that never processed the row.
+- **Chain revisions are named by their inputs:** `rev_` plus the first 32 hex digits of `canonical_sha256` of the version, projection, each run's meta with its budget summary, and each run's results hash. Exporting an unchanged chain returns the same revision, its stored bytes and its first capture time; any change gives a new revision. Run exports keep random revision IDs.
+- **A never-started run in a chain** contributes `None` serving and runtime identity, so a chain with one started and one never-started run gives `chain_identity_drift` until that run starts (literal rule).
+- **Truncation is effectively unreachable with today's settings.** `max_run_rows` is in the compared settings, and `create_run` caps every run at its own `max_run_rows`, so a source with the same setup never has more rows than the maximum. The code path exists and is tested by capping only the selection maximum.
+- **New tests skip `os.fsync`** (module fixture in `tests/test_coverage_continuation.py`). They check selection, chains and exports on 918-row runs, not crash durability; this cut the file from about 234 s to about 90 s. No product code is patched.
+- **`knowledge_audit/jobs.py` changed** (`idle`), which the command's staging list did not name.
+- **`pytest.ini` changed** (`faulthandler_timeout` 120 → 300), approved by the owner after clean-checkout run 2; see below.
+
+### Existing tests changed
+
+| Test | Old | New | Why |
+|---|---|---|---|
+| `tests/test_coverage_sizing.py` `body()` and `estimate_body()` | run payloads had no key | `body()` adds a fresh `idempotency_key`; `estimate_body()` drops it (the estimate takes none) | F15: a run POST without a key is now 422. Every assertion is unchanged. |
+| `tests/test_coverage_depth_settings.py::test_api_entry_budget_defaults_to_and_is_bounded_by_configured_maximum` | both run POSTs had no key | each POST sends its own key | F15. Assertions unchanged. |
+| `tests/test_knowledge_coverage_access_jobs.py::test_upload_mapping_no_arbitrary_paths_and_full_input_pilot_export` | run POST had no key | the body carries a key | F15. Assertions unchanged. |
+| `tests/test_web_permissions.py` `EXPECTED` | no continuation or chain-export routes | the six new routes and capabilities | The inventory lists every browser route. |
+| `tests/knowledge_operations.browser.cjs` | ended the paused-run flow after the export hash check | new step, below; every earlier check unchanged | Browser coverage for the continue action and the chain export. |
+
+`tests/test_knowledge_execution_recovery.py::test_full_mode_api_idempotency_csrf_owner_and_revoked_grant` already sent a key and is unchanged. The page already sent a key, so `tests/knowledge_coverage.frontend.test.cjs` is unchanged.
+
+New browser step in `tests/knowledge_operations.browser.cjs`, from the paused synthetic 918-row run: "Continue unfinished rows (918)" is shown and disabled until "I confirm an unsized run." is ticked; the click opens a new paused run whose `continues_run_id` and `chain_root_run_id` are the source and which selects 918 rows; "Download whole input (all runs)" downloads a CSV whose SHA-256 equals the manifest's `csv_sha256`, and the manifest lists both runs and 918 rows. The fixture app needed no change.
+
+New tests (`tests/test_coverage_continuation.py`, 10): the selection rule with and without `needs_review`; creation (linked `subset` run with top-level links, same key gives the same run, unsized and over-limit sizing rules, second continuation refused, continuation of a continuation keeps the root); refusals (lease held and queued give `run_active`, changed `batch_max_entries` gives `continuation_identity_drift`, no unfinished rows gives 422, a started source with an otherwise equal setup is accepted, unknown run 404); truncation; a chain of 3 runs (provenance per row, 918 rows, 3 runs and hashes in the manifest, the same revision and bytes on repeat and on a fresh build, restricted projection, different `model_limit` and limits still merge); chain export routes; bad chains (branch, different snapshot, different serving); retention; and F15 (missing key 422 for runs and continuations, two keys with identical payloads give two runs).
+
+### AGENTS.md note
+
+This adds run orchestration and an export. It does not change how a row is evaluated, retrieval, prompts, models or the chatbot, so no retrieval or answer-quality test applies. Both benchmarks below show per-row execution overhead is unchanged: the read counts are identical and the medians move within run-to-run noise.
+
+### Checks
+
+Benchmarks, before on `f3c7424` and after, in conda `faq`:
+
+```text
+conda run --no-capture-output -n faq python scripts/benchmark_coverage_progress.py
+before: {"baseline_full_rows_checkpoint_and_progress": {"median_ms": 855.3, "reads": {"index": 0, "metadata": 4600, "row": 4595}}, "baseline_full_rows_poll": {"median_ms": 856.622, "reads": {"index": 0, "metadata": 4595, "row": 4590}}, "indexed_checkpoint_and_progress": {"median_ms": 58.218, "reads": {"index": 10, "metadata": 20, "row": 5}}, "indexed_poll": {"median_ms": 8.151, "reads": {"index": 5, "metadata": 10, "row": 0}}, "iterations": 5, "model_dispatches": 0, "rows": 918, "scope": "synthetic_file_io_only"}
+after:  {"baseline_full_rows_checkpoint_and_progress": {"median_ms": 815.61, "reads": {"index": 0, "metadata": 4600, "row": 4595}}, "baseline_full_rows_poll": {"median_ms": 809.6, "reads": {"index": 0, "metadata": 4595, "row": 4590}}, "indexed_checkpoint_and_progress": {"median_ms": 36.935, "reads": {"index": 10, "metadata": 20, "row": 5}}, "indexed_poll": {"median_ms": 7.974, "reads": {"index": 5, "metadata": 10, "row": 0}}, "iterations": 5, "model_dispatches": 0, "rows": 918, "scope": "synthetic_file_io_only"}
+
+conda run --no-capture-output -n faq python scripts/benchmark_coverage_budgets.py
+before: {"boundaries_per_iteration": 12, "checkpoint_only": {"measurements_ms": [490.728, 435.463, 444.574], "median_ms": 444.574}, "checkpoint_with_allowance": {"measurements_ms": [753.954, 834.973, 986.053], "median_ms": 834.973}, "input_rows": 918, "iterations": 3, "live_dispatches": 0, "scope": "mocked_file_io_no_service_throughput", "version": "a62-file-io-1"}
+after:  {"boundaries_per_iteration": 12, "checkpoint_only": {"measurements_ms": [491.568, 444.757, 437.785], "median_ms": 444.757}, "checkpoint_with_allowance": {"measurements_ms": [807.223, 747.743, 715.192], "median_ms": 747.743}, "input_rows": 918, "iterations": 3, "live_dispatches": 0, "scope": "mocked_file_io_no_service_throughput", "version": "a62-file-io-1"}
+```
+
+Before commit, in conda `faq` with the offline pytest guard:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_coverage_continuation.py tests/test_coverage_sizing.py tests/test_knowledge_execution_recovery.py tests/test_knowledge_operations.py tests/test_knowledge_coverage_access_jobs.py tests/test_web_permissions.py tests/test_knowledge_recommendations.py
+182 passed, 29 warnings in 275.60s (0:04:35)
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+git diff --check
+no output, exit 0
+```
+
+The first run of the focused command, before the fsync fixture and the export rebuild change in the new test file, ended in a segmentation fault reported by the shell; a second, identical run passed (182 passed in 410.89s), as did the final run above. In both completed runs the only diagnostic is the `faulthandler_timeout = 120` traceback dump from the existing `tests/test_knowledge_execution_recovery.py::test_full_918_selection_idempotency_chronology_export_and_mock_run`, which takes about 145 s on `f3c7424` too (143.91 s there, 145.65 s with this change, run alone). No kernel log entry was found. The same crash recurred in clean-checkout run 2; see "Clean-checkout run 2 and the faulthandler timeout" below.
+
+Also run before commit: the node harness `tests/knowledge_coverage.frontend.test.cjs` (6 passed), the offline frontend audit (PASS) and the operations browser harness on its fixture app (all 6 checks, including the new one).
+
+Clean-checkout command (conda `faq`), run on the unpushed `[11]` commit. `/tmp/faq-a21-browser-node` exists, so the browser stage ran with `REQUIRE_BROWSER=1`. `uptime` before the run showed a load average of 0.53, the host's normal level:
+
+```text
+uptime
+git worktree add /tmp/faq-clean-11 HEAD
+cd /tmp/faq-clean-11 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-11; echo "exit $status"
+```
+
+Run 1, on the first `[11]` commit (`94ab38e`):
+
+```text
+1177 passed, 26 deselected, 58 warnings, 291 subtests passed in 327.75s (0:05:27)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count rose from 1167 in step 10 to 1177, from the 10 new tests in `tests/test_coverage_continuation.py`. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. Only this log section changed after run 1.
+
+### Clean-checkout run 2 and the faulthandler timeout (approved by the owner)
+
+Run 2, on the amended commit `7ff0645` (only the run 1 summary above added), with the same command. `uptime` showed a load average of 1.54. The suite itself exited 139 (segmentation fault) during pytest, so the later stages did not run:
+
+```text
+....Timeout (0:02:00)!
+Thread 0x00007e0fe3a65600 (most recent call first):
+  File "/root/miniconda3/envs/faq/lib/python3.12/pathlib.py"timeout: the monitored command dumped core
+scripts/run_offline_tests.sh: line 20: 1212093 Segmentation fault      timeout 1800 python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q
+pytest: FAIL
+exit 139
+```
+
+- **Where it crashed:** `pytest.ini` set `faulthandler_timeout = 120`, so for any test running longer than 120 s faulthandler's watchdog thread prints the traceback of every thread. The existing `tests/test_knowledge_execution_recovery.py::test_full_918_selection_idempotency_chronology_export_and_mock_run` runs longer than that, and both crashes (the first focused run before commit and clean-checkout run 2) happened while that dump was being printed: the output stops in the middle of a traceback line, then the core dump.
+- **Not this change:** run alone, that test took 143.91 s on `f3c7424` and 145.65 s with this change, so it triggers the dump on both, and none of the new code runs in it. Of the five runs that reached the dump, two crashed and three passed. The cause is the faulthandler dump thread, not this change.
+- **Decision (owner, option 1 of 3):** `pytest.ini` `faulthandler_timeout = 300`. No test changes; a real hang still gets a traceback, after 5 minutes instead of 2. The alternatives were skipping disk flushes in that test, which would weaken a crash-recovery test, or re-running unchanged and accepting the flake.
+
+The commit amended with `pytest.ini` and this section was checked again in a new clean worktree with the same command before push.

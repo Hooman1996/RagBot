@@ -33,10 +33,22 @@ async function run(){
  assert.equal(manifest.row_count,918);assert.equal(manifest.state,'paused');assert.equal(manifest.operational_budget.remaining_completions,0);assert.equal(manifest.operational_budget.unknown_reservations,0);
  assert.equal(crypto.createHash('sha256').update(csvBytes).digest('hex'),manifest.csv_sha256);
  const again=await context.request.get(origin+url+'/export?revision_id='+manifest.export_revision_id);assert.deepEqual(await again.body(),csvBytes);
+ // Continue the paused run: a linked subset over its 918 unfinished rows, then one export of the whole input.
+ await page.locator('#coverageContinue:visible').waitFor();assert.equal(await page.locator('#coverageContinue').textContent(),'Continue unfinished rows (918)');
+ await page.locator('#coverageContinueSizingAckLabel').waitFor();assert.equal(await page.locator('#coverageContinue').isDisabled(),true);
+ await page.locator('#coverageContinueSizingAck').check();await page.locator('#coverageContinue').click();
+ await page.waitForFunction(old=>document.getElementById('coverageRuns').value!==old,rid);const next=await page.locator('#coverageRuns').inputValue();
+ await page.waitForFunction(()=>document.getElementById('coverageProgressText').textContent.startsWith('Paused'),{},{timeout:30000});
+ const continued=await(await context.request.get(origin+'/api/knowledge-coverage/runs/'+next)).json();
+ assert.equal(continued.continues_run_id,rid);assert.equal(continued.chain_root_run_id,rid);assert.equal(continued.execution_mode,'subset');assert.equal(continued.selected_row_ids.length,918);
+ await page.locator('#coverageChainExport:visible').waitFor();const chainBytes=await download('#coverageChainExport');
+ const chainManifest=await(await context.request.get(origin+await page.locator('#coverageChainManifest').getAttribute('href'))).json();
+ assert.deepEqual(chainManifest.chain_run_ids,[rid,next]);assert.equal(chainManifest.row_count,918);assert.equal(chainManifest.chain_export_version,'coverage-chain-export-1');
+ assert.equal(crypto.createHash('sha256').update(chainBytes).digest('hex'),chainManifest.csv_sha256);
  await page.locator('#coverageLanguage').click();await page.locator('#coverageTheme').click();await page.setViewportSize({width:390,height:844});
  await page.locator('#coverageBudgetProgress').scrollIntoViewIfNeeded();await shot('a62-paused-dark-rtl.png');assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),true);
  assert.equal(errors,0);
- const report={browser_version:browser.version(),synthetic_rows:918,live_dispatches:0,checks:['explicit_full_budget_acknowledgement_and_keyboard_start','durable_two_call_pause_zero_missing_gap_and_918_pending','exhausted_recovery_refused_without_reset','immutable_918_csv_manifest_hash_and_allowance','light_dark_keyboard_and_390_rtl_no_page_overflow'],screenshots:['a62-paused-light.png','a62-paused-dark-rtl.png']};
+ const report={browser_version:browser.version(),synthetic_rows:918,live_dispatches:0,checks:['explicit_full_budget_acknowledgement_and_keyboard_start','durable_two_call_pause_zero_missing_gap_and_918_pending','exhausted_recovery_refused_without_reset','immutable_918_csv_manifest_hash_and_allowance','continue_paused_run_linked_subset_and_chain_export_hash','light_dark_keyboard_and_390_rtl_no_page_overflow'],screenshots:['a62-paused-light.png','a62-paused-dark-rtl.png']};
  fs.writeFileSync(path.join(output,'checks.json'),JSON.stringify(report,null,2));process.stdout.write(JSON.stringify(report)+'\n');
  }finally{await browser.close();}
 }

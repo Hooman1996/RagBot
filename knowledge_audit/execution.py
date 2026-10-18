@@ -12,6 +12,8 @@ from utils.read_only_audit import canonical_sha256
 
 VERSION = "coverage-execution-1"
 TERMINAL = {"completed", "excluded", "needs_context", "needs_review", "invalid_input", "failed"}
+# Never continued: needs_context rows were already retried once with context_reviewed=True.
+FINAL = {"completed", "excluded", "invalid_input", "needs_context"}
 SUMMARY = ("source_row_id", "source_record_ordinal", "input_query_redacted", "preparation_status", "history_status",
            "processing_status", "coverage_status", "outcome", "evaluated_entry_count", "production_context_sufficiency",
            "attempt_count", "unknown_completion_count", "model_prepared", "validated_checkpoint_count", "model_evaluated", "entry_model_dispatched")
@@ -32,7 +34,7 @@ def available_row_ids(data):
     return [e.source_row_id for e in data.selected]
 
 
-def create_run(store, owner, did, sid, selected_ids, settings, versions, *, execution_mode, idempotency_key, sizing=None):
+def create_run(store, owner, did, sid, selected_ids, settings, versions, *, execution_mode, idempotency_key, sizing=None, chain=None):
     from knowledge_audit.store import now
     from knowledge_audit.snapshot import SNAPSHOT_VERSION
     data, _ = store.dataset(did, owner)
@@ -59,7 +61,7 @@ def create_run(store, owner, did, sid, selected_ids, settings, versions, *, exec
     selected_ids = [rid for rid in available if rid in chosen]
     chronological = [e.source_row_id for e in data.processing_order() if e.selected and e.source_row_id in chosen]
     request_id = canonical_sha256({"dataset": did, "snapshot": sid, "rows": selected_ids, "mode": execution_mode,
-                                   "settings": settings, "versions": versions})
+                                   "settings": settings, "versions": versions, **({"chain": chain} if chain else {})})
     if idempotency_key is not None and not re.fullmatch(r"[A-Za-z0-9_-]{16,128}", idempotency_key):
         raise AuditError("invalid_idempotency_key")
     # A deterministic owner/key address also survives a crash before the response/pointer write.
@@ -71,6 +73,8 @@ def create_run(store, owner, did, sid, selected_ids, settings, versions, *, exec
             if prior.get("creation_request_id") != request_id:
                 raise AuditError("idempotency_request_conflict")
             return prior
+        if chain and any(m.get("continues_run_id") == chain["continues_run_id"] for m in store.list_owned("runs", owner)):
+            raise AuditError("run_already_continued")  # a second continuation would branch the chain
         private_directory(path)
         intent = path / "creation.json"
         if intent.exists() and store.read(intent)["request_id"] != request_id:
@@ -89,6 +93,8 @@ def create_run(store, owner, did, sid, selected_ids, settings, versions, *, exec
             meta["completed_pilot_rows"] = 0
         if sizing is not None:
             meta["sizing"] = sizing  # what the user saw; outside settings, so drift checks ignore it
+        if chain:
+            meta.update(continues_run_id=chain["continues_run_id"], chain_root_run_id=chain["chain_root_run_id"])
         if [r["source_row_id"] for r in rows] != available:
             raise AuditError("input_row_accounting_mismatch")
         initial_rows = []
@@ -168,6 +174,37 @@ def progress(store, rid, owner, *, reconcile=False):
                 "outcome_counts": dict(Counter(r["outcome"] for r in rows)),
                 "selected_outcome_counts": dict(Counter(r["outcome"] for r in selected)),
                 "preparation_counts": dict(Counter(r["preparation_status"] for r in rows))}
+
+
+def unfinished(row, include_needs_review=False):
+    """Whether a continuation runs this source row again."""
+    status = row["processing_status"]
+    if status in FINAL:
+        return False
+    return (status not in TERMINAL or status == "failed" or row.get("unknown_completion_count", 0) > 0
+            or include_needs_review and status == "needs_review")
+
+
+def _selected_summaries(store, owner, rid):
+    original = store.owned("runs", rid, owner)
+    with store.run_lock(rid) if original.get("execution_version") else nullcontext():
+        meta = store.owned("runs", rid, owner)
+        rows = _index(store, rid, owner, meta)["rows"]
+        return [rows[row_id] for row_id in meta["selected_row_ids"]]
+
+
+def continuation_rows(store, owner, source_run_id, *, include_needs_review=False):
+    """The source's unfinished rows, in its selection order."""
+    return [r["source_row_id"] for r in _selected_summaries(store, owner, source_run_id) if unfinished(r, include_needs_review)]
+
+
+def continuation_counts(store, owner, source_run_id):
+    rows = _selected_summaries(store, owner, source_run_id)
+    selected = [r for r in rows if unfinished(r)]
+    return {"unfinished": len(selected),
+            "needs_review": sum(r["processing_status"] == "needs_review" and not unfinished(r) for r in rows),
+            "failed": sum(r["processing_status"] == "failed" for r in selected),
+            "unknown": sum(r.get("unknown_completion_count", 0) > 0 for r in selected)}
 
 
 def result_page(store, rid, owner, offset, limit, outcome, search):

@@ -1,6 +1,7 @@
 """Explicit file-backed execution, cooperative cancellation and durable recovery."""
 from __future__ import annotations
 import asyncio
+from contextlib import asynccontextmanager
 import copy
 import os
 import secrets
@@ -333,6 +334,22 @@ class CoverageJobs:
             finally:
                 os.close(lease)
         return meta
+
+    @asynccontextmanager
+    async def idle(self, rid, owner):
+        """Hold an inactive run's lease, as recovery does, so it cannot start meanwhile."""
+        meta = await self.inspect_state(rid, owner)
+        try:
+            lease = await self.runner.run(self.store.lease, rid)
+        except AuditError:
+            raise AuditError('run_active') from None
+        try:
+            meta = await self.runner.run(self.store.owned, 'runs', rid, owner)
+            if rid in self.tasks.active_job_ids or meta['state'] in {'queued', 'running'}:
+                raise AuditError('run_active')
+            yield meta
+        finally:
+            os.close(lease)
 
     async def cancel(self, rid, owner):
         meta = await self.runner.run(self.store.owned, 'runs', rid, owner)

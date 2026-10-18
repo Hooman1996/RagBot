@@ -80,7 +80,7 @@ def _known_layout(path,kind):
          'snapshots':{'meta.json','kb-snapshot.json','kb-snapshot-manifest.json'},
          'runs':{'meta.json','creation.json','progress.json','progress-dirty.json','budget.json','budget.lock','run.lock','execution.lock','metadata.lock','worker.lock','model-metrics.jsonl'},
          'recommendations':{'meta.json','source.json','metadata-index.json','results.json','results.final.json','latest-review.json','revision.lock','budget.json','budget.lock','model-metrics.jsonl'}}
-    dirs={'runs':{'rows','attempts','exports','combined-exports','recovery-choices'},'recommendations':{'exports'}}
+    dirs={'runs':{'rows','attempts','exports','combined-exports','chain-exports','recovery-choices'},'recommendations':{'exports'}}
     for item in path.iterdir():
         if item.is_symlink():return False
         if item.is_dir() and item.name not in dirs.get(kind,set()):return False
@@ -89,11 +89,16 @@ def _known_layout(path,kind):
         'runs':[r'rows/row_[0-9a-f]{32}\.json',r'attempts/row_[0-9a-f]{32}/(?:request_[0-9a-f]{32}|row-attempt-[0-9]+(?:-interruption-[0-9a-f]{16})?)\.json',
                 r'recovery-choices/recovery_[0-9a-f]{32}\.json',r'exports/(?:evidence|restricted)/latest\.json',
                 r'exports/(?:evidence|restricted)/rev_[0-9a-f]{32}/(?:coverage\.csv|manifest\.json)',
-                r'combined-exports/(?:evidence|restricted)/runex_[0-9a-f]{32}/(?:coverage\.csv|manifest\.json)'],
+                r'combined-exports/(?:evidence|restricted)/runex_[0-9a-f]{32}/(?:coverage\.csv|manifest\.json)',
+                # A chain export lives with its root run; its manifest names every
+                # run of the chain, so a retained export retains all of them.
+                r'chain-exports/(?:evidence|restricted)/latest\.json',
+                r'chain-exports/(?:evidence|restricted)/rev_[0-9a-f]{32}/(?:coverage\.csv|manifest\.json)'],
         'recommendations':[r'exports/(?:evidence|restricted)/rex_[0-9a-f]{32}/(?:coverage\.csv|manifest\.json)']}
     directory_patterns={'runs':[r'rows',r'attempts(?:/row_[0-9a-f]{32})?',r'recovery-choices',
         r'exports(?:/(?:evidence|restricted)(?:/rev_[0-9a-f]{32})?)?',
-        r'combined-exports(?:/(?:evidence|restricted)(?:/runex_[0-9a-f]{32})?)?'],
+        r'combined-exports(?:/(?:evidence|restricted)(?:/runex_[0-9a-f]{32})?)?',
+        r'chain-exports(?:/(?:evidence|restricted)(?:/rev_[0-9a-f]{32})?)?'],
         'recommendations':[r'exports(?:/(?:evidence|restricted)(?:/rex_[0-9a-f]{32})?)?']}
     for item in path.rglob('*'):
         if item.is_symlink():return False

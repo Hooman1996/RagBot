@@ -29,7 +29,6 @@ from knowledge_audit.preparation import QueryPreparer, prepare_dataset
 from knowledge_audit.export import coverage_export
 from knowledge_audit.jobs import CoverageJobs, versions
 from knowledge_audit.service import build_engine
-from utils.read_only_audit import canonical_sha256
 
 router = APIRouter(tags=["knowledge-coverage"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
@@ -73,8 +72,11 @@ class RunScope(StrictModel):
     operational_limits: BudgetPayload | None = None
 
 
+IDEMPOTENCY_KEY = r"^[A-Za-z0-9_-]{16,128}$"
+
+
 class RunPayload(RunScope):
-    idempotency_key: str | None = Field(default=None, pattern=r"^[A-Za-z0-9_-]{16,128}$")
+    idempotency_key: str = Field(pattern=IDEMPOTENCY_KEY)
     budget_acknowledged: bool = False
     sizing_acknowledged: bool = False
     accept_partial_run: bool = False
@@ -82,6 +84,18 @@ class RunPayload(RunScope):
 
 class EstimatePayload(RunScope):
     non_covered_share: float | None = Field(default=None, ge=0, le=1)
+
+
+class ContinuationScope(StrictModel):
+    """Which unfinished rows of a source run a continuation would evaluate, and under which limits."""
+    include_needs_review: bool = False
+    operational_limits: BudgetPayload | None = None
+
+
+class ContinuationPayload(ContinuationScope):
+    idempotency_key: str = Field(pattern=IDEMPOTENCY_KEY)
+    sizing_acknowledged: bool = False
+    accept_partial_run: bool = False
 
 
 class RecoveryPayload(StrictModel):
@@ -98,7 +112,7 @@ def safe_meta(meta):
     keys = ("run_id", "dataset_id", "snapshot_id", "created_at", "state", "stage", "completed_pilot_rows",
             "input_row_count", "selected_row_ids", "active_row_id", "error_code", "attempt", "cancel_requested",
             "processed_rows", "execution_mode", "execution_version", "selected_row_count", "completion_quality", "recovery_choice",
-            "ordering_provenance", "settings", "pause_reason", "operational_policy")
+            "ordering_provenance", "settings", "pause_reason", "operational_policy", "continues_run_id", "chain_root_run_id")
     return {k: meta[k] for k in keys if k in meta}
 
 
@@ -325,6 +339,18 @@ async def estimate_run(payload: EstimatePayload, request: Request, user: WebUser
             "reference": view["reference"], "sizing_version": view["version"]}
 
 
+async def sized(store, owner, scope: RunScope, config, *, sizing_acknowledged, accept_partial_run):
+    """The step 10 sizing rules for a full or subset run; returns what the user accepted."""
+    view = await safe_call(sizing_view, store, owner, scope, config)
+    if view["estimate"] is None and not sizing_acknowledged:
+        raise HTTPException(422, detail="No reference runs on this snapshot; run a pilot first or acknowledge an unsized run")
+    if view["comparison"] is not None and not view["comparison"]["fits"] and not accept_partial_run:
+        raise HTTPException(422, detail="Estimated cost exceeds run limits; raise limits or accept a partial run")
+    return {"version": view["version"], "estimate": view["estimate"], "comparison": view["comparison"],
+            "reference": view["reference"], "sizing_acknowledged": sizing_acknowledged,
+            "accept_partial_run": accept_partial_run}
+
+
 @router.post("/api/knowledge-coverage/runs", status_code=202)
 async def create_run(payload: RunPayload, request: Request, user: WebUser):
     def acknowledged():
@@ -333,19 +359,71 @@ async def create_run(payload: RunPayload, request: Request, user: WebUser):
     store, jobs, config = await run_config(payload, request, user, before_limits=acknowledged)
     sizing = None
     if payload.execution_mode in {"full_input", "subset"}:
-        view = await safe_call(sizing_view, store, user.id, payload, config)
-        if view["estimate"] is None and not payload.sizing_acknowledged:
-            raise HTTPException(422, detail="No reference runs on this snapshot; run a pilot first or acknowledge an unsized run")
-        if view["comparison"] is not None and not view["comparison"]["fits"] and not payload.accept_partial_run:
-            raise HTTPException(422, detail="Estimated cost exceeds run limits; raise limits or accept a partial run")
-        sizing = {"version": view["version"], "estimate": view["estimate"], "comparison": view["comparison"],
-                  "reference": view["reference"], "sizing_acknowledged": payload.sizing_acknowledged,
-                  "accept_partial_run": payload.accept_partial_run}
+        sizing = await sized(store, user.id, payload, config, sizing_acknowledged=payload.sizing_acknowledged,
+                             accept_partial_run=payload.accept_partial_run)
     meta = await safe_call(store.create_run, user.id, payload.dataset_id, payload.snapshot_id,
-                           payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key or canonical_sha256(payload.model_dump()),
+                           payload.row_ids, config, versions(), execution_mode=payload.execution_mode, idempotency_key=payload.idempotency_key,
                            sizing=sizing)
     jobs.start(meta["run_id"], user.id)
     return safe_meta(meta)
+
+
+async def continuation(run_id, payload: ContinuationScope, request, user, source=None):
+    """A subset run over the source's unfinished rows, on the source's dataset, snapshot and documents."""
+    from knowledge_audit.execution import continuation_rows
+    from knowledge_audit.chain_export import same_setup
+    require(user, "coverage_run_start", "kb_read")
+    settings, store, _ = runtime(request)
+    source = source or await safe_call(store.owned, "runs", run_id, user.id)
+    rows = await safe_call(continuation_rows, store, user.id, run_id, include_needs_review=payload.include_needs_review)
+    if not rows:
+        raise HTTPException(422, detail="No unfinished rows")
+    remaining = max(0, len(rows) - settings.max_run_rows)
+    try:
+        scope = RunScope(dataset_id=source["dataset_id"], snapshot_id=source["snapshot_id"], row_ids=rows[:settings.max_run_rows],
+                         execution_mode="subset", entry_budget=source["settings"].get("entry_budget"),
+                         documents=source["settings"].get("documents") or [], operational_limits=payload.operational_limits)
+    except ValidationError:
+        raise HTTPException(409, detail="continuation_identity_drift") from None
+    store, jobs, config = await run_config(scope, request, user)
+    await safe_call(same_setup, source, config, versions())
+    return store, jobs, scope, config, {"truncated": remaining > 0, "remaining_rows": remaining}
+
+
+@router.get("/api/knowledge-coverage/runs/{run_id}/continuation-preview")
+async def continuation_preview(run_id: str, request: Request, user: WebUser):
+    require(user, "coverage_results_view")
+    from knowledge_audit.execution import continuation_counts
+    _, store, _ = runtime(request)
+    return await safe_call(continuation_counts, store, user.id, run_id)
+
+
+@router.post("/api/knowledge-coverage/runs/{run_id}/continuation-estimate")
+async def continuation_estimate(run_id: str, payload: ContinuationScope, request: Request, user: WebUser):
+    store, _, scope, config, truncation = await continuation(run_id, payload, request, user)
+    view = await safe_call(sizing_view, store, user.id, scope, config)
+    return {"row_count": view["row_count"], "estimate": view["estimate"], "comparison": view["comparison"],
+            "reference": view["reference"], "sizing_version": view["version"], **truncation}
+
+
+@router.post("/api/knowledge-coverage/runs/{run_id}/continuations", status_code=202)
+async def create_continuation(run_id: str, payload: ContinuationPayload, request: Request, user: WebUser):
+    require(user, "coverage_run_start", "kb_read")
+    _, store, jobs = runtime(request)
+    await safe_call(store.owned, "runs", run_id, user.id)
+    try:
+        async with jobs.idle(run_id, user.id) as source:
+            store, jobs, scope, config, truncation = await continuation(run_id, payload, request, user, source)
+            sizing = await sized(store, user.id, scope, config, sizing_acknowledged=payload.sizing_acknowledged,
+                                 accept_partial_run=payload.accept_partial_run)
+            chain = {"continues_run_id": run_id, "chain_root_run_id": source.get("chain_root_run_id") or run_id}
+            meta = await safe_call(store.create_run, user.id, scope.dataset_id, scope.snapshot_id, scope.row_ids, config,
+                                   versions(), execution_mode="subset", idempotency_key=payload.idempotency_key,
+                                   sizing=sizing, chain=chain)
+    except AuditError as error:
+        raise HTTPException(409, detail=str(error) if str(error) in SAFE_API_CODES else "Audit operation could not complete") from None
+    jobs.start(meta["run_id"], user.id)
+    return {**safe_meta(meta), **truncation}
 
 
 @router.get("/api/knowledge-coverage/runs")
@@ -429,6 +507,36 @@ async def export_manifest(run_id: str, request: Request, user: WebUser, revision
     return manifest
 
 
+async def chain_exported(run_id, request, user, revision_id=None, *, create=False):
+    from knowledge_audit.chain_export import export_revision
+    require(user, "coverage_export_download", "coverage_results_view")
+    _, store, _ = runtime(request)
+    await safe_call(store.owned, "runs", run_id, user.id)
+    visible = {"coverage_evidence_view", "kb_read"} <= permissions_for_user(user.role, user.id)
+    return await safe_call(export_revision, store, user.id, run_id, visible, revision_id, create=create)
+
+
+@router.post("/api/knowledge-coverage/runs/{run_id}/chain-export-revisions", status_code=201)
+async def create_chain_export_revision(run_id: str, request: Request, user: WebUser):
+    _, manifest = await chain_exported(run_id, request, user, create=True)
+    return {k: manifest[k] for k in ("export_revision_id", "export_id", "csv_sha256", "export_captured_at", "state", "row_count",
+                                     "chain_root_run_id", "chain_run_ids")}
+
+
+@router.get("/api/knowledge-coverage/runs/{run_id}/chain-export")
+async def chain_download(run_id: str, request: Request, user: WebUser, revision_id: str | None = None):
+    data, manifest = await chain_exported(run_id, request, user, revision_id)
+    return Response(data, media_type="text/csv; charset=utf-8", headers={"Cache-Control": "no-store",
+        "Content-Disposition": f'attachment; filename="coverage-chain-{manifest["chain_root_run_id"]}.csv"',
+        "X-Coverage-Export-ID": manifest["export_id"], "X-Coverage-Revision-ID": manifest["export_revision_id"]})
+
+
+@router.get("/api/knowledge-coverage/runs/{run_id}/chain-export-manifest")
+async def chain_export_manifest(run_id: str, request: Request, user: WebUser, revision_id: str | None = None):
+    _, manifest = await chain_exported(run_id, request, user, revision_id)
+    return manifest
+
+
 @router.post("/api/knowledge-coverage/runs/{run_id}/cancel")
 async def cancel(run_id: str, request: Request, user: WebUser):
     require(user, "coverage_run_start")
@@ -460,7 +568,8 @@ SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget
     "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run",
-    "snapshot_policy_superseded"}
+    "snapshot_policy_superseded", "run_active", "run_already_continued", "continuation_identity_drift",
+    "ambiguous_run_chain", "chain_identity_drift", "run_chain_changed"}
 
 # A4 responsibilities and revisions remain separate from coverage run versions.
 from knowledge_audit.recommendation_api import router as recommendation_router
