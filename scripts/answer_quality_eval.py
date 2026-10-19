@@ -25,7 +25,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from knowledge_audit.privacy import formula_safe  # noqa: E402
+from utils.private_files import formula_safe  # noqa: E402
 from scripts import _staging_guard as guard  # noqa: E402
 from scripts.retrieval_eval import (  # noqa: E402
     cases_sha256, documents_arg, existing_private_dir, label_arg, load_cases, private_dir,

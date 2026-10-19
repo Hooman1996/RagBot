@@ -29,7 +29,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from knowledge_audit.privacy import AuditError, formula_safe, private_directory, private_write  # noqa: E402
+from utils.private_files import PrivateFileError, formula_safe, private_directory, private_write  # noqa: E402
 from scripts import _staging_guard as guard  # noqa: E402
 
 CHILD = ROOT / "scripts" / "_retrieval_child.py"
@@ -52,7 +52,7 @@ def refuse(command: str, code: str, status: int = 2) -> None:
 def private_dir(command: str, path: Path) -> Path:
     try:
         return private_directory(Path(path))
-    except AuditError as exc:
+    except PrivateFileError as exc:
         refuse(command, str(exc))
 
 

@@ -106,9 +106,8 @@ class TeiEmbeddingClient:
         self.expected_dimension = expected_dimension
 
     async def embed_query(self, query: str) -> list[float]:
-        from utils.audit_dispatch import audit_dispatch
-        response = await audit_dispatch('embedding',lambda:self._http.post(
-            f"{self.base_url}/embed",json=build_query_payload(query)))
+        response = await self._http.post(
+            f"{self.base_url}/embed", json=build_query_payload(query))
         response.raise_for_status()
         try:
             payload = response.json()
@@ -129,9 +128,8 @@ class TeiEmbeddingClient:
         document_list = request_payload["inputs"]
         if not document_list:
             return []
-        from utils.audit_dispatch import audit_dispatch
-        response = await audit_dispatch('embedding',lambda:self._http.post(
-            f"{self.base_url}/embed",json=request_payload))
+        response = await self._http.post(
+            f"{self.base_url}/embed", json=request_payload)
         response.raise_for_status()
         try:
             payload = response.json()

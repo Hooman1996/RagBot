@@ -291,8 +291,8 @@ The six keys marked "page" are only defaults: the page shows them in editable fi
 | `KNOWLEDGE_COVERAGE_COMBINE_MAX` | `10` | Most partial chunks sent to the one combine call (2 to 20). |
 | `KNOWLEDGE_COVERAGE_CHUNK_MAX_CHARS` | `4000` | Characters of each chunk sent to the model (500 to 20000). |
 | `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `300` | Output tokens per model call (64 to 2048). |
-
-The old audit's keys (`KNOWLEDGE_COVERAGE_TOKEN_MARGIN`, `_BATCH_MAX_ENTRIES`, `_MAX_RUN_ROWS`, `_MAX_COMPLETIONS`, `_MAX_TOKENS`, `_MAX_EXECUTION_SECONDS`, `_MAX_CONSECUTIVE_FAILURES`, `_MIN_FREE_BYTES`, `_PACE_MS`, `_RETENTION_DAYS`, `_INITIAL_DEPTH`, `_INITIAL_ENTRIES`, `_MAX_ENTRY_BUDGET`, `_VERIFICATION_PASSES`, `_DEDUPE`, `_REQUIRE_SECOND_REVIEWER`, `_PUBLIC_CONTACTS` and `KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS`) are read only by `knowledge_audit/`, which the app no longer mounts. They are removed with that code in step 22.
+| `KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT` | `5` | Saved chunks of a row given to the model when it drafts a suggested FAQ entry (1 to 20). |
+| `KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS` | `700` | Output tokens per suggestion (128 to 2048). |
 
 ### Knowledge ingestion tools (command-line only)
 

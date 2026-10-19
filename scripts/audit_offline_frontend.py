@@ -17,7 +17,6 @@ PYTHON_FRONTEND_FILES = (
     PROJECT_DIR / "main.py",
     PROJECT_DIR / "kb_manager.py",
     PROJECT_DIR / "frontend_paths.py",
-    PROJECT_DIR / "knowledge_audit" / "api.py",
     PROJECT_DIR / "coverage_check" / "api.py",
 )
 PUBLIC_SCHEMES = ("http://", "https://", "//")

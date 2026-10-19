@@ -337,6 +337,15 @@ class HttpLoggingMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.assertFalse(route_log_policy("/static/file.css").emit_events)
         self.assertFalse(route_log_policy("/api/health").request_body)
 
+    def test_coverage_routes_log_events_but_never_bodies(self):
+        for path in ("/knowledge-coverage", "/api/knowledge-coverage/documents",
+                     "/api/knowledge-coverage/checks", "/api/knowledge-coverage/checks/c_x/rows/1",
+                     "/api/knowledge-coverage/checks/c_x/export", "/api/knowledge-coverage/checks/c_x/suggestions"):
+            policy = route_log_policy(path)
+            self.assertTrue(policy.emit_events, path)
+            self.assertFalse(policy.request_body, path)
+            self.assertFalse(policy.response_body, path)
+
     async def test_raw_sensitive_body_is_sanitized_before_enqueue(self):
         payload = json.dumps({"password": "raw-password-secret", "national_code": "1234567891",
                               "query": "Bearer abcdefghijklmnop"}).encode()

@@ -79,7 +79,7 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 
 #### Knowledge-coverage check routes
 
-`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit in `knowledge_audit/` stays on disk but is no longer mounted; step 25 deletes it. Suggestions draft FAQ text only, into the run's private folder, and never change the knowledge base.
+`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit (`knowledge_audit/`) was deleted in step 25. Suggestions draft FAQ text only, into the run's private folder, and never change the knowledge base.
 
 - `GET /knowledge-coverage`
 - `GET /api/knowledge-coverage/documents`
@@ -154,12 +154,8 @@ No Dockerfile, Compose file, or other repository-owned Docker definition was fou
 - `python3 test_qdrant.py` runs the standalone, read-only Qdrant connectivity and collection inspection script. It contains a placeholder API key and requires access to its configured Qdrant endpoint.
 - `cd qdrant-web-ui-master && npm test` runs the bundled Qdrant UI Vitest script.
 - `cd static_qdrant && npm test` runs the second bundled Qdrant UI Vitest script.
-- `scripts/run_offline_tests.sh` runs the offline pytest suite, the Node frontend tests, the offline frontend audit and, when `BROWSER_NODE_DIR` is set, all browser harnesses. Set `REQUIRE_BROWSER=1` to fail when browsers are unavailable.
+- `scripts/run_offline_tests.sh` runs the offline pytest suite, the Node frontend tests, the offline frontend audit and the tracked-secret check.
 - Retrieval test: `scripts/retrieval_eval.py` (`freeze`, `run`, `label-sheet`, `compare`). Answer-quality test: `scripts/answer_quality_eval.py` (`collect`, `blind`, `score`). Both are staging-only, need human labels (relevance labels and blind grades), and follow `docs/performance/RELEASE_EVALUATION_RUNBOOK.md`.
-- Coverage-audit benchmarks, run with `conda run --no-capture-output -n faq python <script>`; each prints its results as JSON lines and contacts no service:
-  - `scripts/benchmark_coverage_budgets.py`: checkpoint and budget-allowance file-I/O overhead on a mocked 918-row input.
-  - `scripts/benchmark_coverage_progress.py`: progress-index versus full-row reads for checkpoints and polling on a synthetic 918-row run.
-  - `scripts/benchmark_coverage_dedupe.py`: model calls, retrieval fetches and wall time of a mocked 50-row run with repeated-question copying off and on, plus the 918-row source-map rebuild.
 - `scripts/coverage_compare.py` compares two coverage checks and, with `--expected`, a labelled CSV. It prints counts and row numbers only and contacts no service.
 
 Do not claim a test or benchmark passed unless its command was actually run and its result recorded. Do not run connectivity tests against production.

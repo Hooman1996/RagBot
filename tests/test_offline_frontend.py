@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import asyncio
-from dataclasses import asdict
 import hashlib
 import importlib.util
 import json
@@ -24,7 +23,6 @@ from starlette.staticfiles import StaticFiles
 from starlette.templating import Jinja2Templates
 
 from frontend_paths import PROJECT_DIR, STATIC_DIR, TEMPLATE_DIR
-from knowledge_audit.operations import Limits
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION
 from versioned_assets import VERSIONED_ASSETS, VersionedStaticFiles, asset_digest, asset_integrity, vendor_integrity, versioned_asset
 
@@ -98,9 +96,7 @@ def _render_templates() -> dict[str, str]:
         }
         request = Request(scope)
         rendered[name] = templates.get_template(name).render(
-            request=request, analytics_contract_version=ANALYTICS_CONTRACT_VERSION,
-            operational_limits=asdict(Limits()),
-            retention_days=30,max_run_rows=10000,batch_max_entries=2)
+            request=request, analytics_contract_version=ANALYTICS_CONTRACT_VERSION)
     return rendered
 
 

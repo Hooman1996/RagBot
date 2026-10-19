@@ -178,48 +178,29 @@ LOG_PII_REDACTION=true
 # Only set this for stable pseudonymous labels; never reuse WEB_SESSION_SECRET.
 # LOG_PII_HMAC_SECRET=<OPTIONAL_DEDICATED_SECRET_FROM_SECRET_MANAGER>
 
-# Knowledge-coverage audit; on by default in every environment. Access is by role (admin, dashboard_viewer). Set false to turn it off.
+# Knowledge-coverage check (coverage_check/); on unless false, in every environment. Access is by role: admin starts checks, dashboard_viewer views them. Set false to turn it off.
 KNOWLEDGE_COVERAGE_ENABLED=true
+# Private run folders; absolute, outside the repository and not under /tmp.
 KNOWLEDGE_COVERAGE_ARTIFACT_DIR=/root/projects/faq-private/knowledge-coverage
+# Largest CSV upload in bytes; integer 1024–20971520.
 KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES=5242880
-KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS=1200
-KNOWLEDGE_COVERAGE_TOKEN_MARGIN=128
-# Audit-local batch cap; integer 1-5. Token packing may select fewer.
-KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES=2
-
-# Maximum selected audit rows per run (5–100000); pilot default stays five.
-KNOWLEDGE_COVERAGE_MAX_RUN_ROWS=10000
-
-# A6.2 finite audit allowances and manual retention; no production policy changes.
-# Reserved completion attempts across all recovery attempts; integer 1–100000.
-KNOWLEDGE_COVERAGE_MAX_COMPLETIONS=200
-# Conservative completion prompt plus maximum output token allowance; integer 1–1000000000.
-KNOWLEDGE_COVERAGE_MAX_TOKENS=1000000
-# Cumulative execution seconds; abandoned active intervals include downtime; integer 1–604800.
-KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS=3600
-# Consecutive service/model failures before pause; integer 1–100.
-KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES=3
-# Minimum free artifact filesystem bytes before dispatch; integer 0–1099511627776.
-KNOWLEDGE_COVERAGE_MIN_FREE_BYTES=1073741824
-# Audit-local delay before shared admission in milliseconds; integer 0–60000.
-KNOWLEDGE_COVERAGE_PACE_MS=500
-# Separate completion allowance per recommendation revision; integer 1–10000.
-KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS=20
-# Manual cleanup age threshold; automatic deletion is always disabled; integer 1–3650.
-KNOWLEDGE_COVERAGE_RETENTION_DAYS=30
-# Audit initial retrieval depth (BM25, semantic and top-k); reranking batches it to the TEI limit; changing it changes audit results; integer 1–1000.
-KNOWLEDGE_COVERAGE_INITIAL_DEPTH=150
-# Audit broader retrieval depth when initial evidence is not full; must exceed the initial depth; changing it changes audit results; integer 2–1000.
-KNOWLEDGE_COVERAGE_BROADER_DEPTH=300
-# Entries kept from the reranked initial pool; at most the initial depth; changing it changes audit results; integer 1–1000.
-KNOWLEDGE_COVERAGE_INITIAL_ENTRIES=50
-# Maximum distinct entries per question and default run entry budget; changing it changes audit results; integer 1–1000.
-KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET=300
-# Verification passes per accepted proof: 2 re-verifies it in reversed evidence order and accepts only if both agree; changing it changes audit results and cost; integer 1–2.
-KNOWLEDGE_COVERAGE_VERIFICATION_PASSES=2
-# Evaluate a repeated question once per run: a later identical row with the same prior turns copies the earlier completed result; changes audit cost, not verdicts; true or false.
-KNOWLEDGE_COVERAGE_DEDUPE=true
-# Recommendation approval needs a second admin other than the run owner; owners can still reject or ask for changes; true or false.
-KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER=true
-# Official public support emails, @domains and phone numbers kept in KB snapshots; anything else that looks personal is scrubbed.
-KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS=
+# Most CSV rows per check; integer 1–100000.
+KNOWLEDGE_COVERAGE_MAX_ROWS=10000
+# Page defaults, editable per run: retrieval depth (1–1000), chunks kept after rerank (1 to the depth), chunks per model call (1–20).
+KNOWLEDGE_COVERAGE_DEPTH=150
+KNOWLEDGE_COVERAGE_KEEP=50
+KNOWLEDGE_COVERAGE_BATCH_SIZE=5
+# Page defaults for the wider search when a question is not answered: on or off, depth (greater than DEPTH, at most 1000), chunks kept (1–1000).
+KNOWLEDGE_COVERAGE_BROADER_ENABLED=false
+KNOWLEDGE_COVERAGE_BROADER_DEPTH=200
+KNOWLEDGE_COVERAGE_BROADER_KEEP=50
+# Most partial chunks sent to the one combine call; integer 2–20.
+KNOWLEDGE_COVERAGE_COMBINE_MAX=10
+# Characters of each chunk sent to the model; integer 500–20000.
+KNOWLEDGE_COVERAGE_CHUNK_MAX_CHARS=4000
+# Output tokens per model call; integer 64–2048.
+KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS=300
+# Saved chunks given to the model when it drafts a suggested FAQ entry for an unanswered row; integer 1–20.
+KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT=5
+# Output tokens per suggestion; integer 128–2048.
+KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS=700

@@ -313,6 +313,11 @@ class SearchAndHistoryTests(unittest.IsolatedAsyncioTestCase):
             "AI: ابتدا\nUser: سپس",
         )
 
+    async def test_rewrite_history_keeps_only_the_latest_turns(self):
+        messages = [{"role": "user", "content": f"prior {i}"} for i in range(1, 11)]
+        formatted = format_rewrite_history(messages, max_turns=3)
+        self.assertEqual(formatted.splitlines(), [f"User: prior {i}" for i in range(5, 11)])
+
 
 class SharedPathAndEnvironmentTests(unittest.TestCase):
     def test_chat_interfaces_share_service_while_eval_uses_http_boundary(self):

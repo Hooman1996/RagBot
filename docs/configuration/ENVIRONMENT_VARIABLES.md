@@ -890,62 +890,39 @@ this repository. Qdrant is the opposite: active code uses `QDRANT_HOST`,
 does not mean the host machine or another container. A Docker service name is
 needed for another container on the same Compose network.
 
-## A2 knowledge-coverage pilot settings (2026-10-14)
+## Knowledge-coverage check settings
 
-These optional settings affect the separate audit page/runner, not production
-answering defaults. `knowledge_audit.settings.load_coverage_settings` validates
-the complete configuration. Invalid audit settings prevent audit runtime
-creation; they do not grant new role privileges. Runtime manifests include
-effective limits and a role-policy hash, not authentication data.
+`coverage_check/settings.py` reads these keys. `coverage_enabled` reads only the
+flag; `load_settings` validates every other key at startup, and an invalid value
+stops startup with the variable's name, never its value. The six "page" keys are
+only defaults: the page shows them in editable fields, the server checks every
+submitted value against the same ranges, and each run stores the values it used.
 
 | Variable | Default | Type and validation |
 |---|---|---|
-| `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Absolute durable directory; neither the repository nor `/tmp`, nor inside either (`coverage_check/settings.py`); owner-only directories 0700/files 0600. Provision appropriate ownership before running under another service account. |
+| `KNOWLEDGE_COVERAGE_ENABLED` | `true` | `true` or `false`; on unless `false`, in every environment. With `false` every coverage route returns 404 and no other key is loaded. |
+| `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Absolute durable directory; neither the repository nor `/tmp`, nor inside either; owner-only directories 0700/files 0600. Provision appropriate ownership before running under another service account. |
 | `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Integer 1024–20971520; decoded CSV bytes, with an additional bounded JSON/base64 transport envelope. |
-| `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `300` | Integer 64–2048; output tokens per model call of the coverage check (`coverage_check/settings.py`). A reply cut off at this limit is recorded as `model_output_cut`. |
-| `KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT` | `5` | Integer 1–20; saved chunks of a row given to the model when it drafts a suggested FAQ entry (`coverage_check/settings.py`). |
+| `KNOWLEDGE_COVERAGE_MAX_ROWS` | `10000` | Integer 1–100000; most CSV rows per check. |
+| `KNOWLEDGE_COVERAGE_DEPTH` | `150` | Page. Integer 1–1000; retrieval depth: `top_k` and the BM25 and semantic candidate limits. |
+| `KNOWLEDGE_COVERAGE_KEEP` | `50` | Page. Integer 1 to `DEPTH`; chunks kept after rerank. |
+| `KNOWLEDGE_COVERAGE_BATCH_SIZE` | `5` | Page. Integer 1–20; chunks per model call. |
+| `KNOWLEDGE_COVERAGE_BROADER_ENABLED` | `false` | Page. `true` or `false`; wider search when a question is not answered. |
+| `KNOWLEDGE_COVERAGE_BROADER_DEPTH` | `200` | Page. Integer greater than `DEPTH`, at most 1000; wider-search depth. |
+| `KNOWLEDGE_COVERAGE_BROADER_KEEP` | `50` | Page. Integer 1–1000; new chunks judged in the wider search. |
+| `KNOWLEDGE_COVERAGE_COMBINE_MAX` | `10` | Integer 2–20; most partial chunks sent to the one combine call. |
+| `KNOWLEDGE_COVERAGE_CHUNK_MAX_CHARS` | `4000` | Integer 500–20000; characters of each chunk sent to the model. |
+| `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `300` | Integer 64–2048; output tokens per model call of the coverage check. A reply cut off at this limit is recorded as `model_output_cut`. |
+| `KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT` | `5` | Integer 1–20; saved chunks of a row given to the model when it drafts a suggested FAQ entry. |
 | `KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS` | `700` | Integer 128–2048; output tokens per suggestion. A reply cut off at this limit is recorded as `model_output_cut`. |
-| `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
-| `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` | `2` | Audit-local integer 1–5; whole Q/A entries per batch, with fewer when required by served-token budgeting. Pinned in run/configuration/export identity; changed cap rejects resume. |
 
-A2.2 adds no env variables and does not alter those defaults or production HTTP
-settings. Fixed manifest policies `audit-failures-1` and `full-entries-two-1` add
-content-safe failure categories and cap audit batches at two complete entries.
-The existing 40-second effective staging model read timeout, 50-second
-admission/completion deadline and zero network retries are inherited unchanged;
-the source default for model read remains 45 seconds. Tokenization is outside that
-outer deadline and retains its HTTP timeout. Diagnostic read overrides are local
-experiments only, not permanent runtime values. Existing templates/private runtime
-envs require no new keys; the user-deleted staging template remains deleted.
+Access comes from roles, in `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`,
+and is added only while the check is enabled. `admin` gets `coverage_run_start`
+and `coverage_results_view`; `dashboard_viewer` gets `coverage_results_view`;
+every other role gets none. No environment variable grants access.
 
-Audit capabilities come from roles, in `COVERAGE_ROLE_CAPABILITIES` in
-`web_permissions.py`, and are added only while the audit is enabled
-(`KNOWLEDGE_COVERAGE_ENABLED` not `false`, in every environment). `admin` gets
-`coverage_run_start`, `coverage_results_view`, `coverage_evidence_view`,
-`coverage_export_download` and `coverage_recommendation_review`;
-`dashboard_viewer` gets the three read capabilities; every other role gets none.
-No environment variable grants audit access.
-
-Existing `kb_read` is additionally required for snapshot capture/run start/source
-evidence. Evidence/export require results access too. Capabilities do not
-transfer another user's dataset or run. Trusted CLI `--owner-id` assigns
-ownership when importing; default 0 is the isolated operator namespace. Identical
-validated snapshots can be explicitly registered for another owner without
-sharing datasets/runs. No browser path-read or snapshot-grant endpoint exists.
-
-Constants in the versioned run manifest: five pilot queries, sequential model
-calls, configurable 1–5 entries per batch (default two), initial depths 150/150/150 and 50 initial entries,
-broader depths 300/300/300, maximum 300 distinct evaluated entries. The per-run
-budget is validated 1–300. These are current A2 limits, not unused env knobs.
-Existing performance/history/classifier settings are reused where semantics match.
-
-All six names/defaults appear in `env.example`, `Production_ENV`,
-`.env.example.generated` and `scripts/validate_environment.py`. The generated-named
-template is source-authored; no automatic generator was found. Existing private
-`.env`/`.env_latest` were extended with missing keys only; no private values were
-committed or overwritten and the deleted staging template was not recreated.
-No running service was restarted. A future approved runtime loads these values
-through the existing dotenv/startup mechanism.
+All fifteen names and defaults appear in `env.example`, `Production_ENV.example`,
+`.env.example.generated` and `scripts/validate_environment.py`.
 
 ## Settings not present
 
@@ -957,72 +934,3 @@ pool, Redis runtime, JWT secret/token lifetime/authentication flags,
 observability exporters, or a full `DATABASE_URL`. These may be configured
 outside the repository, but inventing local variables would not affect the
 current code.
-
-
-A3 adds only `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES=2`. Defaults/validation and
-all applicable tracked templates (`env.example`, `env.review.example`,
-`Production_ENV`, `.env.example.generated`) agree. Existing local `.env` and
-`.env_latest` receive only the missing key; existing values stay preserved.
-No generator implementation exists for the source-authored generated-named
-template; no deleted staging template is recreated. Manifest policy becomes
-`full-entries-configurable-1`, settings schema `coverage-settings-3`, CSV v4.
-The A3 campaign's 120-completion ceiling and preselected 12+3 controlled records
-are versioned operator experiment bounds, not unused permanent env settings.
-No production retrieval/timeouts/output defaults or role grants change.
-
-
-## A4 recommendation review access
-
-No new permanent env variable or default is introduced. The capability
-`coverage_recommendation_review` belongs to the `admin` role only. It permits
-question/taxonomy review only, requires results/evidence/kb_read too, and does not
-grant KB writes or confirm factual answers. Existing role permissions and real
-account grants are unchanged. All four applicable tracked templates document the
-capability; private `.env`/`.env_latest` bytes remain unchanged. No template
-generator exists for the source-authored generated-named file; the deleted staging
-template stays deleted. Fixed versioned A4 bounds: up to five selected rows, up
-to three gaps/questions, twenty title candidates, sequential responsibilities and
-40 total staging pilot completion dispatches including checks/recovery. These are
-experiment/schema/algorithm bounds, not unused runtime knobs. Existing model
-output/token-margin/deadline/admission/zero-network-retry settings are reused.
-
-### A6.1 execution size
-
-`KNOWLEDGE_COVERAGE_MAX_RUN_ROWS` defaults to **10000**, integer range **5–100000**.
-It limits selected audit rows in pilot/subset/full-input modes; an oversized
-selection is rejected, never truncated. The default execution mode remains an
-explicit pilot of at most five rows. `coverage-settings-4` includes this value
-and the execution/checkpoint policy identities; changing pinned configuration
-requires a new run. The maximum is a selection guard, not measured capacity or
-permission to run customer inputs. A6.1 validates 918 synthetic rows only.
-Batch cap 2 by default, distinct-entry maximum 300, sequential inference, existing
-model/output/deadline settings and explicit default-deny grants are unchanged.
-Updated root examples (`env.example`, `env.review.example`, `Production_ENV`,
-`.env.example.generated`) and existing private `.env`/`.env_latest`; no generated
-template source exists beyond the source-authored generated-named example.
-
-## A6.2 finite audit operations and manual retention
-
-All settings are strict integers, appear in run configuration/export identities, and
-are audit-local. Run requests may tighten completion/token/time/failure ceilings or
-increase disk/pacing protections. They cannot relax configured ceilings. No in-place
-allowance extension is implemented: a depleted allowance requires a new run with
-explicit settings; consumed reservations on the old run remain intact.
-
-| Variable | Default | Range | Meaning |
-|---|---:|---|---|
-| `KNOWLEDGE_COVERAGE_MAX_COMPLETIONS` | 200 | 1–100000 | Reserved completion attempts across all recovery attempts. |
-| `KNOWLEDGE_COVERAGE_MAX_TOKENS` | 1000000 | 1–1000000000 | Conservative completion prompt plus maximum output token allowance. |
-| `KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS` | 3600 | 1–604800 | Cumulative execution seconds; abandoned active intervals include downtime. |
-| `KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES` | 3 | 1–100 | Consecutive service/model failures before pause. |
-| `KNOWLEDGE_COVERAGE_MIN_FREE_BYTES` | 1073741824 | 0–1099511627776 | Minimum free artifact filesystem bytes before dispatch. |
-| `KNOWLEDGE_COVERAGE_PACE_MS` | 500 | 0–60000 | Audit-local delay before shared admission in milliseconds. |
-| `KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS` | 20 | 1–10000 | Separate completion allowance per recommendation revision. |
-| `KNOWLEDGE_COVERAGE_RETENTION_DAYS` | 30 | 1–3650 | Manual cleanup age threshold; automatic deletion is always disabled. |
-
-Automatic deletion has no scheduled worker and is disabled. Retention is a trusted
-operator dry-run/explicit-plan apply operation; holds, retained dependencies and
-active/recoverable work are protected. Expiry does not silently change access.
-No separate generator for the source-authored `.env.example.generated` exists.
-Private `.env`/`.env_latest` receive only missing keys, without changing old values.
-A configured maximum is not measured capacity.

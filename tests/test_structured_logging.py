@@ -8,7 +8,7 @@ import socket
 import unittest
 from unittest import mock
 
-from utils.log_sanitizer import REDACTED, pseudonymize, sanitize, sanitize_body, scrub_text
+from utils.log_sanitizer import REDACTED, _valid_card, _valid_national, pseudonymize, sanitize, sanitize_body, scrub_text
 from utils.request_instrumentation import (
     RequestTrace, new_request_id, reset_current_trace,
     safe_upstream_request_id, set_current_trace,
@@ -104,6 +104,30 @@ class SanitizerTests(unittest.TestCase):
         for raw in ("private-login", "Private Person", "PrivateName", "grant-all",
                     "session-value", "hmac-value"):
             self.assertNotIn(raw, safe)
+
+    def test_card_and_national_code_checksums(self):
+        def luhn(prefix):
+            total = 0
+            for index, digit in enumerate(reversed(prefix + "0")):
+                number = int(digit) * (2 if index % 2 else 1)
+                total += number - 9 if number > 9 else number
+            return prefix + str((10 - total % 10) % 10)
+
+        def national(nine):
+            remainder = sum(int(d) * (10 - i) for i, d in enumerate(nine)) % 11
+            return nine + str(remainder if remainder < 2 else 11 - remainder)
+
+        card, code = luhn("999912345678901"), national("123456789")
+        self.assertTrue(_valid_card(card))
+        self.assertFalse(_valid_card(card[:-1] + str((int(card[-1]) + 1) % 10)))
+        self.assertTrue(_valid_national(code))
+        self.assertFalse(_valid_national(code[:-1] + str((int(code[-1]) + 1) % 10)))
+
+    def test_free_text_keeps_amounts_and_failed_checksums(self):
+        sample = ("fee 50,000 rial; call 09121234567; mail person@example.com; api_key=synthetic-value-1; "
+                  "card 1234 5678 9012 3452; id 0000000001; iban IR000000000000000000000000")
+        self.assertEqual(scrub_text(sample), "fee 50,000 rial; call [REDACTED]; mail [REDACTED]; [REDACTED]; "
+                                             "card [REDACTED]; id 0000000001; iban [REDACTED]")
 
     def test_bounds_binary_cycles_and_unknown_objects(self):
         source = {"items": ["a" * 500, {"upload": b"private-file-bytes"}], "bad": object()}

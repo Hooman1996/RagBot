@@ -402,70 +402,17 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="4000", minimum=500, maximum=20000, component="Knowledge coverage check", restart="FastAPI",
             usage="coverage_check/prompts.py characters of each chunk sent to the model",
         ),
-        "KNOWLEDGE_COVERAGE_TOKEN_MARGIN": VariableSpec(
-            kind="int", default="128", minimum=32, maximum=1024, component="Knowledge coverage", restart="FastAPI",
+        "KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT": VariableSpec(
+            kind="int", default="5", minimum=1, maximum=20, component="Knowledge coverage check", restart="FastAPI",
+            usage="coverage_check/suggester.py most saved chunks sent as context for one suggestion",
         ),
-        "KNOWLEDGE_COVERAGE_MAX_COMPLETIONS": VariableSpec(
-            kind="int", default="200", minimum=1, maximum=100000, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_MAX_TOKENS": VariableSpec(
-            kind="int", default="1000000", minimum=1, maximum=1000000000, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS": VariableSpec(
-            kind="int", default="3600", minimum=1, maximum=604800, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES": VariableSpec(
-            kind="int", default="3", minimum=1, maximum=100, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_MIN_FREE_BYTES": VariableSpec(
-            kind="int", default="1073741824", minimum=0, maximum=1099511627776, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_PACE_MS": VariableSpec(
-            kind="int", default="500", minimum=0, maximum=60000, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS": VariableSpec(
-            kind="int", default="20", minimum=1, maximum=10000, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_RETENTION_DAYS": VariableSpec(
-            kind="int", default="30", minimum=1, maximum=3650, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_MAX_RUN_ROWS": VariableSpec(
-            kind="int", default="10000", minimum=5, maximum=100000, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES": VariableSpec(
-            kind="int", default="2", minimum=1, maximum=5, component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_INITIAL_DEPTH": VariableSpec(
-            kind="int", default="150", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/retrieval.py AuditRetrieval initial fetch depth; knowledge_audit/pipeline.py CoverageEvaluator initial pool",
+        "KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS": VariableSpec(
+            kind="int", default="700", minimum=128, maximum=2048, component="Knowledge coverage check", restart="FastAPI",
+            usage="coverage_check/suggester.py max_tokens per suggestion model call",
         ),
         "KNOWLEDGE_COVERAGE_BROADER_DEPTH": VariableSpec(
             kind="int", default="200", minimum=2, maximum=1000, component="Knowledge coverage check", restart="FastAPI",
             usage="page default wider-search depth; must exceed KNOWLEDGE_COVERAGE_DEPTH",
-        ),
-        "KNOWLEDGE_COVERAGE_INITIAL_ENTRIES": VariableSpec(
-            kind="int", default="50", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/retrieval.py AuditRetrieval entries kept from the reranked initial pool",
-        ),
-        "KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET": VariableSpec(
-            kind="int", default="300", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/pipeline.py CoverageEvaluator entry budget ceiling; knowledge_audit/api.py run entry_budget default",
-        ),
-        "KNOWLEDGE_COVERAGE_VERIFICATION_PASSES": VariableSpec(
-            kind="int", default="2", minimum=1, maximum=2, component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/pipeline.py CoverageEvaluator.verify passes per accepted proof; 2 re-verifies in reversed evidence order",
-        ),
-        "KNOWLEDGE_COVERAGE_DEDUPE": VariableSpec(
-            kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/dedupe.py repeated-question key and copy; knowledge_audit/pipeline.py CoverageEvaluator.evaluate reuses the same run's completed result",
-        ),
-        "KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER": VariableSpec(
-            kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/recommendation_store.py RecommendationStore.decide refuses an approval by the run owner; reviewers need coverage_recommendation_review",
-        ),
-        "KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS": VariableSpec(
-            default="", component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/privacy.py Redactor.kb_text public-contact allow-list for KB snapshots",
         ),
         "VLLM_HTTP_MAX_CONNECTIONS": VariableSpec(
             kind="int", default="32", minimum=1, component="vLLM client", restart="FastAPI"

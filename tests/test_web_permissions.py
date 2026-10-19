@@ -6,12 +6,23 @@ from fastapi.testclient import TestClient
 from bs4 import BeautifulSoup
 import pytest
 
+from unittest.mock import Mock
+
 import main
 import kb_manager
+import web_permissions
+from coverage_check import api as coverage_check_api
 from tests.test_web_auth import setup, login, csrf
 from web_permissions import COVERAGE_ROLE_CAPABILITIES, PERMISSIONS, ROLE_PERMISSIONS, route_permission
 
-from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+@pytest.fixture
+def coverage_staging(monkeypatch):
+    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ENABLED', 'true')
+    monkeypatch.setenv('ENVIRONMENT', 'staging')
+    if not any(getattr(route, 'path', None) == '/knowledge-coverage' for route in main.app.routes):
+        coverage_check_api.mount(main.app)
+
 
 pytestmark = pytest.mark.usefixtures("coverage_staging")
 
@@ -298,3 +309,21 @@ def test_dashboard_viewer_kb_read_endpoints_return_empty_or_populated_data(setup
         if populated:
             assert chunks.json()['chunks'][0]['answer'] == 'Full chunk content'
             assert versions.json()['versions'][0]['answer'] == 'Safely.'
+
+
+@pytest.mark.parametrize('flag,environment,granted', [
+    ('false', 'staging', False), ('true', 'production', True),
+    ('true', 'staging', True), ('maybe', 'staging', False)])
+def test_coverage_permissions_follow_the_flag_without_loading_settings(monkeypatch, flag, environment, granted):
+    from coverage_check import settings
+    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ENABLED', flag)
+    monkeypatch.setenv('ENVIRONMENT', environment)
+    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ARTIFACT_DIR', '/synthetic/coverage')
+    counter = Mock(side_effect=AssertionError('Settings must not load'))
+    monkeypatch.setattr(settings, 'load_settings', counter)
+    for _ in range(100):
+        expected = web_permissions.permissions_for('admin')
+        if granted:
+            expected = expected | COVERAGE_ROLE_CAPABILITIES['admin']
+        assert web_permissions.permissions_for_user('admin', 1) == expected
+    counter.assert_not_called()
