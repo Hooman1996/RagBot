@@ -59,8 +59,8 @@ def _specs() -> dict[str, VariableSpec]:
             usage="new_architecture/setup_dbs.py reset guard; utils/structured_logging.py",
         ),
         "KNOWLEDGE_COVERAGE_ENABLED": VariableSpec(
-            kind="bool", default="true", allowed=("true", "false"), component="Knowledge coverage audit",
-            restart="FastAPI", usage="coverage gate: on unless false, in every environment; access is by role",
+            kind="bool", default="true", allowed=("true", "false"), component="Knowledge coverage check",
+            restart="FastAPI", usage="coverage_check/settings.py coverage_enabled: on unless false, in every environment; access is by role",
         ),
         "API_HOST": VariableSpec(
             default="0.0.0.0", component="Uvicorn", restart="FastAPI"
@@ -367,7 +367,40 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="5242880", minimum=1024, maximum=20971520, component="Knowledge coverage", restart="FastAPI",
         ),
         "KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS": VariableSpec(
-            kind="int", default="1200", minimum=256, maximum=4096, component="Knowledge coverage", restart="FastAPI",
+            kind="int", default="300", minimum=64, maximum=2048, component="Knowledge coverage check", restart="FastAPI",
+            usage="coverage_check/checker.py max_tokens per batch or combine model call",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_ROWS": VariableSpec(
+            kind="int", default="10000", minimum=1, maximum=100000, component="Knowledge coverage check", restart="FastAPI",
+            usage="coverage_check/store.py parse_csv row limit (too_many_rows)",
+        ),
+        "KNOWLEDGE_COVERAGE_DEPTH": VariableSpec(
+            kind="int", default="150", minimum=1, maximum=1000, component="Knowledge coverage check", restart="FastAPI",
+            usage="page default retrieval depth (top_k, BM25 and semantic candidates)",
+        ),
+        "KNOWLEDGE_COVERAGE_KEEP": VariableSpec(
+            kind="int", default="50", minimum=1, maximum=1000, component="Knowledge coverage check", restart="FastAPI",
+            usage="page default rerank top_k; at most KNOWLEDGE_COVERAGE_DEPTH",
+        ),
+        "KNOWLEDGE_COVERAGE_BATCH_SIZE": VariableSpec(
+            kind="int", default="5", minimum=1, maximum=20, component="Knowledge coverage check", restart="FastAPI",
+            usage="page default chunks per batch model call",
+        ),
+        "KNOWLEDGE_COVERAGE_BROADER_ENABLED": VariableSpec(
+            kind="bool", default="false", allowed=("true", "false"), component="Knowledge coverage check", restart="FastAPI",
+            usage="page default for the wider search checkbox",
+        ),
+        "KNOWLEDGE_COVERAGE_BROADER_KEEP": VariableSpec(
+            kind="int", default="50", minimum=1, maximum=1000, component="Knowledge coverage check", restart="FastAPI",
+            usage="page default chunks judged in the wider search",
+        ),
+        "KNOWLEDGE_COVERAGE_COMBINE_MAX": VariableSpec(
+            kind="int", default="10", minimum=2, maximum=20, component="Knowledge coverage check", restart="FastAPI",
+            usage="coverage_check/checker.py most partial chunks in the combine call",
+        ),
+        "KNOWLEDGE_COVERAGE_CHUNK_MAX_CHARS": VariableSpec(
+            kind="int", default="4000", minimum=500, maximum=20000, component="Knowledge coverage check", restart="FastAPI",
+            usage="coverage_check/prompts.py characters of each chunk sent to the model",
         ),
         "KNOWLEDGE_COVERAGE_TOKEN_MARGIN": VariableSpec(
             kind="int", default="128", minimum=32, maximum=1024, component="Knowledge coverage", restart="FastAPI",
@@ -407,8 +440,8 @@ def _specs() -> dict[str, VariableSpec]:
             usage="knowledge_audit/retrieval.py AuditRetrieval initial fetch depth; knowledge_audit/pipeline.py CoverageEvaluator initial pool",
         ),
         "KNOWLEDGE_COVERAGE_BROADER_DEPTH": VariableSpec(
-            kind="int", default="300", minimum=2, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
-            usage="knowledge_audit/retrieval.py AuditRetrieval broader fetch depth; knowledge_audit/pipeline.py CoverageEvaluator broadening",
+            kind="int", default="200", minimum=2, maximum=1000, component="Knowledge coverage check", restart="FastAPI",
+            usage="page default wider-search depth; must exceed KNOWLEDGE_COVERAGE_DEPTH",
         ),
         "KNOWLEDGE_COVERAGE_INITIAL_ENTRIES": VariableSpec(
             kind="int", default="50", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
@@ -923,6 +956,18 @@ def analyze_environment(
         add_relationship_error(
             "TEI_EMBED_INSERT_BATCH_SIZE",
             "cannot exceed TEI_EMBED_MAX_CLIENT_BATCH_SIZE",
+        )
+
+    coverage_depth = as_number("KNOWLEDGE_COVERAGE_DEPTH")
+    coverage_keep = as_number("KNOWLEDGE_COVERAGE_KEEP")
+    coverage_broader = as_number("KNOWLEDGE_COVERAGE_BROADER_DEPTH")
+    if coverage_depth is not None and coverage_keep is not None and coverage_keep > coverage_depth:
+        add_relationship_error(
+            "KNOWLEDGE_COVERAGE_KEEP", "cannot exceed KNOWLEDGE_COVERAGE_DEPTH"
+        )
+    if coverage_depth is not None and coverage_broader is not None and coverage_broader <= coverage_depth:
+        add_relationship_error(
+            "KNOWLEDGE_COVERAGE_BROADER_DEPTH", "must exceed KNOWLEDGE_COVERAGE_DEPTH"
         )
 
     severity_counts = {

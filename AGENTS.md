@@ -77,53 +77,19 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 - `GET /knowledge-base/api/chunks/{chunk_id}/versions`
 - `POST /knowledge-base/api/chunks/revert`
 
-#### Knowledge-coverage and recommendation routes
+#### Knowledge-coverage check routes
 
-`knowledge_audit.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls `mount(app)`. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`. The list was generated from `main.app.routes` with both values set, by an in-process import with no services. The recommendation and run-export routes come from `knowledge_audit/recommendation_api.py` and `knowledge_audit/run_export_api.py`, whose routers are included in the audit router.
+`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit in `knowledge_audit/` stays on disk but is no longer mounted; step 22 deletes it.
 
-- `GET /api/knowledge-coverage/calibrations`
-- `GET /api/knowledge-coverage/calibrations/{calibration_id}`
-- `GET /api/knowledge-coverage/calibrations/{calibration_id}/export`
-- `GET /api/knowledge-coverage/calibrations/{calibration_id}/export-manifest`
-- `GET /api/knowledge-coverage/datasets`
-- `POST /api/knowledge-coverage/datasets`
-- `GET /api/knowledge-coverage/datasets/{dataset_id}/rows`
-- `GET /api/knowledge-coverage/recommendations/reviewable`
-- `GET /api/knowledge-coverage/recommendations/{revision_id}`
-- `POST /api/knowledge-coverage/recommendations/{revision_id}/cancel`
-- `GET /api/knowledge-coverage/recommendations/{revision_id}/export`
-- `GET /api/knowledge-coverage/recommendations/{revision_id}/export-manifest`
-- `POST /api/knowledge-coverage/recommendations/{revision_id}/export-revisions`
-- `GET /api/knowledge-coverage/recommendations/{revision_id}/metadata/{faq_id}`
-- `GET /api/knowledge-coverage/recommendations/{revision_id}/review-view`
-- `POST /api/knowledge-coverage/recommendations/{revision_id}/reviews`
-- `GET /api/knowledge-coverage/runs`
-- `POST /api/knowledge-coverage/runs`
-- `POST /api/knowledge-coverage/runs/estimate`
-- `GET /api/knowledge-coverage/runs/{run_id}`
-- `POST /api/knowledge-coverage/runs/{run_id}/cancel`
-- `GET /api/knowledge-coverage/runs/{run_id}/chain-export`
-- `GET /api/knowledge-coverage/runs/{run_id}/chain-export-manifest`
-- `POST /api/knowledge-coverage/runs/{run_id}/chain-export-revisions`
-- `GET /api/knowledge-coverage/runs/{run_id}/combined-export`
-- `GET /api/knowledge-coverage/runs/{run_id}/combined-export-manifest`
-- `POST /api/knowledge-coverage/runs/{run_id}/combined-export-preview`
-- `POST /api/knowledge-coverage/runs/{run_id}/combined-export-revisions`
-- `POST /api/knowledge-coverage/runs/{run_id}/continuation-estimate`
-- `GET /api/knowledge-coverage/runs/{run_id}/continuation-preview`
-- `POST /api/knowledge-coverage/runs/{run_id}/continuations`
-- `GET /api/knowledge-coverage/runs/{run_id}/export`
-- `GET /api/knowledge-coverage/runs/{run_id}/export-manifest`
-- `GET /api/knowledge-coverage/runs/{run_id}/export-options`
-- `POST /api/knowledge-coverage/runs/{run_id}/export-revisions`
-- `POST /api/knowledge-coverage/runs/{run_id}/recommendations`
-- `GET /api/knowledge-coverage/runs/{run_id}/results`
-- `POST /api/knowledge-coverage/runs/{run_id}/retry`
-- `GET /api/knowledge-coverage/runs/{run_id}/rows/{row_id}`
-- `GET /api/knowledge-coverage/runs/{run_id}/rows/{row_id}/recommendations`
-- `GET /api/knowledge-coverage/snapshots`
-- `POST /api/knowledge-coverage/snapshots`
 - `GET /knowledge-coverage`
+- `GET /api/knowledge-coverage/documents`
+- `POST /api/knowledge-coverage/checks`
+- `GET /api/knowledge-coverage/checks`
+- `GET /api/knowledge-coverage/checks/{run_id}`
+- `GET /api/knowledge-coverage/checks/{run_id}/rows`
+- `POST /api/knowledge-coverage/checks/{run_id}/cancel`
+- `POST /api/knowledge-coverage/checks/{run_id}/resume`
+- `GET /api/knowledge-coverage/checks/{run_id}/export`
 
 #### Routes from `internal_evaluation_api.py`
 
@@ -171,7 +137,7 @@ Verified configuration files and sources:
 - `new_architecture/alembic/versions/alembic.ini`: Alembic configuration.
 - Root `package.json`: root frontend dependency metadata.
 - `qdrant-web-ui-master/package.json` and `static_qdrant/package.json`: bundled Qdrant UI build and test scripts.
-- Knowledge-coverage audit gate: the audit routes, jobs and CLIs (except `scripts/knowledge_coverage_cleanup.py`) run when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says (`knowledge_audit/settings.py` `coverage_enabled`). Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`.
+- Knowledge-coverage check gate: the check routes and background task run when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says (`coverage_check/settings.py` `coverage_enabled`); `load_settings` validates every `KNOWLEDGE_COVERAGE_*` key at startup. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`.
 
 `pytest.ini` now exists. No `pyproject.toml`, `requirements*.txt`, `tox.ini`, or Makefile was found. The canonical Python dependency-installation command is therefore unknown.
 

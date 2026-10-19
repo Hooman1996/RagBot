@@ -124,20 +124,3 @@ def test_run_started_under_other_depths_is_identity_drift(monkeypatch):
         asyncio.run(build_engine(None, meta, settings, answering=None, runner=None, limiter=None))
 
 
-def test_api_entry_budget_defaults_to_and_is_bounded_by_configured_maximum(audit_runtime, setup, monkeypatch):
-    store, d, s, meta, jobs = audit_runtime
-    settings = replace(load_coverage_settings({}), max_entry_budget=120)
-    monkeypatch.setattr(main.app.state, 'coverage_runtime', (settings, store, jobs), raising=False)
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET', '120')
-    setup.users[1]['role'] = 'admin'
-    body = {'dataset_id': d['dataset_id'], 'snapshot_id': s['snapshot_id'], 'row_ids': list(meta['row_ids'][:1]),
-            'documents': ['Synthetic_FAQ']}
-    with TestClient(main.app, raise_server_exceptions=False) as client:
-        login(client, 'alice')
-        page = client.get('/knowledge-coverage'); assert page.status_code == 200
-        assert 'id="coverageBudget" type="number" min="1" max="120" value="120"' in page.text
-        rejected = client.post('/api/knowledge-coverage/runs', json={**body, 'entry_budget': 121, 'idempotency_key': 'synthetic_depth_rejected'}, headers=csrf(client))
-        assert rejected.status_code == 409 and rejected.json()['detail'] == 'invalid_entry_budget'
-        started = client.post('/api/knowledge-coverage/runs', json={**body, 'idempotency_key': 'synthetic_depth_started'}, headers=csrf(client))
-        assert started.status_code == 202, started.text
-        assert started.json()['settings']['entry_budget'] == 120

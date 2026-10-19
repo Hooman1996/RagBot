@@ -139,9 +139,3 @@ def _label_maps():
     return maps
 
 
-def test_every_review_code_has_a_label_in_each_language():
-    maps = _label_maps()
-    assert maps, "no label map found"
-    review = BLOCKING_CODES | RESIDUAL_CODES | SEARCH_CODES | NOTE_CODES
-    for name, keys in maps.items():
-        assert not review - keys, (name, sorted(review - keys))

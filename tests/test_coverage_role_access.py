@@ -44,22 +44,6 @@ def coverage_for(role):
     return web_permissions.permissions_for_user(role, 1) & CAPABILITIES
 
 
-@pytest.mark.parametrize("environment", ENVIRONMENTS)
-def test_roles_grant_coverage_capabilities(monkeypatch, environment):
-    monkeypatch.delenv("KNOWLEDGE_COVERAGE_ENABLED", raising=False)
-    if environment is None:
-        monkeypatch.delenv("ENVIRONMENT", raising=False)
-    else:
-        monkeypatch.setenv("ENVIRONMENT", environment)
-    assert coverage_for("admin") == CAPABILITIES
-    assert coverage_for("dashboard_viewer") == READ_CAPABILITIES
-    for role in ("user", "moderator", "analytics_viewer", "knowledge_editor", "synthetic_unknown_role"):
-        assert coverage_for(role) == frozenset(), role
-    monkeypatch.setenv("KNOWLEDGE_COVERAGE_ENABLED", "false")
-    for role in ("admin", "dashboard_viewer", "user", "synthetic_unknown_role"):
-        assert coverage_for(role) == frozenset(), role
-        assert web_permissions.permissions_for_user(role, 1) == web_permissions.permissions_for(role)
-
 
 @pytest.fixture
 def coverage_app(setup, monkeypatch):
@@ -70,17 +54,6 @@ def coverage_app(setup, monkeypatch):
         mount(main.app)
     return setup
 
-
-@pytest.mark.parametrize("role,page_status,link", [("dashboard_viewer", 200, True), ("user", 403, False)])
-def test_page_and_sidebar_follow_role(coverage_app, role, page_status, link):
-    coverage_app.users[1]["role"] = role
-    with TestClient(main.app, raise_server_exceptions=False) as client:
-        login(client, "alice")
-        assert client.get("/knowledge-coverage").status_code == page_status
-        app_page = client.get("/app")
-        assert app_page.status_code == 200
-        assert ("Knowledge coverage" in app_page.text) is link
-        assert ('href="/knowledge-coverage"' in app_page.text) is link
 
 
 def test_live_run_guard_uses_configured_endpoints(monkeypatch):

@@ -282,31 +282,6 @@ def test_creation_failure_retry_uses_same_run_identity(tmp_path,monkeypatch):
     assert len(store.rows(result['run_id'],1))==3
 
 
-def test_full_mode_api_idempotency_csrf_owner_and_revoked_grant(audit_runtime,setup,monkeypatch):
-    import main
-    from fastapi.testclient import TestClient
-    from tests.test_web_auth import login,csrf
-    store,d,s,meta,jobs=audit_runtime
-    setup.users[1]['role']=setup.users[2]['role']='admin'
-    monkeypatch.setattr(jobs,'start',lambda *a:None)
-    # No completed reference run exists, so the unsized run is acknowledged.
-    payload={'dataset_id':d['dataset_id'],'snapshot_id':s['snapshot_id'],'execution_mode':'full_input','budget_acknowledged':True,
-             'sizing_acknowledged':True,'idempotency_key':'synthetic_api_idempotency','documents':['Synthetic_FAQ']}
-    with TestClient(main.app,raise_server_exceptions=False) as client:
-        login(client,'alice')
-        assert client.post('/api/knowledge-coverage/runs',json=payload).status_code==403
-        first=client.post('/api/knowledge-coverage/runs',json=payload,headers=csrf(client));assert first.status_code==202
-        second=client.post('/api/knowledge-coverage/runs',json=payload,headers=csrf(client))
-        assert second.status_code==202 and first.json()['run_id']==second.json()['run_id']
-        assert len(first.json()['selected_row_ids'])==3
-        changed=client.post('/api/knowledge-coverage/runs',json={**payload,'entry_budget':299},headers=csrf(client))
-        assert changed.status_code==409 and changed.json()['detail']=='idempotency_request_conflict'
-        assert client.post('/api/knowledge-coverage/runs',json={**payload,'selected_count':918},headers=csrf(client)).status_code==422
-        login(client,'bob')
-        assert client.post('/api/knowledge-coverage/runs',json=payload,headers=csrf(client)).status_code==404
-        login(client,'alice');setup.users[1]['role']='user'
-        assert client.post('/api/knowledge-coverage/runs/'+first.json()['run_id']+'/retry',headers=csrf(client)).status_code==403
-
 
 def test_precise_model_dispatch_journal_read_timeout_and_cancellation(tmp_path):
     import httpx

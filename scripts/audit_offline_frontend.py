@@ -18,6 +18,7 @@ PYTHON_FRONTEND_FILES = (
     PROJECT_DIR / "kb_manager.py",
     PROJECT_DIR / "frontend_paths.py",
     PROJECT_DIR / "knowledge_audit" / "api.py",
+    PROJECT_DIR / "coverage_check" / "api.py",
 )
 PUBLIC_SCHEMES = ("http://", "https://", "//")
 TEXT_SUFFIXES = {".css", ".html", ".htm", ".jinja", ".jinja2", ".js", ".mjs"}

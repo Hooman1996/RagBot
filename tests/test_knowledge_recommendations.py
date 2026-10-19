@@ -250,53 +250,6 @@ def test_known_historical_full_blocks_old_gap_but_preserves_both(tmp_path):
     assert output['recommendation_status']=='unavailable'
 
 
-def test_owned_csrf_review_capability_and_pinned_downloads(audit_runtime,setup,monkeypatch):
-    from fastapi.testclient import TestClient
-    import main
-    from knowledge_audit.recommendation_jobs import RecommendationJobs
-    from tests.test_answering_service import ImmediateRunner
-    store,d,s,run,coverage_jobs=audit_runtime
-    snap=store.snapshot(s['snapshot_id'],1);data,redactor=store.dataset(d['dataset_id'],1)
-    row=evaluate(snap,LabeledModel(snap,{'1':['a1']}),Retrieval([],['1']),dataset=data)[0]
-    store.save_row(run['run_id'],row,1);store.update_run(run['run_id'],1,{'state':'completed'})
-    recs=RecommendationStore(store)
-    async def factory(meta):return RecommendationEngine(DraftModel(),snap,redactor)
-    jobs=RecommendationJobs(recs,coverage_jobs,ImmediateRunner(),factory)
-    monkeypatch.setattr(main.app.state,'recommendation_runtime',(recs,jobs),raising=False)
-    setup.users[1]['role']='admin';setup.users[2]['role']='admin'
-    with TestClient(main.app,raise_server_exceptions=False) as client:
-        assert client.get('/api/knowledge-coverage/runs/'+run['run_id']+'/rows/'+row['source_row_id']+'/recommendations').status_code==401
-        login(client,'alice')
-        source=client.post('/api/knowledge-coverage/runs/'+run['run_id']+'/export-revisions',headers=csrf(client)).json()
-        endpoint='/api/knowledge-coverage/runs/'+run['run_id']+'/recommendations'
-        payload={'coverage_export_revision_id':source['export_revision_id'],'row_ids':[row['source_row_id']]}
-        assert client.post(endpoint,json=payload).status_code==403
-        created=client.post(endpoint,json=payload,headers=csrf(client));assert created.status_code==202,created.text
-        rid=created.json()['recommendation_revision_id'];url='/api/knowledge-coverage/recommendations/'+rid
-        import time
-        for _ in range(100):
-            detail=client.get(url).json()
-            if detail['revision']['state'] not in {'queued','running'}:break
-            time.sleep(.01)
-        assert detail['revision']['state']=='completed',detail
-        assert detail['results'][row['source_row_id']]['recommendation_status']=='drafted',detail
-        review={'source_row_id':row['source_row_id'],'recommendation_id':'q1','decision':'approved','note':'Synthetic question-only review.'}
-        # A dashboard viewer has no review capability.
-        setup.users[1]['role']='dashboard_viewer'
-        assert client.post(url+'/reviews',json=review,headers=csrf(client)).status_code==403
-        setup.users[1]['role']='admin'
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER','false')
-        assert client.post(url+'/reviews',json=review).status_code==403
-        old=client.post(url+'/export-revisions',json={},headers=csrf(client)).json()
-        csv_old=client.get(url+'/export?export_revision_id='+old['export_revision_id']).content
-        assert client.post(url+'/reviews',json=review,headers=csrf(client)).status_code==201
-        manifest=client.get(url+'/export-manifest?export_revision_id='+old['export_revision_id']).json()
-        import hashlib
-        assert hashlib.sha256(csv_old).hexdigest()==manifest['csv_sha256'] and manifest['review_revision_id']==''
-        assert client.get(url+'/metadata/1').status_code==200
-        login(client,'bob')
-        for suffix in ('','/metadata/1','/export?export_revision_id='+old['export_revision_id']):assert client.get(url+suffix).status_code==404
-
 
 def test_background_cancel_preserves_source_and_balances_shared_lease(tmp_path):
     from knowledge_audit.jobs import CoverageJobs

@@ -93,39 +93,6 @@ def test_subset_of_joint_batch_cannot_reuse_full_verdict_or_spend_entries_twice(
     assert len([c for c in model.calls if c[0]=='verification'])==1
 
 
-def test_immutable_export_pair_survives_row_mutation_and_repeated_downloads(audit_runtime,setup,monkeypatch):
-    from fastapi.testclient import TestClient
-    import hashlib
-    import main
-    from knowledge_audit.settings import CAPABILITIES
-    store,d,s,meta,jobs=audit_runtime
-    import web_permissions
-    setup.users[1]['role']='admin'
-    url='/api/knowledge-coverage/runs/'+meta['run_id']
-    with TestClient(main.app,raise_server_exceptions=False) as client:
-        login(client,'alice')
-        first=client.get(url+'/export'); assert first.status_code==200
-        row=store.row(meta['run_id'],meta['selected_row_ids'][0],1)
-        row.update(processing_status='completed',coverage_status='full',outcome='covered_reachable')
-        store.save_row(meta['run_id'],row,1)
-        manifest=client.get(url+'/export-manifest').json()
-        assert first.headers['x-coverage-export-id']==manifest['export_id']
-        assert hashlib.sha256(first.content).hexdigest()==manifest['csv_sha256']
-        assert client.get(url+'/export').content==first.content
-        assert client.post(url+'/export-revisions').status_code==403
-        fresh=client.post(url+'/export-revisions',headers=csrf(client)); assert fresh.status_code==201
-        revision=fresh.json()['export_revision_id']
-        second=client.get(url+'/export?revision_id='+revision)
-        assert second.content!=first.content
-        frozen=client.get(url+'/export-manifest?revision_id='+revision).json()
-        assert second.headers['x-coverage-export-id']==frozen['export_id']
-        assert hashlib.sha256(second.content).hexdigest()==frozen['csv_sha256']
-        old=client.get(url+'/export?revision_id='+manifest['export_revision_id'])
-        assert old.content==first.content and manifest['state']=='queued'
-        # No real role lacks evidence view while keeping export, so restrict the role map for this check.
-        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES-{'coverage_evidence_view'}))
-        assert client.get(url+'/export?revision_id='+revision).status_code==404
-
 
 @pytest.mark.parametrize('stage',['before_redaction','after_redaction'])
 def test_validation_diagnostics_never_save_values_or_arbitrary_field_names(stage):

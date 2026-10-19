@@ -70,7 +70,9 @@ from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
 from web_permissions import permissions_for, permissions_for_user
-from knowledge_audit.api import mount
+from coverage_check import api as coverage_check_api
+from coverage_check.settings import coverage_enabled as coverage_check_enabled
+from coverage_check.settings import load_settings as load_coverage_check_settings
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
                       set_cookies, clear_cookies, web_auth_middleware, safe_user,
                       validate_config, job_access_token, valid_job_access)
@@ -217,6 +219,10 @@ async def lifespan(app: FastAPI):
 
     app.state.health_phase = "starting"
     validate_config()
+    # An invalid coverage-check variable stops startup with its name.
+    coverage_check_settings = (
+        load_coverage_check_settings() if coverage_check_enabled() else None
+    )
     logging_runtime = start_logging()
     app.state.logging_runtime = logging_runtime
     blocking_runner = BoundedBlockingRunner(BLOCKING_CONCURRENCY_LIMIT)
@@ -399,6 +405,8 @@ async def lifespan(app: FastAPI):
         app.state.health_minio_client = db_connections.minio_client
         app.state.health_minio_bucket = db_connections_config.MINIO_BUCKET
         app.state.health_ocr_service = ocr_service
+        if coverage_check_settings is not None:
+            await coverage_check_api.start(app, coverage_check_settings)
         app.state.ready = True
         app.state.health_phase = "running"
         yield
@@ -415,9 +423,9 @@ async def lifespan(app: FastAPI):
                 cleanup_errors.append(exc)
 
         await cleanup(app.state.health_coordinator.aclose)
-        if hasattr(app.state, "coverage_runtime"):
-            await cleanup(app.state.coverage_runtime[2].aclose)
-            del app.state.coverage_runtime
+        if hasattr(app.state, "coverage_check"):
+            await cleanup(app.state.coverage_check.aclose)
+            del app.state.coverage_check
         if mass_answer_job_manager is not None:
             await cleanup(mass_answer_job_manager.aclose)
         if rag_system is not None:
@@ -500,6 +508,11 @@ async def browser_auth_middleware(request: Request, call_next):
     return await web_auth_middleware(request, call_next, db_manager)
 
 
+@app.middleware("http")
+async def coverage_check_gate(request: Request, call_next):
+    return await coverage_check_api.coverage_gate(request, call_next)
+
+
 # One outer ASGI trace for authentication, endpoints, and response streaming.
 app.add_middleware(HttpLoggingMiddleware)
 
@@ -514,7 +527,7 @@ app.mount("/static", VersionedStaticFiles(directory=str(STATIC_DIR)), name="stat
 app.include_router(kb_router)
 app.include_router(mobile_router)
 app.include_router(internal_evaluation_router)
-mount(app)
+coverage_check_api.mount(app)
 
 
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---

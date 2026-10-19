@@ -11,7 +11,8 @@
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
 <body>
-<a class="coverage-skip" href="#coverageMain">Skip to coverage review</a>
+{% set d = defaults or {} %}
+<a class="coverage-skip" href="#coverageMain">Skip to coverage check</a>
 <div class="app-shell">
     <aside class="sidebar" aria-label="Main navigation">
         <div class="sidebar__brand"><div class="sidebar__logo">N</div><div class="sidebar__brand-text"><div class="sidebar__brand-name">Negah Bank AI</div><div class="sidebar__brand-sub">Knowledge workspace</div></div></div>
@@ -21,148 +22,59 @@
             {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">Analytics</a>{% endif %}
             {% set coverage_active = true %}{% include "_coverage_nav_link.html" %}
         </nav>
-        <p class="coverage-private-note">Private review workspace<br>Results are evidence assessments, not customer answers.</p>
     </aside>
     <main id="coverageMain" class="main-content" tabindex="-1">
         <header class="topbar"><div class="topbar__title">Knowledge coverage</div><div class="web-header-controls coverage-header-controls">
-            <button id="coverageLanguage" class="theme-toggle" type="button" aria-label="Switch reading direction, labels remain English">RTL / LTR</button>
             <button id="coverageTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode">Theme</button>
             {% set logout_label = 'Log out' %}{% include "_logout_button.html" %}
         </div></header>
-        <div id="coverageRoot" class="coverage-page" data-contract="{{ contract_version }}" data-upload-limit="{{ upload_max_bytes }}" data-max-run-rows="{{ max_run_rows }}" data-batch-max="{{ batch_max_entries }}" data-operational-limits='{{ operational_limits|tojson }}'
-             data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}"
-             data-can-evidence="{{ 'true' if 'coverage_evidence_view' in permissions and 'kb_read' in permissions else 'false' }}"
-             data-can-export="{{ 'true' if 'coverage_export_download' in permissions else 'false' }}"
-             data-can-review="{{ 'true' if 'coverage_recommendation_review' in permissions else 'false' }}">
-            <div class="coverage-intro"><div><p class="coverage-eyebrow">KNOWLEDGE REVIEW · CONTROLLED EXECUTION</p><h1>What can our knowledge answer?</h1>
-                <p>Choose an explicit scope against a frozen knowledge revision. Every imported query stays in the results and download.</p></div>
-                <span class="coverage-pill">Up to 5 questions per pilot</span>
-            </div>
-            <p id="coverageStatus" class="coverage-status" role="status" aria-live="polite">Loading your review workspace…</p>
+        <div id="coverageRoot" class="coverage-page" data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}" data-upload-limit="{{ upload_max_bytes }}">
             <p id="coverageError" class="coverage-error" role="alert" hidden></p>
-            {% if 'coverage_recommendation_review' in permissions %}
-            <section id="coverageReviewQueue" class="coverage-card coverage-review-queue" aria-label="Question drafts waiting for my review"></section>
-            {% endif %}
             {% if 'coverage_run_start' in permissions %}
-            <details class="coverage-card coverage-import" open>
-                <summary>Import questions and choose an execution scope</summary>
-                <form id="coverageImportForm">
-                    <div class="coverage-form-grid">
-                        <label class="coverage-file-label">CSV file<input id="coverageFile" type="file" accept=".csv,text/csv" required><span>Only mapped query, session, time and role fields are retained.</span></label>
-                        <label>Question column<select id="coverageQueryColumn" required><option value="">Choose a CSV file first</option></select></label>
-                        <label>Session column · optional<select id="coverageSessionColumn"><option value="">Independent rows</option></select></label>
-                        <label>Message role · optional<select id="coverageRoleColumn"><option value="">All rows are user questions</option></select></label>
+            <section class="coverage-card" aria-labelledby="coverageNewTitle">
+                <h2 id="coverageNewTitle">New check</h2>
+                <form id="coverageForm">
+                    <label class="coverage-file">CSV file<input id="coverageFile" type="file" accept=".csv,text/csv" required>
+                        <span>CSV, UTF-8, with a <code>query</code> column and an optional <code>id</code> column</span></label>
+                    <fieldset class="coverage-documents"><legend>Datasources</legend><div id="coverageDocuments">Loading datasources…</div></fieldset>
+                    <div class="coverage-settings-row">
+                        <label>Retrieve<input id="coverageDepth" type="number" min="1" max="1000" value="{{ d.depth }}" required></label>
+                        <label>Keep after rerank<input id="coverageKeep" type="number" min="1" max="1000" value="{{ d.keep }}" required></label>
+                        <label>Batch size<input id="coverageBatchSize" type="number" min="1" max="20" value="{{ d.batch_size }}" required></label>
                     </div>
-                    <details class="coverage-settings"><summary>Chronology and import settings</summary>
-                        <p>Naive times require a confirmed timezone. Assistant messages need their own availability time; answer columns are not inferred as history.</p>
-                        <div class="coverage-form-grid">
-                            <label>Timestamp column<select id="coverageTimestampColumn"><option value="">No combined timestamp</option></select></label>
-                            <label>Date column<select id="coverageDateColumn"><option value="">No separate date</option></select></label>
-                            <label>Time column<select id="coverageTimeColumn"><option value="">No separate time</option></select></label>
-                            <label>Calendar<select id="coverageCalendar"><option value="gregorian">Gregorian · ISO dates</option><option value="jalali">Jalali · YYYY/MM/DD</option></select></label>
-                            <label>Source timezone<input id="coverageTimezone" placeholder="e.g. Asia/Tehran" autocomplete="off"></label>
-                            <label>Delimiter<select id="coverageDelimiter"><option value=",">Comma</option><option value=";">Semicolon</option><option value="&#9;">Tab</option><option value="|">Pipe</option></select></label>
-                        </div>
-                        <label class="coverage-check"><input id="coverageTrustedOrder" type="checkbox"> I confirm CSV order is authoritative within each session when timestamps cannot establish order.</label>
-                    </details>
-                    <button id="coverageUpload" class="coverage-primary" type="submit">Import and validate</button>
+                    <p id="coverageBatchLine" class="coverage-hint"></p>
+                    <label class="coverage-check"><input id="coverageBroader" type="checkbox"{% if d.broader_enabled %} checked{% endif %}> Wider search if not answered</label>
+                    <div class="coverage-settings-row">
+                        <label>Wider depth<input id="coverageBroaderDepth" type="number" min="2" max="1000" value="{{ d.broader_depth }}" required></label>
+                        <label>Wider keep<input id="coverageBroaderKeep" type="number" min="1" max="1000" value="{{ d.broader_keep }}" required></label>
+                    </div>
+                    <button id="coverageStart" class="coverage-primary" type="submit">Start check</button>
                 </form>
-                <div class="coverage-divider"></div>
-                <div class="coverage-form-grid">
-                    <label>Imported dataset<select id="coverageDataset"><option value="">No datasets yet</option></select></label>
-                    <label>Knowledge revision<select id="coverageSnapshot"><option value="">Capture a revision first</option></select></label>
-                    <label>Maximum distinct entries per question<input id="coverageBudget" type="number" min="1" max="{{ max_entry_budget }}" value="{{ max_entry_budget }}"></label>
-                    <div class="coverage-capture"><button id="coverageCapture" class="coverage-secondary" type="button">Capture current knowledge</button><p>Read-only capture. No knowledge edits.</p></div>
-                </div>
-                <div id="coverageDocuments" class="coverage-document-list" role="group" aria-label="Knowledge datasources"></div>
-                <p id="coverageDatasetSummary" class="coverage-summary">Import or select a dataset to review its preparation state.</p>
-                <label>Execution scope<select id="coverageMode">
-                    <option value="pilot">Pilot · up to five questions (default)</option>
-                    <option value="subset">Explicit larger subset</option>
-                    <option value="full_input">All user-query rows in this dataset</option>
-                </select></label>
-                <details class="coverage-summary"><summary>Finite execution limits</summary>
-                    <p>These are stop limits, not estimates of capacity. A larger input may pause before all rows are evaluated. Consumed allowance survives recovery; exhausted allowance requires a new run.</p>
-                    <div class="coverage-form-grid">
-                    {% for key,label in [('completion_attempts','Completion attempts'),('token_allowance','Reserved/used tokens'),('execution_seconds','Execution seconds'),('consecutive_failures','Consecutive failures'),('min_free_bytes','Minimum free storage bytes'),('pace_ms','Audit pacing milliseconds')] %}
-                    <label>{{ label }}<input id="coverageLimit_{{ key }}" type="number" value="{{ operational_limits[key] }}" min="{{ operational_limits[key] if key in ['min_free_bytes','pace_ms'] else 1 }}" max="{{ operational_limits[key] if key not in ['min_free_bytes','pace_ms'] else (1099511627776 if key == 'min_free_bytes' else 60000) }}"></label>
-                    {% endfor %}
-                    </div>
-                    <label><input id="coverageBudgetAck" type="checkbox"> I confirm these finite limits for full-input execution; unfinished rows remain pending if a limit is reached.</label>
-                </details>
-                <div id="coverageSizing" class="coverage-settings" hidden>
-                    <p id="coverageSizingStatus" class="coverage-summary" aria-live="polite"></p>
-                    <div id="coverageSizingTable"></div>
-                    <label id="coverageSizingAckLabel" class="coverage-check" hidden><input id="coverageSizingAck" type="checkbox"> I confirm an unsized run.</label>
-                    <label id="coveragePartialAckLabel" class="coverage-check" hidden><input id="coveragePartialAck" type="checkbox"> I accept that this run will pause before finishing</label>
-                </div>
-                <p class="coverage-summary">Retention: manual operator cleanup only; automatic deletion is disabled. Default age threshold: {{ retention_days }} days. Holds, active work and referenced dependencies are protected. Age alone does not revoke access.</p>
-                <p id="coverageStartSummary" class="coverage-summary" aria-live="polite">Select a dataset and snapshot. Processing is sequential; larger runs may take a long time.</p>
-                <div class="coverage-selection-bar"><strong id="coverageSelectionCount">0 selected</strong><button id="coverageClearSelection" class="coverage-link" type="button">Clear selection</button>
-                    <button id="coverageStart" class="coverage-primary" type="button" disabled>Start selected pilot</button></div>
-            </details>
-            {% endif %}
-            <section class="coverage-card coverage-run" aria-labelledby="coverageRunTitle">
-                <div class="coverage-section-heading"><div><h2 id="coverageRunTitle">Review progress</h2><p id="coverageProgressText">No run selected. Import questions or open a previous run.</p></div>
-                    <label>Previous runs<select id="coverageRuns"><option value="">Select a run</option></select></label></div>
-                <progress id="coverageProgress" max="5" value="0" aria-label="Selected rows processed"></progress>
-                <div id="coverageRunCounts" class="coverage-run-counts" aria-live="polite"></div>
-                <p id="coverageBudgetProgress" class="coverage-summary" role="status" aria-live="polite"></p>
-                <div class="coverage-run-actions"><button id="coverageCancel" class="coverage-secondary" type="button" hidden>Cancel run</button>
-                    <button id="coverageResume" class="coverage-secondary" type="button" hidden>Resume remaining rows</button>
-                    {% if 'coverage_run_start' in permissions %}<button id="coverageContinue" class="coverage-secondary" type="button" hidden>Continue unfinished rows</button>{% endif %}
-                </div>
-                {% if 'coverage_run_start' in permissions %}
-                <div id="coverageContinuation" class="coverage-settings" hidden>
-                    <p class="coverage-summary">A continuation is a new subset run over the rows this run did not finish, on the same dataset, snapshot and datasources. Limits come from the finite execution limits above.</p>
-                    <label class="coverage-check"><input id="coverageContinueReview" type="checkbox"> Also re-run rows that need review</label>
-                    <p id="coverageContinueSizingStatus" class="coverage-summary" aria-live="polite"></p>
-                    <div id="coverageContinueSizingTable"></div>
-                    <label id="coverageContinueSizingAckLabel" class="coverage-check" hidden><input id="coverageContinueSizingAck" type="checkbox"> I confirm an unsized run.</label>
-                    <label id="coverageContinuePartialAckLabel" class="coverage-check" hidden><input id="coverageContinuePartialAck" type="checkbox"> I accept that this run will pause before finishing</label>
-                </div>
-                {% endif %}
-                <div id="coverageRecovery" class="coverage-summary" hidden>
-                    <p id="coverageRecoveryText"></p>
-                    <label>Recovery choice<select id="coverageRecoveryChoice">
-                        <option value="stop">Resume only if no remote completion is unknown</option>
-                        <option value="skip_unknown">Continue other rows; leave unknown work interrupted</option>
-                        <option value="retry_unknown">Explicitly retry unknown work · may duplicate server work/cost</option>
-                    </select></label>
-                    <p>Completed rows are retained. Validated checkpoints are checked again. A local cancellation does not prove that the server stopped. Changed identities require a new run.</p>
-                </div>
-                <details class="coverage-legacy-download"><summary>Coverage-only download · no draft recommendations</summary><div class="coverage-run-actions">
-                    <button id="coveragePrepareExport" class="coverage-secondary" type="button" hidden>Prepare download</button>
-                    <a id="coverageExport" class="coverage-primary" hidden>Download all rows · CSV</a>
-                    <a id="coverageManifest" class="coverage-link" download="coverage-manifest.json" hidden>Export manifest</a>
-                    <button id="coverageChainExport" class="coverage-secondary" type="button" hidden>Download whole input (all runs)</button>
-                    <a id="coverageChainCsv" class="coverage-link" hidden>Whole-input CSV</a>
-                    <a id="coverageChainManifest" class="coverage-link" download="coverage-chain-manifest.json" hidden>Whole-input manifest</a></div>
-                <p id="coverageExportState" class="coverage-summary" aria-live="polite">No download revision prepared.</p></details>
             </section>
-            <section id="coverageRunExport" class="coverage-card coverage-run-export" aria-label="Run-level CSV and review selection" hidden></section>
-            <div class="coverage-workbench">
-                <section class="coverage-card coverage-results" aria-labelledby="coverageResultsTitle">
-                    <div class="coverage-section-heading"><div><h2 id="coverageResultsTitle">Query results</h2><p id="coverageResultCount">No input loaded</p></div></div>
-                    <div class="coverage-filters"><label>Find a question<input id="coverageSearch" type="search" placeholder="Search redacted questions" maxlength="200"></label>
-                        <label>Outcome<select id="coverageFilter"><option value="">All outcomes</option><option value="covered_reachable">Covered and reachable</option><option value="covered_not_reachable">Covered but not reachable</option><option value="possible_partial_gap">Possible partial KB gap</option><option value="possible_gap">Possible KB gap</option><option value="needs_context">Needs preceding context</option><option value="needs_review">Needs review</option><option value="excluded">Excluded</option><option value="pending">Pending</option><option value="error">Error</option></select></label></div>
-                    <div class="coverage-table-scroll" tabindex="0" aria-label="Scrollable question results">
-                        <table id="coverageTable"><thead><tr><th scope="col">Select / row</th><th scope="col">Question</th><th scope="col">Preparation</th><th scope="col">Outcome</th><th scope="col">Entries checked</th><th scope="col">Evidence</th></tr></thead>
-                            <tbody id="coverageRows"><tr><td colspan="6" class="coverage-empty">Import questions to begin. No coverage results have been assessed.</td></tr></tbody></table>
-                    </div>
-                    <div class="coverage-pagination"><button id="coveragePrevious" class="coverage-secondary" type="button" disabled>Previous</button><span id="coveragePageLabel">Page 1</span><button id="coverageNext" class="coverage-secondary" type="button" disabled>Next</button></div>
-                    <p class="coverage-scope-note">A possible gap is limited to the recorded search and entry budget. Pending and context-dependent rows are never counted as missing knowledge.</p>
-                </section>
-                <aside id="coverageEvidence" class="coverage-card coverage-evidence" aria-label="Selected query evidence" tabindex="-1">
-                    <div class="coverage-section-heading"><h2>Aspect → evidence</h2><button id="coverageCloseEvidence" class="coverage-link" type="button" aria-label="Close evidence and return to query">Close</button></div>
-                    <div id="coverageEvidenceContent" class="coverage-empty">Open an assessed query to inspect its requested aspects, source sentences, conditions and verification.</div>
-                </aside>
-            </div>
+            {% endif %}
+            <section class="coverage-card" aria-labelledby="coverageChecksTitle">
+                <h2 id="coverageChecksTitle">Checks</h2>
+                <div class="coverage-table-scroll"><table>
+                    <thead><tr><th scope="col">Started</th><th scope="col">File</th><th scope="col">Rows</th><th scope="col">Progress</th><th scope="col">State</th><th scope="col"><span class="coverage-visually-hidden">Actions</span></th></tr></thead>
+                    <tbody id="coverageChecks"><tr><td colspan="6" class="coverage-empty">No checks yet.</td></tr></tbody>
+                </table></div>
+            </section>
+            <section id="coverageResults" class="coverage-card" aria-labelledby="coverageResultsTitle" hidden>
+                <div class="coverage-heading"><h2 id="coverageResultsTitle">Results</h2><a id="coverageDownload" class="coverage-secondary" href="#">Download CSV</a></div>
+                <div id="coverageCounts" class="coverage-counts"></div>
+                <label class="coverage-filter">Result<select id="coverageFilter">
+                    <option value="">All</option><option value="answered">Answered</option><option value="answered_combined">Answered by combining</option>
+                    <option value="partial">Partly answered</option><option value="not_answered">Not answered</option><option value="chitchat">Chit-chat</option>
+                    <option value="error">Error</option><option value="waiting">Waiting</option></select></label>
+                <div class="coverage-table-scroll"><table>
+                    <thead><tr><th scope="col">#</th><th scope="col">id</th><th scope="col">Question</th><th scope="col">Result</th><th scope="col">Answer batch</th><th scope="col">Answering FAQ titles</th></tr></thead>
+                    <tbody id="coverageRows"></tbody>
+                </table></div>
+                <div class="coverage-pagination"><button id="coveragePrevious" class="coverage-secondary" type="button" disabled>Previous</button><span id="coveragePageLabel"></span><button id="coverageNext" class="coverage-secondary" type="button" disabled>Next</button></div>
+            </section>
         </div>
     </main>
 </div>
-<script src="{{ versioned_asset(request, 'js/knowledge_run_export.js') }}" integrity="{{ asset_integrity('js/knowledge_run_export.js') }}" crossorigin="anonymous"></script>
-<script src="{{ versioned_asset(request, 'js/knowledge_recommendations.js') }}" integrity="{{ asset_integrity('js/knowledge_recommendations.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/knowledge_coverage.js') }}" integrity="{{ asset_integrity('js/knowledge_coverage.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

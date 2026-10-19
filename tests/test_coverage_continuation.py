@@ -108,114 +108,6 @@ def post(client, rid, **body):
     return client.post(f'/api/knowledge-coverage/runs/{rid}/continuations', json=body, headers=csrf(client))
 
 
-def test_continuation_creates_a_linked_subset_run(client_runtime):
-    client, store, d, snap, dataset, _ = client_runtime
-    source = paused_full(store, d, snap, dataset)
-    rid = source['run_id']
-    preview = client.get(f'/api/knowledge-coverage/runs/{rid}/continuation-preview')
-    assert preview.json() == {'unfinished': 878, 'needs_review': 0, 'failed': 0, 'unknown': 0}
-    estimate = client.post(f'/api/knowledge-coverage/runs/{rid}/continuation-estimate', json={}, headers=csrf(client)).json()
-    assert estimate['row_count'] == 878 and estimate['estimate'] is None and estimate['truncated'] is False
-    refused = post(client, rid, idempotency_key=key())
-    assert refused.status_code == 422 and refused.json()['detail'] == UNSIZED
-    same = key()
-    created = post(client, rid, idempotency_key=same, sizing_acknowledged=True)
-    assert created.status_code == 202, created.text
-    body = created.json()
-    assert body['truncated'] is False and body['remaining_rows'] == 0
-    meta = store.owned('runs', body['run_id'], 1)
-    assert meta['execution_mode'] == 'subset' and meta['selected_row_ids'] == source['selected_row_ids'][40:]
-    assert meta['continues_run_id'] == rid and meta['chain_root_run_id'] == rid
-    assert 'continues_run_id' not in meta['settings'] and 'chain_root_run_id' not in meta['settings']
-    assert meta['settings']['entry_budget'] == source['settings']['entry_budget'] and meta['settings']['documents'] == ['Synthetic_FAQ']
-    assert meta['sizing']['sizing_acknowledged'] is True and meta['sizing']['estimate'] is None
-    assert post(client, rid, idempotency_key=same, sizing_acknowledged=True).json()['run_id'] == body['run_id']
-    # A second continuation of the same source would branch the chain.
-    again = post(client, rid, idempotency_key=key(), sizing_acknowledged=True)
-    assert again.status_code == 409 and again.json()['detail'] == 'run_already_continued'
-    # The continuation of the continuation keeps the root.
-    mark(store, body['run_id'], {}, state='paused')
-    second = post(client, body['run_id'], idempotency_key=key(), sizing_acknowledged=True).json()
-    assert store.owned('runs', second['run_id'], 1)['chain_root_run_id'] == rid
-
-
-def test_continuation_sizing_rules_apply(client_runtime):
-    client, store, d, snap, dataset, _ = client_runtime
-    reference(store, d, snap, dataset)
-    source = paused_full(store, d, snap, dataset)
-    over = post(client, source['run_id'], idempotency_key=key(), operational_limits=LOW)
-    assert over.status_code == 422 and over.json()['detail'] == OVER
-    created = post(client, source['run_id'], idempotency_key=key(), operational_limits=LOW, accept_partial_run=True)
-    assert created.status_code == 202, created.text
-    sizing = store.owned('runs', created.json()['run_id'], 1)['sizing']
-    assert sizing['accept_partial_run'] is True and sizing['comparison']['fits'] is False and sizing['estimate']['row_count'] == 878
-
-
-def test_continuation_refusals(client_runtime, monkeypatch):
-    client, store, d, snap, dataset, jobs = client_runtime
-    source = paused_full(store, d, snap, dataset)
-    rid = source['run_id']
-    lease = store.lease(rid)
-    try:
-        held = post(client, rid, idempotency_key=key(), sizing_acknowledged=True)
-    finally:
-        os.close(lease)
-    assert held.status_code == 409 and held.json()['detail'] == 'run_active'
-    store.update_run(rid, 1, {'state': 'queued', 'stage': 'waiting'})
-    queued = post(client, rid, idempotency_key=key(), sizing_acknowledged=True)
-    assert queued.status_code == 409 and queued.json()['detail'] == 'run_active'
-    store.update_run(rid, 1, {'state': 'paused'})
-    # A changed setting is a different setup.
-    drifted = paused_full(store, d, snap, dataset, config('server_all_user_query_rows', batch_max_entries=1))
-    refused = post(client, drifted['run_id'], idempotency_key=key(), sizing_acknowledged=True)
-    assert refused.status_code == 409 and refused.json()['detail'] == 'continuation_identity_drift'
-    with pytest.raises(AuditError, match='continuation_identity_drift'):
-        chain_export.same_setup(drifted, config(), versions())
-    # Nothing left to run.
-    ids = [e.source_row_id for e in dataset.selected][:5]
-    done = store.create_run(1, d['dataset_id'], snap['snapshot_id'], ids, config(), versions(), execution_mode='subset')
-    mark(store, done['run_id'], {r: 'completed' for r in ids}, state='completed')
-    empty = post(client, done['run_id'], idempotency_key=key(), sizing_acknowledged=True)
-    assert empty.status_code == 422 and empty.json()['detail'] == 'No unfinished rows'
-    # A started source has serving and runtime_configuration; that alone is not drift.
-    started(store, rid, model_limit=918)
-    created = post(client, rid, idempotency_key=key(), sizing_acknowledged=True)
-    assert created.status_code == 202, created.text
-    assert client.post('/api/knowledge-coverage/runs/r_' + 'f' * 32 + '/continuations',
-                       json={'idempotency_key': key()}, headers=csrf(client)).status_code == 404
-
-
-def test_continuation_over_the_row_maximum_is_truncated(client_runtime, monkeypatch):
-    client, store, d, snap, dataset, jobs = client_runtime
-    source = paused_full(store, d, snap, dataset)
-    # The maximum only caps the selection; the run settings stay those of the source.
-    settings = load_coverage_settings({})
-    class Capped:
-        max_run_rows = 300
-        def __getattr__(self, name):
-            return getattr(settings, name)
-    monkeypatch.setattr(main.app.state, 'coverage_runtime', (Capped(), store, jobs), raising=False)
-    estimate = client.post(f"/api/knowledge-coverage/runs/{source['run_id']}/continuation-estimate", json={}, headers=csrf(client)).json()
-    assert estimate['row_count'] == 300 and estimate['truncated'] is True and estimate['remaining_rows'] == 578
-    created = post(client, source['run_id'], idempotency_key=key(), sizing_acknowledged=True)
-    assert created.status_code == 202, created.text
-    assert created.json()['truncated'] is True and created.json()['remaining_rows'] == 578
-    assert store.owned('runs', created.json()['run_id'], 1)['selected_row_ids'] == source['selected_row_ids'][40:340]
-
-
-def test_every_run_creating_request_needs_an_idempotency_key(client_runtime):
-    client, store, d, snap, dataset, _ = client_runtime
-    body = {'dataset_id': d['dataset_id'], 'snapshot_id': snap['snapshot_id'], 'row_ids': [dataset.selected[0].source_row_id],
-            'execution_mode': 'pilot', 'entry_budget': 300, 'documents': ['Synthetic_FAQ']}
-    assert client.post('/api/knowledge-coverage/runs', json=body, headers=csrf(client)).status_code == 422
-    first = client.post('/api/knowledge-coverage/runs', json={**body, 'idempotency_key': key()}, headers=csrf(client))
-    second = client.post('/api/knowledge-coverage/runs', json={**body, 'idempotency_key': key()}, headers=csrf(client))
-    assert first.status_code == second.status_code == 202 and first.json()['run_id'] != second.json()['run_id']
-    source = paused_full(store, d, snap, dataset)
-    missing = client.post(f"/api/knowledge-coverage/runs/{source['run_id']}/continuations", json={'sizing_acknowledged': True}, headers=csrf(client))
-    assert missing.status_code == 422
-    assert not any(m.get('continues_run_id') for m in store.list_owned('runs', 1))
-
 
 # 4-6. Chains, the chain export and retention
 def chain_of_three(store, d, snap, old, dataset):
@@ -278,21 +170,6 @@ def test_chain_of_three_runs_exports_each_row_from_the_run_that_finished_it(data
     # Model limits and operational limits differed across the three runs.
     assert len({json.dumps(m['versions']['runtime_configuration'], sort_keys=True) for m in runs}) == 3
 
-
-def test_chain_export_api_is_hash_bound(client_runtime):
-    client, store, d, snap, dataset, _ = client_runtime
-    old = {'settings': {'entry_budget': 300, 'documents': ['Synthetic_FAQ']}}
-    root, c1, c2 = chain_of_three(store, d, snap, old, dataset)
-    base = f"/api/knowledge-coverage/runs/{c1['run_id']}"
-    revision = client.post(base + '/chain-export-revisions', headers=csrf(client))
-    assert revision.status_code == 201, revision.text
-    value = revision.json()
-    assert value['chain_run_ids'] == [root['run_id'], c1['run_id'], c2['run_id']] and value['row_count'] == 918
-    body = client.get(base + '/chain-export?revision_id=' + value['export_revision_id'])
-    manifest = client.get(f"/api/knowledge-coverage/runs/{root['run_id']}/chain-export-manifest?revision_id=" + value['export_revision_id']).json()
-    assert body.status_code == 200 and hashlib.sha256(body.content).hexdigest() == manifest['csv_sha256'] == value['csv_sha256']
-    assert body.headers['X-Coverage-Revision-ID'] == value['export_revision_id']
-    assert client.get(base + '/chain-export?revision_id=rev_' + '0' * 32).status_code == 404
 
 
 def test_bad_chains_are_refused(data918):

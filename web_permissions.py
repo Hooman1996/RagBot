@@ -22,13 +22,11 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "dashboard_viewer": USER_PERMISSIONS | frozenset({"analytics", "kb_page", "kb_read"}),
 }
 
-# Knowledge-coverage audit capabilities by role, added while the audit is enabled.
+# Knowledge-coverage check capabilities by role, added while the check is enabled.
 # Roles not listed here get none.
 COVERAGE_ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
-    "admin": frozenset({"coverage_run_start", "coverage_results_view", "coverage_evidence_view",
-                        "coverage_export_download", "coverage_recommendation_review"}),
-    "dashboard_viewer": frozenset({"coverage_results_view", "coverage_evidence_view",
-                                   "coverage_export_download"}),
+    "admin": frozenset({"coverage_run_start", "coverage_results_view"}),
+    "dashboard_viewer": frozenset({"coverage_results_view"}),
 }
 
 
@@ -37,15 +35,14 @@ def permissions_for(role: str | None) -> frozenset[str]:
 
 
 def permissions_for_user(role: str | None, user_id: int) -> frozenset[str]:
-    """Role privileges plus the role's audit capabilities while the audit is enabled."""
+    """Role privileges plus the role's coverage capabilities while the check is enabled."""
     if role not in ROLE_PERMISSIONS:
         return frozenset()
-    from knowledge_audit.settings import coverage_enabled
-    from knowledge_audit.privacy import AuditError
+    from coverage_check.settings import SettingsError, coverage_enabled
     try:
         if not coverage_enabled():
             return permissions_for(role)
-    except AuditError:
+    except SettingsError:
         return permissions_for(role)
     return permissions_for(role) | COVERAGE_ROLE_CAPABILITIES.get(role, frozenset())
 
@@ -62,49 +59,15 @@ def landing_for(role: str | None) -> str:
 # Each entry is (HTTP method, full path regex, permission). Unknown routes
 # remain unclassified and are denied by the browser middleware.
 ROUTES = (
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/export-options", "coverage_export_download"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/combined-export-preview", "coverage_export_download"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/combined-export-revisions", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/combined-export", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/combined-export-manifest", "coverage_export_download"),
     ("GET", r"/knowledge-coverage", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+/recommendations", "coverage_evidence_view"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/recommendations", "coverage_run_start"),
-    ("GET", r"/api/knowledge-coverage/recommendations/reviewable", "coverage_recommendation_review"),
-    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/review-view", "coverage_recommendation_review"),
-    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+", "coverage_evidence_view"),
-    ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/cancel", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/reviews", "coverage_recommendation_review"),
-    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/metadata/[^/]+", "coverage_evidence_view"),
-    ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/export-revisions", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/export", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/export-manifest", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/calibrations", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/calibrations/[^/]+", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/calibrations/[^/]+/export", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/calibrations/[^/]+/export-manifest", "coverage_export_download"),
-    ("POST", r"/api/knowledge-coverage/datasets", "coverage_run_start"),
-    ("GET", r"/api/knowledge-coverage/datasets", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/datasets/[^/]+/rows", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/snapshots", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/snapshots", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/runs", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/runs/estimate", "coverage_run_start"),
-    ("GET", r"/api/knowledge-coverage/runs", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/results", "coverage_results_view"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+", "coverage_evidence_view"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/export", "coverage_export_download"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/export-revisions", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/export-manifest", "coverage_export_download"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/cancel", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/retry", "coverage_run_start"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/continuation-preview", "coverage_results_view"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/continuation-estimate", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/continuations", "coverage_run_start"),
-    ("POST", r"/api/knowledge-coverage/runs/[^/]+/chain-export-revisions", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/chain-export", "coverage_export_download"),
-    ("GET", r"/api/knowledge-coverage/runs/[^/]+/chain-export-manifest", "coverage_export_download"),
+    ("GET", r"/api/knowledge-coverage/documents", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/checks", "coverage_run_start"),
+    ("GET", r"/api/knowledge-coverage/checks", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/checks/[^/]+", "coverage_results_view"),
+    ("GET", r"/api/knowledge-coverage/checks/[^/]+/rows", "coverage_results_view"),
+    ("POST", r"/api/knowledge-coverage/checks/[^/]+/cancel", "coverage_run_start"),
+    ("POST", r"/api/knowledge-coverage/checks/[^/]+/resume", "coverage_run_start"),
+    ("GET", r"/api/knowledge-coverage/checks/[^/]+/export", "coverage_results_view"),
     ("GET", r"/app", "chat"),
     ("POST", r"/api/query", "chat"),
     ("GET", r"/api/sessions", "sessions"),

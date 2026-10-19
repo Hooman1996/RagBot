@@ -317,20 +317,3 @@ def client_store(tmp_path, setup, monkeypatch):
         yield client, store, d, s
 
 
-def test_estimate_previews_possible_copies_without_text_or_keys(client_store, monkeypatch):
-    client, store, d, s = client_store
-    payload = {'dataset_id': d['dataset_id'], 'snapshot_id': s['snapshot_id'], 'row_ids': [], 'execution_mode': 'full_input',
-               'entry_budget': 300, 'documents': ['Synthetic_FAQ']}
-    response = client.post('/api/knowledge-coverage/runs/estimate', json=payload, headers=csrf(client))
-    assert response.status_code == 200, response.text
-    view = response.json()
-    assert view['dedupe'] == {'policy': dedupe.VERSION, 'candidate_rows': 4, 'distinct_questions': 2, 'possible_copies': 2}
-    assert view['row_count'] == 6 and view['estimate'] is None  # the estimate still counts every row
-    text = json.dumps(view)
-    assert QUESTION not in text and OTHER not in text and PRIOR not in text
-    subset = client.post('/api/knowledge-coverage/runs/estimate', headers=csrf(client),
-                         json={**payload, 'execution_mode': 'subset', 'row_ids': ['row_' + f'{n:032x}' for n in (1, 2, 4)]}).json()
-    assert subset['dedupe']['possible_copies'] == 1
-    off = load_coverage_settings({'KNOWLEDGE_COVERAGE_DEDUPE': 'false'})
-    monkeypatch.setattr(main.app.state, 'coverage_runtime', (off, *main.app.state.coverage_runtime[1:]), raising=False)
-    assert client.post('/api/knowledge-coverage/runs/estimate', json=payload, headers=csrf(client)).json()['dedupe'] is None

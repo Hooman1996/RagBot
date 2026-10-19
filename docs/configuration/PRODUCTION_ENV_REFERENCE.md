@@ -268,37 +268,31 @@ Set all five so every path reaches the same database.
 | `MINIO_BUCKET` | Yes | none | (fill in) | Bucket for source documents. Startup checks that it exists, and the health check uses it. |
 | `MINIO_SECURE` | Tools only | `false` | `False` | TLS for the data-insertion and reset tools only; the app ignores it. `new_architecture/insert_data.py` treats any non-empty value, `False` included, as on. |
 
-### Knowledge-coverage audit (every environment)
+### Knowledge-coverage check (every environment)
 
-The audit is on unless `KNOWLEDGE_COVERAGE_ENABLED=false`, and behaves the same whatever `ENVIRONMENT` says. Access is by role, from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`: `admin` can start runs, view results and evidence, download exports and review recommendations; `dashboard_viewer` can view results and evidence and download exports; every other role has no access. With the flag `false`, none of the other keys are loaded.
+The check (`coverage_check/`) is on unless `KNOWLEDGE_COVERAGE_ENABLED=false`, and behaves the same whatever `ENVIRONMENT` says. Access is by role, from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`: `admin` can start, cancel and resume checks and view every check; `dashboard_viewer` can view every check and download its CSV; every other role has no access. With the flag `false`, every coverage route returns 404, the sidebar link is hidden and none of the other keys are loaded. Any invalid value stops startup with the variable's name.
 
-**Production note.** `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` must point to a persistent directory on the production host. Audit runs use the production vLLM and TEI, paced by `KNOWLEDGE_COVERAGE_PACE_MS` and admitted through the same request limiter as chat.
+**Production note.** `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` must point to a persistent directory on the production host. Checks use the production vLLM and TEI, one question at a time, and every retrieval and model call is admitted through the same request limiter as chat.
+
+The six keys marked "page" are only defaults: the page shows them in editable fields, the server checks every submitted value against the same ranges, and each run stores the values it used.
 
 | Variable | Code default | What it does |
 |---|---|---|
-| `KNOWLEDGE_COVERAGE_ENABLED` | on | Feature flag; on unless `false`. Any value other than `true` or `false` fails with `invalid_coverage_flag`. |
-| `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Store for audit datasets, runs and exports. Must be an absolute path outside the repository and `/tmp`, with no symlinks. |
-| `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Largest dataset upload (1024 to 20971520). |
-| `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Maximum tokens per audit completion (256 to 4096). |
-| `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Token safety margin (32 to 1024). |
-| `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` | `2` | KB entries judged per model call (1 to 5). |
-| `KNOWLEDGE_COVERAGE_MAX_RUN_ROWS` | `10000` | Most rows in one run (5 to 100000). |
-| `KNOWLEDGE_COVERAGE_MAX_COMPLETIONS` | `200` | Model-completion budget per run. |
-| `KNOWLEDGE_COVERAGE_MAX_TOKENS` | `1000000` | Token allowance per run. |
-| `KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS` | `3600` | Wall-clock budget per run. |
-| `KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES` | `3` | Pauses a run after this many failures in a row. |
-| `KNOWLEDGE_COVERAGE_MIN_FREE_BYTES` | `1073741824` | Minimum free disk space in the artifact directory. |
-| `KNOWLEDGE_COVERAGE_PACE_MS` | `500` | Delay between audit calls, to spare the shared GPU. |
-| `KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS` | `20` | Completion cap for recommendation drafting. |
-| `KNOWLEDGE_COVERAGE_RETENTION_DAYS` | `30` | Declared retention. Deletion is manual. |
-| `KNOWLEDGE_COVERAGE_INITIAL_DEPTH` | `150` | First-pass retrieval depth per question. |
-| `KNOWLEDGE_COVERAGE_BROADER_DEPTH` | `300` | Expanded retrieval depth; must be greater than the initial depth. |
-| `KNOWLEDGE_COVERAGE_INITIAL_ENTRIES` | `50` | Entries judged in the first pass; must not exceed the initial depth. |
-| `KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET` | `300` | Most entries judged per question. |
-| `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES` | `2` | Verification passes (1 or 2). |
-| `KNOWLEDGE_COVERAGE_DEDUPE` | `true` | Copies results for repeated questions rather than re-evaluating them. |
-| `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER` | `true` | Requires a second admin, not the run owner, to approve recommendations. |
-| `KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS` | `""` | Comma-separated public bank contacts that the redactor keeps rather than masks. |
+| `KNOWLEDGE_COVERAGE_ENABLED` | `true` | Feature flag; `true` or `false`. |
+| `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Private run folders. Must be an absolute path outside the repository and not under `/tmp`. |
+| `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Largest CSV upload (1024 to 20971520). |
+| `KNOWLEDGE_COVERAGE_MAX_ROWS` | `10000` | Most CSV rows per check (1 to 100000). |
+| `KNOWLEDGE_COVERAGE_DEPTH` | `150` | Page. Retrieval depth: `top_k` and the BM25 and semantic candidate limits (1 to 1000). |
+| `KNOWLEDGE_COVERAGE_KEEP` | `50` | Page. Chunks kept after rerank (1 to `DEPTH`). |
+| `KNOWLEDGE_COVERAGE_BATCH_SIZE` | `5` | Page. Chunks per model call (1 to 20). |
+| `KNOWLEDGE_COVERAGE_BROADER_ENABLED` | `false` | Page. Wider search when a question is not answered. |
+| `KNOWLEDGE_COVERAGE_BROADER_DEPTH` | `200` | Page. Wider-search depth (greater than `DEPTH`, at most 1000). |
+| `KNOWLEDGE_COVERAGE_BROADER_KEEP` | `50` | Page. New chunks judged in the wider search (1 to 1000). |
+| `KNOWLEDGE_COVERAGE_COMBINE_MAX` | `10` | Most partial chunks sent to the one combine call (2 to 20). |
+| `KNOWLEDGE_COVERAGE_CHUNK_MAX_CHARS` | `4000` | Characters of each chunk sent to the model (500 to 20000). |
+| `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `300` | Output tokens per model call (64 to 2048). |
+
+The old audit's keys (`KNOWLEDGE_COVERAGE_TOKEN_MARGIN`, `_BATCH_MAX_ENTRIES`, `_MAX_RUN_ROWS`, `_MAX_COMPLETIONS`, `_MAX_TOKENS`, `_MAX_EXECUTION_SECONDS`, `_MAX_CONSECUTIVE_FAILURES`, `_MIN_FREE_BYTES`, `_PACE_MS`, `_RETENTION_DAYS`, `_INITIAL_DEPTH`, `_INITIAL_ENTRIES`, `_MAX_ENTRY_BUDGET`, `_VERIFICATION_PASSES`, `_DEDUPE`, `_REQUIRE_SECOND_REVIEWER`, `_PUBLIC_CONTACTS` and `KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS`) are read only by `knowledge_audit/`, which the app no longer mounts. They are removed with that code in step 22.
 
 ### Knowledge ingestion tools (command-line only)
 
