@@ -1,5 +1,8 @@
 # RagBot environment-variable reference
 
+For the production hand-over list, verified against the code on `main`, see
+[`PRODUCTION_ENV_REFERENCE.md`](PRODUCTION_ENV_REFERENCE.md).
+
 This is the complete configuration inventory for the repository as audited on
 2026-07-29. It covers the FastAPI application, setup and insertion commands,
 legacy modules, tests, and staging benchmarks. No secret value from `.env` is

@@ -6,6 +6,17 @@ API_HOST="0.0.0.0"
 API_PORT="8080"
 
 # ==========================================
+# WEB LOGIN (browser session for /app, /analytics and /knowledge-base)
+# ==========================================
+# Required: at least 32 random bytes from the secret manager. Startup fails without it.
+WEB_SESSION_SECRET=
+# Required: the exact external HTTPS origin users open, such as https://chat.example.com (no path). Startup fails without it.
+WEB_PUBLIC_ORIGIN=
+WEB_COOKIE_MODE=https
+WEB_ENVIRONMENT=production
+WEB_SESSION_SECONDS=900
+
+# ==========================================
 # VECTOR DATABASE (Qdrant)
 # ==========================================
 QDRANT_URL="http://10.0.1.7:6333"
@@ -77,6 +88,9 @@ TEI_HTTP_CONNECT_TIMEOUT_SECONDS="3"
 TEI_HTTP_READ_TIMEOUT_SECONDS="15"
 TEI_HTTP_WRITE_TIMEOUT_SECONDS="5"
 TEI_HTTP_POOL_TIMEOUT_SECONDS="15"
+# Document-embedding batch for the data-insertion tools; must not exceed TEI_EMBED_MAX_CLIENT_BATCH_SIZE.
+TEI_EMBED_INSERT_BATCH_SIZE=32
+TEI_EMBED_MAX_CLIENT_BATCH_SIZE=50
 
 VLLM_HTTP_MAX_CONNECTIONS="256"
 VLLM_HTTP_MAX_KEEPALIVE_CONNECTIONS="128"
@@ -87,6 +101,14 @@ VLLM_HTTP_WRITE_TIMEOUT_SECONDS="5"
 VLLM_HTTP_POOL_TIMEOUT_SECONDS="15"
 
 QDRANT_CONCURRENCY="32"
+
+# Mass answer (POST /api/mass-answer); rows share the GPU with live chat.
+MASS_ANSWER_ROW_CONCURRENCY=4
+MASS_ANSWER_ROW_TIMEOUT_SECONDS=50
+MASS_ANSWER_DIRECT_MAX_ROWS=20
+MASS_ANSWER_JOB_RETENTION_HOURS=24
+MASS_ANSWER_MAX_ROWS=5000
+MASS_ANSWER_MAX_UPLOAD_MB=10
 
 # ==========================================
 # RETRIEVAL AND GENERATION LIMITS
