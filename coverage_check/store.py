@@ -1,7 +1,8 @@
-"""Private per-run folders: meta.json, input.json and results/<row>.json."""
+"""Private per-run folders: meta.json, input.json, results/<row>.json and chunks/<sha256>.json."""
 from __future__ import annotations
 
 import csv
+import hashlib
 import io
 import json
 import os
@@ -13,6 +14,7 @@ from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
 
 RUN_ID = re.compile(r"^c_[0-9a-f]{32}$")
+CHUNK_KEY = re.compile(r"[0-9a-f]{64}")
 STATES = ("queued", "running", "completed", "cancelled", "interrupted")
 
 
@@ -112,6 +114,7 @@ class CheckStore:
         path = self.root / run_id
         self._mkdir(path)
         self._mkdir(path / "results")
+        self._mkdir(path / "chunks")
         meta = {"run_id": run_id, "created_at": now(), "owner_id": owner_id,
                 "file_name": safe_file_name(file_name), "documents": list(documents),
                 "settings": dict(settings), "state": "queued", "row_count": len(rows)}
@@ -169,3 +172,25 @@ class CheckStore:
         self._write(self._run(run_id) / "results" / f"{int(row)}.json", data)
         with self._lock:
             self._results.setdefault(run_id, {})[int(row)] = data["result"]
+
+    # Chunk text -------------------------------------------------------
+    def write_texts(self, run_id: str, texts: dict[str, str]) -> dict[str, str]:
+        """Chunk id -> sha256; each distinct text is stored once per run."""
+        folder = self._run(run_id) / "chunks"
+        if not folder.is_dir():
+            self._mkdir(folder)
+        keys = {}
+        for chunk_id, text in texts.items():
+            key = hashlib.sha256(str(text).encode("utf-8")).hexdigest()
+            path = folder / f"{key}.json"
+            if not path.is_file():
+                self._write(path, {"text": str(text)})
+            keys[str(chunk_id)] = key
+        return keys
+
+    def chunk_text(self, run_id: str, key) -> str | None:
+        """The stored text, or None for a key that is not 64 lowercase hex or a missing file."""
+        if not isinstance(key, str) or not CHUNK_KEY.fullmatch(key):
+            return None
+        path = self._run(run_id) / "chunks" / f"{key}.json"
+        return self._read(path)["text"] if path.is_file() else None

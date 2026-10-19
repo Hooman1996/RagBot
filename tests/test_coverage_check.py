@@ -8,6 +8,8 @@ import io
 import json
 import os
 import stat
+import threading
+import time
 from dataclasses import dataclass
 from types import SimpleNamespace
 
@@ -24,6 +26,7 @@ from coverage_check.jobs import CheckJobs
 from coverage_check.settings import CoverageSettings, RunSettings, SettingsError, load_settings
 from coverage_check.store import CheckStore, StoreError, parse_csv
 from tests.test_web_auth import csrf, login, setup  # noqa: F401  (fixture)
+from utils.concurrency import AdmissionLimiter
 
 DOCUMENTS = ["Synthetic_FAQ"]
 QUESTION = "  مي‌خوام مساعده بگيرم  "
@@ -363,6 +366,7 @@ def start_payload(**overrides):
 ROUTES = [("GET", "/knowledge-coverage"), ("GET", "/api/knowledge-coverage/documents"),
           ("POST", "/api/knowledge-coverage/checks"), ("GET", "/api/knowledge-coverage/checks"),
           ("GET", "/api/knowledge-coverage/checks/{id}"), ("GET", "/api/knowledge-coverage/checks/{id}/rows"),
+          ("GET", "/api/knowledge-coverage/checks/{id}/rows/1"),
           ("POST", "/api/knowledge-coverage/checks/{id}/cancel"),
           ("POST", "/api/knowledge-coverage/checks/{id}/resume"),
           ("GET", "/api/knowledge-coverage/checks/{id}/export")]
@@ -548,3 +552,278 @@ def test_queue_runs_in_fifo_order_and_cancel_between_rows(tmp_path):
     asyncio.run(scenario())
     assert order == ["a1", "b1"]
     assert store.meta(first)["state"] == "cancelled" and store.meta(second)["state"] == "completed"
+
+
+# Active row, Stop, chunk text ------------------------------------------
+
+def wait_until(predicate, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        time.sleep(0.01)
+    return False
+
+
+async def async_wait_until(predicate, seconds=5.0):
+    deadline = time.monotonic() + seconds
+    while time.monotonic() < deadline:
+        if predicate():
+            return True
+        await asyncio.sleep(0.01)
+    return False
+
+
+def plain_result(result="not_answered", texts=None):
+    return {"result": result, "error_code": None, "model_calls": 0, "duration_ms": 0, "texts": texts or {}}
+
+
+def test_active_row_while_a_row_is_being_checked(api):
+    api.db.users[1]["role"] = "admin"
+    entered, release = threading.Event(), threading.Event()
+
+    class GatedChecker:
+        async def check(self, question):
+            if question == "second synthetic question":
+                entered.set()
+                while not release.is_set():
+                    await asyncio.sleep(0.01)
+            return plain_result()
+
+    jobs = CheckJobs(api.runtime.store, lambda meta: GatedChecker())
+    api.runtime.jobs = jobs
+    body = "id,query\n1,first synthetic question\n2,second synthetic question\n3,third synthetic question\n"
+    payload = start_payload(csv_base64=base64.b64encode(body.encode()).decode())
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        run_id = client.post("/api/knowledge-coverage/checks", json=payload, headers=csrf(client)).json()["run_id"]
+        try:
+            assert entered.wait(5)
+            detail = client.get(f"/api/knowledge-coverage/checks/{run_id}").json()
+            assert detail["active_row"] == 2 and detail["meta"]["active_row"] == 2
+            assert client.get("/api/knowledge-coverage/checks").json()[0]["active_row"] == 2
+            rows = client.get(f"/api/knowledge-coverage/checks/{run_id}/rows").json()["rows"]
+            assert [r["active"] for r in rows] == [False, True, False]
+        finally:
+            release.set()
+        assert wait_until(lambda: client.get(f"/api/knowledge-coverage/checks/{run_id}").json()["meta"]["state"]
+                          == "completed")
+        detail = client.get(f"/api/knowledge-coverage/checks/{run_id}").json()
+        assert detail["active_row"] is None and detail["meta"]["active_row"] is None
+        rows = client.get(f"/api/knowledge-coverage/checks/{run_id}/rows").json()["rows"]
+        assert not any(r["active"] for r in rows)
+        client.portal.call(jobs.aclose)
+
+
+def test_stop_cancels_the_model_call_at_once_and_resume_rechecks_the_row(tmp_path):
+    rows = [{"row": n, "id": str(n), "question": f"synthetic question {n}"} for n in (1, 2, 3)]
+    store, run_id = make_run(tmp_path, rows)
+    limiter = AdmissionLimiter(1, name="coverage-test")
+    gate = SimpleNamespace(block=True, calls=0, entered=None, cancelled_at=None)
+
+    class GatedRag(Rag):
+        async def _completion(self, **kwargs):
+            gate.calls += 1
+            if gate.block and gate.calls == 2:  # row 2's first model call
+                gate.entered.set()
+                try:
+                    await asyncio.Event().wait()
+                except asyncio.CancelledError:
+                    gate.cancelled_at = time.perf_counter()
+                    raise
+            return await super()._completion(**kwargs)
+
+    rag = GatedRag(judge=lambda kind, ids, call: {"verdict": "complete", "chunk_numbers": [1], "note": "synthetic"})
+    service = answering(rag)
+
+    async def scenario():
+        gate.entered = asyncio.Event()
+        jobs = CheckJobs(store, lambda meta: CoverageChecker(service, limiter, DOCUMENTS, meta["settings"]))
+        jobs.enqueue(run_id)
+        await asyncio.wait_for(gate.entered.wait(), 5)
+        assert jobs.active_row(run_id) == 2 and limiter.snapshot().active == 1
+        asked = time.perf_counter()
+        await jobs.cancel(run_id)
+        assert await async_wait_until(lambda: store.meta(run_id)["state"] == "cancelled")
+        assert gate.cancelled_at is not None and gate.cancelled_at - asked < 1.0
+        assert not (store.root / run_id / "results" / "2.json").exists()
+        assert store.result_codes(run_id) == {1: "answered"}
+        snapshot = limiter.snapshot()
+        assert snapshot.active == 0 and snapshot.waiting == 0
+        assert snapshot.acquired_total == snapshot.released_total
+        assert jobs.active_row(run_id) is None
+
+        gate.block = False
+        store.set_state(run_id, "queued")
+        jobs.enqueue(run_id)
+        assert await async_wait_until(lambda: store.meta(run_id)["state"] == "completed")
+        await jobs.aclose()
+
+    asyncio.run(scenario())
+    assert store.result_codes(run_id) == {1: "answered", 2: "answered", 3: "answered"}
+    assert limiter.snapshot().active == 0
+
+
+@pytest.mark.parametrize("stop_pending", [False, True])
+def test_app_shutdown_reraises_and_leaves_the_run_to_recover(tmp_path, stop_pending):
+    rows = [{"row": n, "id": str(n), "question": f"synthetic {n}"} for n in (1, 2, 3)]
+    store, run_id = make_run(tmp_path, rows)
+
+    async def scenario():
+        entered = asyncio.Event()
+
+        class Checker:
+            async def check(self, question):
+                if question == "synthetic 2":
+                    entered.set()
+                    await asyncio.Event().wait()
+                return plain_result()
+
+        jobs = CheckJobs(store, lambda meta: Checker())
+        jobs.enqueue(run_id)
+        await asyncio.wait_for(entered.wait(), 5)
+        worker = jobs._task
+        if stop_pending:
+            jobs._cancel.add(run_id)  # a Stop not yet acted on does not swallow shutdown
+        await jobs.aclose()
+        assert worker.cancelled()
+        assert store.meta(run_id)["state"] == "running"
+        assert jobs.active is None
+        fresh = CheckJobs(CheckStore(tmp_path / "private"), lambda meta: Checker())
+        assert await fresh.recover() == 1
+
+    asyncio.run(scenario())
+    assert store.meta(run_id)["state"] == "interrupted"
+    assert not (store.root / run_id / "results" / "2.json").exists()
+
+
+def test_shared_chunk_text_is_stored_once(tmp_path):
+    rows = [{"row": n, "id": str(n), "question": f"synthetic {n}"} for n in (1, 2)]
+    store, run_id = make_run(tmp_path, rows)
+    shared = "Question: synthetic shared\nAnswer: synthetic shared answer"
+
+    class Checker:
+        async def check(self, question):
+            return plain_result("answered", {"k1": shared, "k-" + question: "synthetic own text " + question})
+
+    async def scenario():
+        jobs = CheckJobs(store, lambda meta: Checker())
+        jobs.enqueue(run_id)
+        assert await async_wait_until(lambda: store.meta(run_id)["state"] == "completed")
+        await jobs.aclose()
+
+    asyncio.run(scenario())
+    folder = store.root / run_id / "chunks"
+    files = sorted(folder.glob("*.json"))
+    assert len(files) == 3
+    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
+    assert all(stat.S_IMODE(f.stat().st_mode) == 0o600 for f in files)
+    first, second = store.result(run_id, 1), store.result(run_id, 2)
+    assert "texts" not in first and shared not in json.dumps(first)
+    assert first["text_keys"]["k1"] == second["text_keys"]["k1"]
+    assert store.chunk_text(run_id, first["text_keys"]["k1"]) == shared
+
+
+def test_checker_saves_exactly_the_text_the_model_saw():
+    long_text = "Question: synthetic question 0\nAnswer: " + "x" * 5000
+
+    class LongRag(Rag):
+        async def retrieve(self, query, top_k=None, **kwargs):
+            items = await super().retrieve(query, top_k=top_k, **kwargs)
+            items[0] = Candidate("k0", long_text)
+            return items
+
+    rag = LongRag(judge=lambda kind, ids, call: {"verdict": "complete", "chunk_numbers": [1], "note": ""})
+    result, _ = check(rag)
+    sent = json.loads(rag.completions[0]["kwargs"]["messages"][1]["content"])["chunks"]
+    assert set(result["texts"]) == {"k0", "k1", "k2", "k3", "k4"}
+    assert result["texts"]["k0"] == sent[0]["text"] == long_text[:4000]
+
+
+def write_detail_run(store):
+    meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                        rows=[{"row": n, "id": str(n), "question": f"synthetic {n}"} for n in (1, 2, 3, 4)])
+    run_id = meta["run_id"]
+    keys = store.write_texts(run_id, {"k1": "synthetic text one", "k2": "synthetic text two",
+                                      "k3": "synthetic text three"})
+    store.write_result(run_id, 1, {
+        "result": "answered_combined", "answer_batch": None, "answer_phase": "initial",
+        "answer_chunk_ids": ["k1", "k3"], "titles": {"k1": "title one", "k2": None, "k3": "title three"},
+        "batches": [
+            {"number": 1, "phase": "initial", "verdict": "partial", "chunk_ids": ["k1", "k2"],
+             "relied_chunk_ids": ["k1"], "note": "synthetic note one"},
+            {"number": 2, "phase": "initial", "verdict": "partial", "chunk_ids": ["k3"],
+             "relied_chunk_ids": ["k3"], "note": "synthetic note two"}],
+        "combines": [{"phase": "initial", "verdict": "complete", "chunk_ids": ["k1", "k3"],
+                      "relied_chunk_ids": ["k1", "k3"], "note": "synthetic combine note"}],
+        "broader_used": False, "model_calls": 3, "duration_ms": 30, "error_code": None,
+        "note": "synthetic combine note", "text_keys": keys})
+    # Written before this step: no text_keys.
+    store.write_result(run_id, 2, {
+        "result": "not_answered", "answer_batch": None, "answer_phase": None, "answer_chunk_ids": [],
+        "titles": {"k1": "title one"}, "combines": [], "broader_used": False, "model_calls": 1,
+        "duration_ms": 5, "error_code": None, "note": "",
+        "batches": [{"number": 1, "phase": "initial", "verdict": "none", "chunk_ids": ["k1"],
+                     "relied_chunk_ids": [], "note": ""}]})
+    # Tampered keys never read outside chunks/.
+    store.write_result(run_id, 3, {
+        "result": "not_answered", "answer_batch": None, "answer_phase": None, "answer_chunk_ids": [],
+        "titles": {}, "combines": [], "broader_used": False, "model_calls": 1, "duration_ms": 5,
+        "error_code": None, "note": "",
+        "text_keys": {"a": "../meta", "b": "../results/1", "c": keys["k1"].upper(), "d": keys["k1"] + "\n"},
+        "batches": [{"number": 1, "phase": "initial", "verdict": "none", "chunk_ids": ["a", "b", "c", "d"],
+                     "relied_chunk_ids": [], "note": ""}]})
+    return run_id, keys
+
+
+def test_row_detail_route_returns_numbered_chunks_text_and_notes(api):
+    api.db.users[1]["role"] = "dashboard_viewer"
+    store = api.runtime.store
+    run_id, keys = write_detail_run(store)
+    base = f"/api/knowledge-coverage/checks/{run_id}/rows"
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = client.get(base + "/1")
+        assert response.status_code == 200 and response.headers["cache-control"] == "no-store"
+        view = response.json()
+        assert view["row"] == 1 and view["result"] == "answered_combined"
+        first, second = view["batches"]
+        assert (first["number"], first["verdict"], first["note"]) == (1, "partial", "synthetic note one")
+        assert first["chunks"] == [
+            {"number": 1, "chunk_id": "k1", "title": "title one", "text": "synthetic text one", "relied": True},
+            {"number": 2, "chunk_id": "k2", "title": None, "text": "synthetic text two", "relied": False}]
+        assert second["chunks"][0]["number"] == 1 and second["note"] == "synthetic note two"
+        combine = view["combines"][0]
+        assert combine["note"] == "synthetic combine note"
+        assert [(c["number"], c["chunk_id"], c["text"], c["relied"]) for c in combine["chunks"]] == \
+            [(1, "k1", "synthetic text one", True), (2, "k3", "synthetic text three", True)]
+
+        old = client.get(base + "/2").json()
+        assert old["batches"][0]["chunks"] == [
+            {"number": 1, "chunk_id": "k1", "title": "title one", "text": None, "relied": False}]
+        tampered = client.get(base + "/3").json()
+        assert [c["text"] for c in tampered["batches"][0]["chunks"]] == [None, None, None, None]
+        waiting = client.get(base + "/4").json()
+        assert waiting["result"] is None and waiting["batches"] == [] and waiting["question"] == "synthetic 4"
+        missing = client.get(base + "/5")
+        assert missing.status_code == 404 and missing.json()["detail"] == "not_found"
+        assert client.get(base + "/0").status_code == 404
+
+        listing = client.get(base).json()
+        assert "synthetic text" not in json.dumps(listing)
+    for bad in ("../meta", "../results/1", keys["k1"].upper(), keys["k1"] + "\n", None, 7):
+        assert store.chunk_text(run_id, bad) is None
+    assert store.chunk_text(run_id, "0" * 64) is None
+
+
+@pytest.mark.parametrize("role", ["user", "dashboard_viewer"])
+def test_row_detail_route_needs_results_access(api, monkeypatch, role):
+    import web_permissions
+    monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES, "dashboard_viewer", frozenset())
+    api.db.users[1]["role"] = role
+    run_id, _ = write_detail_run(api.runtime.store)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = client.get(f"/api/knowledge-coverage/checks/{run_id}/rows/1")
+    assert response.status_code == 403
+    assert "synthetic" not in response.text

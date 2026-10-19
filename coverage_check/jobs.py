@@ -25,8 +25,11 @@ class CheckJobs:
         self._wakeup = asyncio.Event()
         self._cancel: set[str] = set()
         self._task: asyncio.Task | None = None
+        self._row_task: asyncio.Task | None = None
         self._closed = False
         self.current: str | None = None
+        # The row being checked; memory only.
+        self.active: dict | None = None
 
     async def recover(self) -> int:
         """Runs left running or queued by a previous process become interrupted."""
@@ -45,6 +48,10 @@ class CheckJobs:
         if self._task is None or self._task.done():
             self._task = asyncio.create_task(self._worker(), name="coverage-check")
 
+    def active_row(self, run_id: str) -> int | None:
+        active = self.active
+        return active["row"] if active is not None and active["run_id"] == run_id else None
+
     def enqueue(self, run_id: str) -> None:
         self._cancel.discard(run_id)
         self._queue.append(run_id)
@@ -57,7 +64,10 @@ class CheckJobs:
             await run_in_threadpool(self.store.set_state, run_id, "cancelled")
             log_event(logger, "coverage_check_cancelled", {"run_id": run_id, "while": "queued"})
         elif run_id == self.current:
+            # Stops the row at once; it gets no result and is checked again on resume.
             self._cancel.add(run_id)
+            if self._row_task is not None:
+                self._row_task.cancel()
         else:
             # Queued in storage but not in this process's queue; nothing is running it.
             await run_in_threadpool(self.store.set_state, run_id, "cancelled")
@@ -83,6 +93,7 @@ class CheckJobs:
                     pass
             finally:
                 self.current = None
+                self.active = None
                 self._cancel.discard(run_id)
 
     async def _run(self, run_id: str) -> None:
@@ -99,20 +110,40 @@ class CheckJobs:
                                           operation_type="knowledge_coverage_check"):
             checker = self.checker_factory(meta)
             checked = 0
+            stopped_row = None
             for item in rows:
                 if run_id in self._cancel:
                     break
                 if item["row"] in done:
                     continue
-                result = await checker.check(item["question"])
+                self.active = {"run_id": run_id, "row": item["row"]}
+                self._row_task = asyncio.create_task(checker.check(item["question"]),
+                                                     name="coverage-check-row")
+                try:
+                    result = await self._row_task
+                except asyncio.CancelledError:
+                    # Only a Stop for this run; app shutdown cancels this task and is re-raised.
+                    if run_id not in self._cancel or asyncio.current_task().cancelling():
+                        raise
+                    stopped_row = item["row"]
+                    break
+                finally:
+                    self._row_task = None
+                texts = result.pop("texts", None) or {}
+                result["text_keys"] = await run_in_threadpool(self.store.write_texts, run_id, texts)
                 await run_in_threadpool(self.store.write_result, run_id, item["row"], result)
+                self.active = None
                 checked += 1
                 log_event(logger, "coverage_check_row", {
                     "run_id": run_id, "row": item["row"], "result": result["result"],
                     "error_code": result["error_code"], "model_calls": result["model_calls"],
                     "duration_ms": result["duration_ms"]})
+        self.active = None
         state = "cancelled" if run_id in self._cancel else "completed"
         await run_in_threadpool(self.store.set_state, run_id, state)
+        if stopped_row is not None:
+            log_event(logger, "coverage_check_cancelled",
+                      {"run_id": run_id, "while": "running", "row": stopped_row})
         log_event(logger, "coverage_check_finished", {
             "run_id": run_id, "state": state, "checked_rows": checked,
             "duration_ms": round((time.perf_counter() - started) * 1000)})

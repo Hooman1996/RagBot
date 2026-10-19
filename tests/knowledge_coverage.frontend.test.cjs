@@ -14,6 +14,7 @@ class Element {
     getAttribute(key) { return this.attributes[key]; }
     addEventListener(name, listener) { this.listeners[name] = listener; }
     dispatch(name, extra = {}) { return this.listeners[name]?.({ preventDefault() {}, ...extra }); }
+    scrollIntoView(options) { this.document.scrolls.push({ element: this, options }); }
     querySelectorAll(selector) {
         const found = [];
         const visit = n => { if (n.tagName === 'INPUT' && selector === 'input:checked' && n.checked) found.push(n); (n.children || []).forEach(visit); };
@@ -22,9 +23,11 @@ class Element {
 }
 const text = element => (element.textContent || '') + (element.children || []).map(text).join('');
 const find = (element, predicate) => predicate(element) ? element : (element.children || []).map(c => find(c, predicate)).find(Boolean);
+const findAll = (element, predicate, out = []) => { if (predicate(element)) out.push(element); (element.children || []).forEach(c => findAll(c, predicate, out)); return out; };
+const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function dom(canStart) {
-    const document = { ids: new Map(), createElement(tag) { return new Element(tag, this); }, getElementById(id) { return this.ids.get(id); } };
+    const document = { ids: new Map(), scrolls: [], createElement(tag) { return new Element(tag, this); }, getElementById(id) { return this.ids.get(id); } };
     const html = fs.readFileSync('templates/knowledge_coverage.html', 'utf8');
     [...html.matchAll(/id="(coverage[^"]+)"/g)].forEach(m => { document.createElement('div').id = m[1]; });
     document.body = { classList: { values: new Set(), add(v) { this.values.add(v); }, toggle(v) { if (this.values.has(v)) { this.values.delete(v); return false; } this.values.add(v); return true; } } };
@@ -35,20 +38,65 @@ function dom(canStart) {
 }
 
 const RUN = 'c_' + 'a'.repeat(32);
-const FIXTURE = {
-    checks: [{ run_id: RUN, created_at: '2026-01-01T10:00:00.000+00:00', file_name: 'synthetic.csv', row_count: 3, done: 2, state: 'running' }],
-    detail: { meta: { run_id: RUN }, done: 2, counts: { answered: 1, answered_combined: 0, partial: 0, not_answered: 0, chitchat: 1, error: 0, waiting: 1 } },
-    rows: { total: 3, offset: 0, rows: [
-        { row: 1, id: 'q1', question: '<img src=x onerror=alert(1)> سوال آزمایشی', result: 'answered', answer_batch: 2, answer_phase: 'initial',
-          answer_chunks: [{ chunk_id: 'k7', title: 'عنوان آزمایشی هفت' }],
-          batches: [{ number: 1, phase: 'initial', verdict: 'none', chunks: [{ chunk_id: 'k1', title: 'عنوان یک' }, { chunk_id: 'k2', title: null }] },
-                    { number: 2, phase: 'initial', verdict: 'complete', chunks: [{ chunk_id: 'k7', title: 'عنوان آزمایشی هفت' }] }],
-          combines: [], model_calls: 2, duration_ms: 900, error_code: null, note: 'synthetic note' },
-        { row: 2, id: 'q2', question: 'سلام', result: 'chitchat', answer_batch: null, answer_phase: null, answer_chunks: [], batches: [], combines: [], model_calls: 0, duration_ms: 5, error_code: null, note: null },
-        { row: 3, id: 'q3', question: 'منتظر', result: null, answer_batch: null, answer_phase: null, answer_chunks: [], batches: [], combines: [], model_calls: null, duration_ms: null, error_code: null, note: null }
-    ] },
-    documents: { documents: [{ name: 'Synthetic_FAQ', category: 'FAQ' }, { name: 'Synthetic_Policies', category: 'Policy' }], count: 2 }
-};
+const clone = value => JSON.parse(JSON.stringify(value));
+function fixture() {
+    return {
+        checks: [{ run_id: RUN, created_at: '2026-01-01T10:00:00.000+00:00', file_name: 'synthetic.csv', row_count: 3, done: 2, state: 'running', active_row: 3 }],
+        detail: { meta: { run_id: RUN, state: 'running', active_row: 3 }, done: 2, active_row: 3, counts: { answered: 1, answered_combined: 0, partial: 0, not_answered: 0, chitchat: 1, error: 0, waiting: 1 } },
+        rows: { total: 3, offset: 0, rows: [
+            { row: 1, id: 'q1', question: '<img src=x onerror=alert(1)> سوال آزمایشی', result: 'answered', answer_batch: 2, answer_phase: 'initial',
+              answer_chunks: [{ chunk_id: 'k7', title: 'عنوان آزمایشی هفت' }],
+              batches: [{ number: 1, phase: 'initial', verdict: 'none', chunks: [{ chunk_id: 'k1', title: 'عنوان یک' }, { chunk_id: 'k2', title: null }] },
+                        { number: 2, phase: 'initial', verdict: 'complete', chunks: [{ chunk_id: 'k7', title: 'عنوان آزمایشی هفت' }] }],
+              combines: [], model_calls: 2, duration_ms: 900, error_code: null, note: 'synthetic note', active: false },
+            { row: 2, id: 'q2', question: 'سلام', result: 'chitchat', answer_batch: null, answer_phase: null, answer_chunks: [], batches: [], combines: [], model_calls: 0, duration_ms: 5, error_code: null, note: null, active: false },
+            { row: 3, id: 'q3', question: 'منتظر', result: null, answer_batch: null, answer_phase: null, answer_chunks: [], batches: [], combines: [], model_calls: null, duration_ms: null, error_code: null, note: null, active: true }
+        ] },
+        rowDetails: {
+            1: { row: 1, id: 'q1', question: 'سوال', result: 'answered', answer_batch: 2, answer_phase: 'initial', model_calls: 2, duration_ms: 900, error_code: null,
+                 batches: [
+                     { number: 1, phase: 'initial', verdict: 'none', note: 'یادداشت یک', chunks: [
+                         { number: 1, chunk_id: 'k1', title: 'عنوان یک', text: '<b>متن یک</b>', relied: false },
+                         { number: 2, chunk_id: 'k2', title: null, text: null, relied: false }] },
+                     { number: 2, phase: 'initial', verdict: 'complete', note: 'synthetic note', chunks: [
+                         { number: 1, chunk_id: 'k7', title: 'عنوان آزمایشی هفت', text: 'متن هفت', relied: true }] }],
+                 combines: [] }
+        },
+        documents: { documents: [{ name: 'Synthetic_FAQ', category: 'FAQ' }, { name: 'Synthetic_Policies', category: 'Policy' }], count: 2 }
+    };
+}
+
+/* Boots the page against fixture data; returns helpers for the fake server and timers. */
+async function harness(canStart, data = fixture()) {
+    const document = dom(canStart), $ = name => document.getElementById('coverage' + name);
+    const requests = [], timers = [];
+    const saved = { fetch: global.fetch, localStorage: global.localStorage, setInterval: global.setInterval, clearInterval: global.clearInterval };
+    global.localStorage = { getItem() { return null; }, setItem() {} };
+    global.setInterval = fn => { timers.push(fn); return timers.length; }; global.clearInterval = () => {};
+    const server = { data, hold: null };
+    global.fetch = async (url, options = {}) => {
+        requests.push({ url, options });
+        if (server.hold && url.endsWith('/cancel')) await server.hold;
+        const path = url.replace('/api/knowledge-coverage/', '');
+        const d = server.data;
+        let value;
+        const detailMatch = path.match(/\/rows\/(\d+)$/);
+        if (path === 'documents') value = d.documents;
+        else if (path === 'checks' && options.method === 'POST') value = { run_id: RUN };
+        else if (path === 'checks') value = d.checks;
+        else if (detailMatch) value = d.rowDetails[detailMatch[1]];
+        else if (path.includes('/rows?')) value = d.rows;
+        else if (path.endsWith('/cancel')) value = { run_id: RUN, state: 'cancelled' };
+        else value = d.detail;
+        return { ok: true, json: async () => clone(value) };
+    };
+    const booted = await ui.boot(document);
+    await tick();
+    return { document, $, requests, timers, server, booted, restore: () => Object.assign(global, saved) };
+}
+const rowTr = ($, n) => $('Rows').children[(n - 1) * 2];
+const detailTr = ($, n) => $('Rows').children[(n - 1) * 2 + 1];
+const toggleOf = ($, n) => find(rowTr($, n), e => e.tagName === 'BUTTON');
 
 test('"= N batches of M" line', () => {
     assert.equal(ui.batchLine(50, 5), '= 10 batches of 5');
@@ -59,25 +107,8 @@ test('"= N batches of M" line', () => {
 });
 
 test('counts, rows as text, batch detail and the start payload', async () => {
-    const document = dom(true), $ = name => document.getElementById('coverage' + name);
-    const requests = [], timers = [];
-    const saved = { fetch: global.fetch, localStorage: global.localStorage, setInterval: global.setInterval, clearInterval: global.clearInterval };
-    global.localStorage = { getItem() { return null; }, setItem() {} };
-    global.setInterval = fn => { timers.push(fn); return timers.length; }; global.clearInterval = () => {};
-    global.fetch = async (url, options = {}) => {
-        requests.push({ url, options });
-        const path = url.replace('/api/knowledge-coverage/', '');
-        let value;
-        if (path === 'documents') value = FIXTURE.documents;
-        else if (path === 'checks' && options.method === 'POST') value = { run_id: RUN };
-        else if (path === 'checks') value = FIXTURE.checks;
-        else if (path.includes('/rows?')) value = FIXTURE.rows;
-        else value = FIXTURE.detail;
-        return { ok: true, json: async () => value };
-    };
+    const h = await harness(true), { $ } = h;
     try {
-        const booted = await ui.boot(document);
-        await new Promise(resolve => setImmediate(resolve));
         assert.equal($('BatchLine').textContent, '= 10 batches of 5');
         $('BatchSize').value = '10'; $('BatchSize').dispatch('input');
         assert.equal($('BatchLine').textContent, '= 5 batches of 10');
@@ -85,10 +116,12 @@ test('counts, rows as text, batch detail and the start payload', async () => {
         $('Broader').checked = true; $('Broader').dispatch('change');
         assert.equal($('BroaderDepth').disabled, false);
         assert.equal($('Documents').querySelectorAll('input:checked').length, 2);
-        assert.match(text($('Checks')), /synthetic\.csv/); assert.match(text($('Checks')), /2\/3/);
-        assert.equal(timers.length, 1, 'polls while a run is running');
+        assert.match(text($('Checks')), /synthetic\.csv/);
+        assert.match(text($('Checks')), /2\/3 · row 3/, 'progress names the row being checked');
+        assert.match(text($('Checks')), /Stop/); assert.doesNotMatch(text($('Checks')), /Cancel/);
+        assert.equal(h.timers.length, 1, 'polls while a run is running');
 
-        await booted.actions.open(RUN);
+        await h.booted.actions.open(RUN);
         assert.equal($('Results').hidden, false);
         const counts = text($('Counts'));
         ['Answered', 'Answered by combining', 'Partly answered', 'Not answered', 'Chit-chat', 'Error', 'Waiting'].forEach(name => assert.ok(counts.includes(name), name));
@@ -97,33 +130,183 @@ test('counts, rows as text, batch detail and the start payload', async () => {
         assert.equal(rows.children.length, 6, 'each row has a hidden detail row');
         assert.match(text(rows.children[0]), /<img src=x onerror=alert\(1\)>/, 'question rendered as text');
         assert.match(text(rows.children[0]), /عنوان آزمایشی هفت/);
-        const detail = rows.children[1];
+        const detail = detailTr($, 1);
         assert.equal(detail.hidden, true);
-        const toggle = find(rows.children[0], n => n.tagName === 'BUTTON');
-        toggle.dispatch('click');
-        assert.equal(detail.hidden, false); assert.equal(toggle.getAttribute('aria-expanded'), 'true');
-        assert.match(text(detail), /Batch 1 · initial · none/);
-        assert.match(text(detail), /عنوان یک · k2/);
-        assert.match(text(detail), /Batch 2 · initial · complete/);
-        assert.match(text(rows.children[4]), /Waiting/);
+        toggleOf($, 1).dispatch('click'); await tick();
+        assert.equal(detail.hidden, false); assert.equal(toggleOf($, 1).getAttribute('aria-expanded'), 'true');
+        const shown = text(detail);
+        assert.match(shown, /Answer batch 2/); assert.match(shown, /2 model calls/); assert.match(shown, /0\.9 s/);
+        assert.match(shown, /Batch 1 · initial · none/); assert.match(shown, /Batch 2 · initial · complete/);
+        assert.match(shown, /Model note: یادداشت یک/);
+        assert.match(shown, /<b>متن یک<\/b>/, 'chunk text rendered as text');
+        const chunkText = find(detail, e => e.className === 'coverage-chunk-text');
+        assert.equal(chunkText.dir, 'auto');
+        const answer = findAll(detail, e => /coverage-step--answer/.test(e.className));
+        assert.equal(answer.length, 1); assert.match(text(answer[0]), /^Batch 2.*Answer/);
         assert.equal($('Download').getAttribute('href'), '/api/knowledge-coverage/checks/' + RUN + '/export');
 
         const raw = 'id,query\r\n1,سوال\r\n';
         $('File').files = [{ name: 'synthetic.csv', size: Buffer.byteLength(raw), arrayBuffer: async () => new TextEncoder().encode(raw).buffer }];
         $('Depth').value = '150'; $('Keep').value = '50'; $('BroaderDepth').value = '200'; $('BroaderKeep').value = '50';
         await $('Form').dispatch('submit');
-        const post = requests.find(r => r.options.method === 'POST');
+        const post = h.requests.find(r => r.options.method === 'POST');
         const payload = JSON.parse(post.options.body);
         assert.equal(Buffer.from(payload.csv_base64, 'base64').toString('utf8'), raw);
         assert.deepEqual(payload.documents, ['Synthetic_FAQ', 'Synthetic_Policies']);
         assert.deepEqual([payload.depth, payload.keep, payload.batch_size, payload.broader_enabled, payload.broader_depth, payload.broader_keep], [150, 50, 10, true, 200, 50]);
-    } finally { Object.assign(global, saved); }
+    } finally { h.restore(); }
 });
 
-test('batch detail without batches shows the error code', () => {
+test('the active row is highlighted and marked Checking…', async () => {
+    const h = await harness(false), { $ } = h;
+    try {
+        await h.booted.actions.open(RUN);
+        const active = rowTr($, 3);
+        assert.match(active.className, /\bcoverage-row--active\b/);
+        assert.equal(active.getAttribute('aria-current'), 'true');
+        assert.match(text(active), /Checking…/);
+        const badge = find(active, e => e.className === 'coverage-badge');
+        assert.equal(badge.getAttribute('data-tone'), 'active');
+        [1, 2].forEach(n => { assert.doesNotMatch(rowTr($, n).className, /active/); assert.equal(rowTr($, n).getAttribute('aria-current'), undefined); });
+        assert.equal(h.document.scrolls.length, 1, 'scrolled to the active row once');
+        assert.deepEqual(h.document.scrolls[0].options, { block: 'nearest' });
+        await h.timers[0](); await tick();
+        assert.equal(h.document.scrolls.length, 1, 'no scroll when the active row is unchanged');
+    } finally { h.restore(); }
+});
+
+test('an expanded row stays open across polls and its details are fetched once', async () => {
+    const h = await harness(false), { $ } = h;
+    try {
+        await h.booted.actions.open(RUN);
+        toggleOf($, 1).dispatch('click'); await tick();
+        const firstBody = detailTr($, 1).children[0].children[0];
+        const detailFetches = () => h.requests.filter(r => /\/rows\/1$/.test(r.url)).length;
+        assert.equal(detailFetches(), 1);
+        for (const result of ['not_answered', 'partial']) {
+            const data = fixture();
+            data.rows.rows[2] = { ...data.rows.rows[2], result, active: false };
+            data.rows.rows[1] = { ...data.rows.rows[1], note: 'changed ' + result };
+            data.detail.active_row = null; data.detail.meta.active_row = null;
+            h.server.data = { ...data, rowDetails: h.server.data.rowDetails };
+            await h.timers[0](); await tick();
+            assert.match(text(rowTr($, 3)), result === 'partial' ? /Partly answered/ : /Not answered/, 'table redrawn with the new result');
+            assert.equal(detailTr($, 1).hidden, false, 'still expanded after poll');
+            assert.equal(toggleOf($, 1).getAttribute('aria-expanded'), 'true');
+            assert.equal(detailTr($, 1).children[0].children[0], firstBody, 'cached detail element reused');
+        }
+        assert.equal(detailFetches(), 1, 'details fetched once');
+        // A changed result refetches.
+        const data = clone(h.server.data); data.rows.rows[0].result = 'partial';
+        h.server.data = data;
+        await h.timers[0](); await tick();
+        assert.equal(detailFetches(), 2);
+    } finally { h.restore(); }
+});
+
+test('Follow moves to the active row page and is unchecked by details, paging and filter', async () => {
+    const data = fixture();
+    data.detail.active_row = 120; data.rows.total = 200;
+    const h = await harness(false, data), { $ } = h;
+    try {
+        assert.equal($('Follow').checked, true, 'checked by default');
+        await h.booted.actions.open(RUN);
+        const rowsCall = () => h.requests.filter(r => r.url.includes('/rows?')).pop().url;
+        assert.match(rowsCall(), /offset=100&/, 'page holding row 120');
+
+        h.server.data = fixture();
+        await h.timers[0](); await tick();
+        toggleOf($, 1).dispatch('click'); await tick();
+        assert.equal($('Follow').checked, false, 'opening details unchecks Follow');
+
+        $('Follow').checked = true;
+        $('Previous').dispatch('click'); await tick();
+        assert.equal($('Follow').checked, false, 'Previous unchecks Follow');
+        $('Follow').checked = true;
+        $('Next').dispatch('click'); await tick();
+        assert.equal($('Follow').checked, false, 'Next unchecks Follow');
+        $('Follow').checked = true;
+        $('Filter').value = 'answered'; $('Filter').dispatch('change'); await tick();
+        assert.equal($('Follow').checked, false, 'a filter change unchecks Follow');
+        assert.match(rowsCall(), /offset=0&.*result=answered/);
+    } finally { h.restore(); }
+});
+
+test('Stop shows only for a running check and only with coverage_run_start', async () => {
+    const viewer = await harness(false);
+    try {
+        await viewer.booted.actions.open(RUN);
+        assert.equal(viewer.$('Stop').hidden, true, 'hidden without coverage_run_start');
+        assert.doesNotMatch(text(viewer.$('Checks')), /Stop/);
+    } finally { viewer.restore(); }
+
+    const done = fixture(); done.detail.meta.state = 'completed'; done.checks[0].state = 'completed';
+    const finished = await harness(true, done);
+    try {
+        await finished.booted.actions.open(RUN);
+        assert.equal(finished.$('Stop').hidden, true, 'hidden for a finished check');
+    } finally { finished.restore(); }
+
+    const h = await harness(true), { $ } = h;
+    try {
+        await h.booted.actions.open(RUN);
+        assert.equal($('Stop').hidden, false);
+        let release; h.server.hold = new Promise(resolve => { release = resolve; });
+        const pending = $('Stop').dispatch('click');
+        await tick();
+        assert.equal($('Stop').textContent, 'Stopping…'); assert.equal($('Stop').disabled, true);
+        const stopped = fixture(); stopped.detail.meta.state = 'cancelled'; stopped.detail.active_row = null; stopped.checks[0].state = 'cancelled';
+        h.server.data = stopped;
+        release(); await pending;
+        assert.ok(h.requests.some(r => r.url.endsWith('/checks/' + RUN + '/cancel') && r.options.method === 'POST'));
+        assert.equal($('Stop').textContent, 'Stop'); assert.equal($('Stop').disabled, false);
+        assert.equal($('Stop').hidden, true, 'hidden once the check is cancelled');
+    } finally { h.restore(); }
+});
+
+test('relied chunks are marked Used and missing text shows the not-saved message', () => {
     const document = dom(false);
-    const list = ui.batchDetail(document, { batches: [], combines: [], error_code: 'retrieval_failed' });
-    assert.match(text(list), /Error: retrieval_failed/);
-    const combined = ui.batchDetail(document, { batches: [], combines: [{ phase: 'initial', verdict: 'complete', chunks: [{ chunk_id: 'k3', title: 'ترکیب' }] }] });
-    assert.match(text(combined), /Combined · initial · complete/);
+    const view = fixture().rowDetails[1];
+    view.batches[0].chunks[0].text = 'line\n'.repeat(10);
+    const detail = ui.renderDetail(document, view);
+    const chunks = findAll(detail, e => /^coverage-chunk( |$)/.test(e.className));
+    assert.equal(chunks.length, 3);
+    const used = chunks.filter(c => /coverage-chunk--used/.test(c.className));
+    assert.equal(used.length, 1); assert.match(text(used[0]), /^1عنوان آزمایشی هفتUsed/);
+    assert.doesNotMatch(text(chunks[0]), /Used/);
+    assert.match(text(chunks[1]), /Text not saved for this row \(checked before this update\)/);
+    const clipped = find(chunks[0], e => /coverage-chunk-text--clipped/.test(e.className));
+    assert.ok(clipped, 'long text is clipped');
+    const more = find(chunks[0], e => e.tagName === 'BUTTON');
+    assert.equal(more.textContent, 'Show more');
+    more.dispatch('click');
+    assert.equal(more.textContent, 'Show less'); assert.equal(clipped.className, 'coverage-chunk-text');
+
+    const combined = ui.renderDetail(document, { result: 'answered_combined', answer_batch: null, model_calls: 3, duration_ms: 10, batches: [],
+        combines: [{ phase: 'broader', verdict: 'complete', note: '', chunks: [{ number: 1, chunk_id: 'k3', title: 'ترکیب', text: 'متن', relied: true }] }] });
+    assert.match(text(combined), /Combined/); assert.match(text(combined), /Combined · wider · complete/);
+    assert.match(text(combined), /Answer/); assert.match(text(combined), /Used/);
+});
+
+test('error rows show their reason and the legend has six lines', async () => {
+    const document = dom(false);
+    const rows = [
+        { row: 1, id: '', question: 'q', result: 'error', error_code: 'retrieval_failed', answer_chunks: [] },
+        { row: 2, id: '', question: 'q', result: 'error', error_code: 'synthetic_unknown_code', answer_chunks: [] }];
+    const tbody = document.createElement('tbody');
+    ui.renderRows(document, tbody, rows, {});
+    assert.match(text(tbody.children[0]), /ErrorSearch or rerank failed/);
+    assert.match(text(tbody.children[2]), /Errorsynthetic_unknown_code/);
+    assert.deepEqual(Object.keys(ui.ERROR_REASONS), ['empty_query', 'normalization_failed', 'intent_failed', 'retrieval_failed', 'model_failed', 'invalid_model_output']);
+    const detail = ui.renderDetail(document, { result: 'error', error_code: 'model_failed', model_calls: 2, duration_ms: 50, batches: [], combines: [] });
+    assert.match(text(detail), /Model call failed/);
+
+    const h = await harness(false), { $ } = h;
+    try {
+        const legend = $('Legend').children;
+        assert.equal(legend.length, 6);
+        ['Answered', 'Answered by combining', 'Partly answered', 'Not answered', 'Chit-chat', 'Error'].forEach((name, i) => assert.ok(text(legend[i]).startsWith(name), name));
+        assert.match(text(legend[0]), /the batch number is shown/);
+        assert.match(text(legend[4]), /intent classifier/);
+    } finally { h.restore(); }
 });

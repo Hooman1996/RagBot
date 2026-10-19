@@ -125,9 +125,9 @@ def counts_for(meta: dict, codes: dict[int, str]) -> dict:
     return view
 
 
-def run_view(meta: dict, codes: dict[int, str]) -> dict:
+def run_view(meta: dict, codes: dict[int, str], active_row: int | None = None) -> dict:
     keys = ("run_id", "created_at", "owner_id", "file_name", "documents", "settings", "state", "row_count")
-    return {**{key: meta[key] for key in keys}, "done": len(codes)}
+    return {**{key: meta[key] for key in keys}, "done": len(codes), "active_row": active_row}
 
 
 def chunk_view(chunk_ids, titles) -> list[dict]:
@@ -150,6 +150,32 @@ def row_view(item: dict, result: dict | None) -> dict:
         "duration_ms": result.get("duration_ms"), "error_code": result.get("error_code"),
         "note": result.get("note"),
     }
+
+
+def detail_chunks(chunk_ids, relied_ids, titles, texts) -> list[dict]:
+    relied = set(relied_ids or [])
+    return [{"number": number, "chunk_id": chunk_id, "title": titles.get(chunk_id),
+             "text": texts.get(chunk_id), "relied": chunk_id in relied}
+            for number, chunk_id in enumerate(chunk_ids, 1)]
+
+
+def row_detail(store: CheckStore, run_id: str, item: dict, result: dict | None) -> dict:
+    """row_view plus, per batch and combine call, its note and the numbered chunk text the model saw."""
+    view = row_view(item, result)
+    if not result:
+        return view
+    titles = result.get("titles") or {}
+    keys = result.get("text_keys") or {}
+    texts = {}
+    for chunk_id, key in keys.items():
+        texts[chunk_id] = store.chunk_text(run_id, key)
+    view["batches"] = [{"number": b["number"], "phase": b["phase"], "verdict": b["verdict"], "note": b.get("note"),
+                        "chunks": detail_chunks(b["chunk_ids"], b.get("relied_chunk_ids"), titles, texts)}
+                       for b in result.get("batches") or []]
+    view["combines"] = [{"phase": c["phase"], "verdict": c["verdict"], "note": c.get("note"),
+                         "chunks": detail_chunks(c["chunk_ids"], c.get("relied_chunk_ids"), titles, texts)}
+                        for c in result.get("combines") or []]
+    return view
 
 
 def formula_safe(value) -> str:
@@ -235,22 +261,26 @@ async def start_check(request: Request, user: WebUser):
 @router.get("/api/knowledge-coverage/checks")
 async def list_checks(request: Request, user: WebUser):
     require(user, "coverage_results_view")
-    store = runtime_of(request).store
+    runtime = runtime_of(request)
+    store = runtime.store
     metas = await store_call(store.list)
     views = []
     for meta in metas:
-        views.append(run_view(meta, await store_call(store.result_codes, meta["run_id"])))
+        codes = await store_call(store.result_codes, meta["run_id"])
+        views.append(run_view(meta, codes, runtime.jobs.active_row(meta["run_id"])))
     return JSONResponse(views, headers=NO_STORE)
 
 
 @router.get("/api/knowledge-coverage/checks/{run_id}")
 async def get_check(run_id: str, request: Request, user: WebUser):
     require(user, "coverage_results_view")
-    store = runtime_of(request).store
+    runtime = runtime_of(request)
+    store = runtime.store
     meta = await store_call(store.meta, run_id)
     codes = await store_call(store.result_codes, run_id)
-    return JSONResponse({"meta": run_view(meta, codes), "counts": counts_for(meta, codes), "done": len(codes)},
-                        headers=NO_STORE)
+    active_row = runtime.jobs.active_row(run_id)
+    return JSONResponse({"meta": run_view(meta, codes, active_row), "counts": counts_for(meta, codes),
+                         "done": len(codes), "active_row": active_row}, headers=NO_STORE)
 
 
 @router.get("/api/knowledge-coverage/checks/{run_id}/rows")
@@ -261,9 +291,11 @@ async def check_rows(run_id: str, request: Request, user: WebUser,
     require(user, "coverage_results_view")
     if result is not None and result not in (*RESULTS, "waiting"):
         raise HTTPException(422, detail="invalid_result_filter")
-    store = runtime_of(request).store
+    runtime = runtime_of(request)
+    store = runtime.store
     items = await store_call(store.inputs, run_id)
     codes = await store_call(store.result_codes, run_id)
+    active_row = runtime.jobs.active_row(run_id)
     if result == "waiting":
         items = [item for item in items if item["row"] not in codes]
     elif result is not None:
@@ -272,8 +304,20 @@ async def check_rows(run_id: str, request: Request, user: WebUser,
     rows = []
     for item in page_items:
         found = await store_call(store.result, run_id, item["row"]) if item["row"] in codes else None
-        rows.append(row_view(item, found))
+        rows.append({**row_view(item, found), "active": item["row"] == active_row})
     return JSONResponse({"total": len(items), "offset": offset, "rows": rows}, headers=NO_STORE)
+
+
+@router.get("/api/knowledge-coverage/checks/{run_id}/rows/{row}")
+async def check_row(run_id: str, row: int, request: Request, user: WebUser):
+    require(user, "coverage_results_view")
+    store = runtime_of(request).store
+    items = await store_call(store.inputs, run_id)
+    item = next((item for item in items if item["row"] == row), None)
+    if item is None:
+        raise HTTPException(404, detail="not_found")
+    found = await store_call(store.result, run_id, row)
+    return JSONResponse(await store_call(row_detail, store, run_id, item, found), headers=NO_STORE)
 
 
 @router.post("/api/knowledge-coverage/checks/{run_id}/cancel")

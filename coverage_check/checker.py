@@ -47,6 +47,7 @@ class _Row:
     batches: list[dict] = field(default_factory=list)
     combines: list[dict] = field(default_factory=list)
     titles: dict[str, str | None] = field(default_factory=dict)
+    texts: dict[str, str] = field(default_factory=dict)
     broader_used: bool = False
     retrievals: int = 0
     model_calls: int = 0
@@ -96,7 +97,7 @@ class CoverageChecker:
             "combines": row.combines, "titles": row.titles, "broader_used": row.broader_used,
             "retrievals": row.retrievals, "model_calls": row.model_calls,
             "duration_ms": round((time.perf_counter() - started) * 1000),
-            "error_code": row.error_code, "note": row.note,
+            "error_code": row.error_code, "note": row.note, "texts": row.texts,
         }
         return result
 
@@ -212,6 +213,9 @@ class CoverageChecker:
         """One model call, retried once on failure or an invalid reply."""
         settings = self.settings
         msgs = prompts.messages(kind, query, [c.content for c in chunks], settings["chunk_max_chars"])
+        # Exactly the text the model sees; the job stores it in the run's private folder.
+        for chunk in chunks:
+            row.texts[chunk.chunk_id] = chunk.content[:settings["chunk_max_chars"]]
 
         async def operation():
             return await self.rag._completion(
