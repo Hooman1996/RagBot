@@ -9,7 +9,7 @@ from knowledge_audit.model import AuditModel
 from knowledge_audit.preparation import QueryPreparer
 from knowledge_audit.pipeline import CoverageEvaluator
 from knowledge_audit.retrieval import AuditRetrieval
-from knowledge_audit.runtime import confirm_staging
+from knowledge_audit.runtime import confirm_live_run, require_configured
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.audit_dispatch import audit_dispatch
@@ -42,15 +42,9 @@ async def build_engine(store, meta, settings, *, answering, runner, limiter):
     if any(meta["settings"].get(k) != v for k, v in settings.manifest().items() if k!="operational_limits"):
         from knowledge_audit.privacy import AuditError
         raise AuditError("audit_runtime_identity_drift")
-    confirm_staging(confirmed=True, model=True, snapshot=True)
-    # Confirm the reranker too; it was not needed by A1's preparation guard.
-    from dotenv import dotenv_values
-    from knowledge_audit.runtime import ROOT
-    from urllib.parse import urlsplit
-    target = os.environ.get("TEI_RERANK_URL", "")
-    if target != dotenv_values(ROOT / ".env").get("TEI_RERANK_URL") or urlsplit(target).hostname not in {"localhost", "127.0.0.1", "::1"}:
-        from knowledge_audit.privacy import AuditError
-        raise AuditError("unconfirmed_service_target")
+    confirm_live_run(confirmed=True, model=True, snapshot=True)
+    # Require the reranker too; it was not needed by A1's preparation guard.
+    require_configured("TEI_RERANK_URL")
     await _require_reranker_capability(answering.agent_service.rag_system.search_engine)
     dataset, redactor = await runner.run(store.dataset, meta["dataset_id"], meta["owner_id"])
     snapshot = await runner.run(store.snapshot, meta["snapshot_id"], meta["owner_id"])

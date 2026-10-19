@@ -16,7 +16,7 @@ from knowledge_audit.execution import continuation_counts, continuation_rows
 from knowledge_audit.jobs import CoverageJobs, versions
 from knowledge_audit.privacy import AuditError
 from knowledge_audit.retention import plan_cleanup
-from knowledge_audit.settings import CAPABILITIES, load_coverage_settings
+from knowledge_audit.settings import load_coverage_settings
 from tests.test_answering_service import ImmediateRunner
 from tests.test_coverage_sizing import LOW, config, reference
 from tests.test_knowledge_coverage_access_jobs import coverage_staging
@@ -93,7 +93,6 @@ def client_runtime(data918, setup, monkeypatch):
     settings = load_coverage_settings({})
     monkeypatch.setattr(main.app.state, 'coverage_runtime', (settings, store, jobs), raising=False)
     setup.users[1]['role'] = 'admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS', json.dumps({'1': sorted(CAPABILITIES)}))
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, 'alice')
         yield client, store, d, snap, dataset, jobs

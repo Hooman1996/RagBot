@@ -6,7 +6,6 @@ import hashlib
 import os
 from pathlib import Path
 import subprocess
-from urllib.parse import urlsplit
 
 from knowledge_audit.privacy import AuditError
 from knowledge_audit.settings import require_coverage_enabled
@@ -14,23 +13,22 @@ from knowledge_audit.settings import require_coverage_enabled
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def confirm_staging(*, confirmed: bool, model: bool = False, snapshot: bool = False) -> None:
-    """Restrict CLI live work to the documented confirmed local staging targets.
+def require_configured(*keys: str) -> None:
+    """Each live service the audit uses must be configured in the process environment."""
+    if any(not os.environ.get(key, "").strip() for key in keys):
+        raise AuditError("audit_service_unconfigured")
 
-    Historical reports establish this root .env's development targets. Explicit
-    assertion alone never permits arbitrary remote production configuration.
+
+def confirm_live_run(*, confirmed: bool, model: bool = False, snapshot: bool = False) -> None:
+    """Require an explicit confirmation and configured endpoints before live audit work.
+
+    The configured endpoints are used as they are, in every environment.
     """
     require_coverage_enabled()
-    from dotenv import dotenv_values
     if not confirmed:
-        raise AuditError("staging_confirmation_required")
-    file_values = dotenv_values(ROOT / ".env")
-    keys = (["TEI_EMBED_URL", "VLLM_URL"] if model else []) + (["POSTGRES_HOST", "QDRANT_HOST"] if snapshot else [])
-    for key in keys:
-        value = os.environ.get(key, "")
-        host = urlsplit(value).hostname if "URL" in key else value
-        if value != file_values.get(key) or host not in {"127.0.0.1", "localhost", "::1"}:
-            raise AuditError("unconfirmed_service_target")
+        raise AuditError("live_run_confirmation_required")
+    require_configured(*(["TEI_EMBED_URL", "VLLM_URL"] if model else []),
+                       *(["POSTGRES_HOST", "QDRANT_HOST"] if snapshot else []))
 
 
 def code_identity() -> dict:

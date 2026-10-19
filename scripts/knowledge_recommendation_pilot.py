@@ -14,7 +14,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 
 async def run(confirmed):
     logging.disable(logging.CRITICAL)
-    from knowledge_audit.runtime import confirm_staging,live_components,code_identity,serving_identity,configuration_identity
+    from knowledge_audit.runtime import confirm_live_run,live_components,code_identity,serving_identity,configuration_identity
     from knowledge_audit.settings import load_coverage_settings
     from knowledge_audit.store import CoverageStore,now
     from knowledge_audit.privacy import Redactor,private_directory,private_json,AuditError
@@ -32,7 +32,7 @@ async def run(confirmed):
     from utils.concurrency import BoundedBlockingRunner,AdmissionLimiter
     from utils.performance_config import PERFORMANCE_SETTINGS
     import httpx
-    confirm_staging(confirmed=confirmed,model=True)
+    confirm_live_run(confirmed=confirmed,model=True)
     settings=load_coverage_settings();store=CoverageStore(settings.artifact_dir)
     pilot_root=private_directory(store.root/'recommendation-pilots');lease=store.global_lease();runner=BoundedBlockingRunner(1)
     rag=None;budget=None;meta=None;usage=[];wire=0;started=time.perf_counter()
@@ -142,8 +142,8 @@ def main():
         print(str(error), file=sys.stderr)
         return 2
     import argparse
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--confirmed-staging',action='store_true')
-    try:asyncio.run(run(parser.parse_args().confirmed_staging))
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--confirmed',action='store_true',dest='confirmed',help='confirm live audit work against the configured services');parser.add_argument('--confirmed-staging',action='store_true',dest='confirmed',help=argparse.SUPPRESS)
+    try:asyncio.run(run(parser.parse_args().confirmed))
     except AuditError as error:
         print(str(error), file=sys.stderr)
         return 2

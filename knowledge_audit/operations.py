@@ -11,7 +11,7 @@ import time
 from knowledge_audit.privacy import AuditError
 from utils.read_only_audit import canonical_sha256
 from knowledge_audit.failures import category, send_state, TRANSPORT_CODES, VALIDATION_CODES
-SAFE_ERRORS=TRANSPORT_CODES|VALIDATION_CODES|{"coverage_disabled", "coverage_enabled_in_production", "none","cancellation","audit_failed","schema_validation","output_length","citation_validation","semantic_validation"}
+SAFE_ERRORS=TRANSPORT_CODES|VALIDATION_CODES|{"coverage_disabled", "audit_service_unconfigured", "none","cancellation","audit_failed","schema_validation","output_length","citation_validation","semantic_validation"}
 
 VERSION='audit-operations-2'
 

@@ -96,7 +96,8 @@ incomplete runs as full-dataset evaluation. Evidence-visible and restricted
 projections have separate protected revisions; revoked evidence permission cannot
 read the old privileged projection.
 
-Default deny remains `KNOWLEDGE_COVERAGE_ACCESS_GRANTS={}`. No real account was
+Default deny remained in force through the per-user grant map at A2.1 (replaced
+by role-based access on 2026-10-19, step [17]). No real account was
 granted access. All 16 page/API routes retain authentication, ownership, capability
 and CSRF enforcement where applicable; the new export-revision POST requires
 export/results capabilities and CSRF. Query details show explicit verified/apparent

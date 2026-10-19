@@ -9,7 +9,7 @@ import pytest
 import main
 import kb_manager
 from tests.test_web_auth import setup, login, csrf
-from web_permissions import PERMISSIONS, ROLE_PERMISSIONS, route_permission
+from web_permissions import COVERAGE_ROLE_CAPABILITIES, PERMISSIONS, ROLE_PERMISSIONS, route_permission
 
 from tests.test_knowledge_coverage_access_jobs import coverage_staging
 
@@ -133,7 +133,7 @@ def test_role_by_api_route_matrix(setup, monkeypatch, role):
     setup.users[1]['role'] = role
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, 'alice')
-        grants = ROLE_PERMISSIONS.get(role, frozenset())
+        grants = ROLE_PERMISSIONS.get(role, frozenset()) | COVERAGE_ROLE_CAPABILITIES.get(role, frozenset())
         for (method, path), permission in EXPECTED.items():
             if not path.startswith(('/api/', '/knowledge-base/api/')):
                 continue
@@ -159,7 +159,8 @@ def test_login_landing_pages_and_forged_links(setup, role, landing, allowed_page
         response = login(client, 'alice')
         assert response.json()['landing_path'] == landing
         assert response.json()['user']['landing_path'] == landing
-        assert client.get('/api/auth/me').json()['user']['permissions'] == sorted(ROLE_PERMISSIONS.get(role, ()))
+        assert client.get('/api/auth/me').json()['user']['permissions'] == sorted(
+            ROLE_PERMISSIONS.get(role, frozenset()) | COVERAGE_ROLE_CAPABILITIES.get(role, frozenset()))
         assert client.get(allowed_page).status_code == 200
         if forbidden_page:
             forbidden = client.get(forbidden_page, follow_redirects=False)
@@ -244,7 +245,7 @@ def test_dashboard_viewer_exact_grants_navigation_and_read_only_template(setup):
         login(client, 'alice')
         me = client.get('/api/auth/me').json()['user']
         assert me['role'] == 'dashboard_viewer'
-        assert me['permissions'] == sorted(expected)
+        assert me['permissions'] == sorted(expected | COVERAGE_ROLE_CAPABILITIES['dashboard_viewer'])
         assert me['landing_path'] == '/app'
         for page, links in (('/app', ('/analytics', '/knowledge-base')),
                             ('/analytics', ('/app', '/knowledge-base')),

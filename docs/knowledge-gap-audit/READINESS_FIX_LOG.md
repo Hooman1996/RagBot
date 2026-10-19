@@ -2039,3 +2039,151 @@ exit 0
 ```
 
 The pytest count equals the main-checkout run. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. These results were then added to this log and to `RELEASE_READINESS.md`, and the commit was amended; the amendment changes only those two files.
+
+## [17] Role-based knowledge-coverage access, same in every environment
+
+### Owner decision
+
+On 2026-10-19 the owner decided that the audit is role-based and behaves the same in development, staging and production. Access comes from roles that already exist, not from per-user grants, and no audit code reads `ENVIRONMENT`. The audit is on unless `KNOWLEDGE_COVERAGE_ENABLED=false`.
+
+### Role table
+
+`COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`, next to `ROLE_PERMISSIONS`. `permissions_for_user(role, user_id)` returns `permissions_for(role) | COVERAGE_ROLE_CAPABILITIES.get(role, ∅)` while `coverage_enabled()`, and `permissions_for(role)` when it is off or the flag is invalid. The signature is unchanged; `user_id` is no longer used.
+
+| Role | Capabilities |
+|---|---|
+| `admin` | `coverage_run_start`, `coverage_results_view`, `coverage_evidence_view`, `coverage_export_download`, `coverage_recommendation_review` |
+| `dashboard_viewer` | `coverage_results_view`, `coverage_evidence_view`, `coverage_export_download` |
+| every other role | none |
+
+Unchanged: the second-reviewer rule (an owner cannot approve their own run's recommendations, so approval now needs a second admin), the `audit_access_revoked` check, and every `require(...)` capability check in the API.
+
+### Changes
+
+- **Gate.** `knowledge_audit.settings.coverage_enabled` returns true when `KNOWLEDGE_COVERAGE_ENABLED` is unset, `true`/`false` (stripped, case-insensitive) as given, and raises `invalid_coverage_flag` for any other value, the empty string included. `require_coverage_enabled` still raises `coverage_disabled` when it is off. `mount(app)` includes the router whenever `coverage_enabled()` is true.
+- **Live-run guard.** `knowledge_audit.runtime.confirm_staging` is now `confirm_live_run(*, confirmed, model=False, snapshot=False)`. It keeps `require_coverage_enabled()` and the explicit confirmation, and replaces the loopback and `.env` comparison with a non-empty check of `TEI_EMBED_URL`/`VLLM_URL` (model) and `POSTGRES_HOST`/`QDRANT_HOST` (snapshot) through a new `require_configured(*keys)`. `build_engine` in `knowledge_audit/service.py` checks `TEI_RERANK_URL` the same way. Callers updated: `knowledge_audit/api.py` (snapshot capture), `knowledge_audit/recommendation_jobs.py`, `knowledge_audit/service.py` and the seven audit CLIs.
+- **CLIs.** `scripts/knowledge_audit_prepare.py`, `knowledge_coverage_calibrate.py`, `knowledge_coverage_diagnose.py`, `knowledge_coverage_pilot.py`, `knowledge_coverage_resources.py`, `knowledge_recommendation_pilot.py` and `knowledge_recommendation_revalidate.py` document `--confirmed`; `--confirmed-staging` stays as a hidden alias (`help=argparse.SUPPRESS`, same `dest="confirmed"`). `knowledge_audit_p0_baseline.py`, `knowledge_coverage_cleanup.py` and `knowledge_coverage_stability_report.py` had no confirmation flag.
+- **Manifest.** `CoverageSettings.manifest()` replaces `access_grants_sha256` with `"access_policy": {"version": "coverage-roles-1", "roles_sha256": canonical_sha256(<COVERAGE_ROLE_CAPABILITIES with sorted lists>)}`, and `"schema"` is `coverage-settings-7`. Runs created before this change report `audit_runtime_identity_drift` on resume. The owner accepted that.
+- **Validator.** `scripts/validate_environment.py`: the grants spec and the production relationship check are removed; `KNOWLEDGE_COVERAGE_ENABLED` is `kind="bool", default="true", allowed=("true", "false")`; the `ENVIRONMENT` spec no longer names the coverage gate.
+- **Env files.** `.env`, `env.example`, `Production_ENV.example` and `.env.example.generated`: the grants line and its comment are removed, `KNOWLEDGE_COVERAGE_ENABLED=true` has the new comment, and the second-reviewer comment names admins. In `.env` only these lines changed: `KNOWLEDGE_COVERAGE_ENABLED` (comment; the value was already `true`), `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` (removed) and `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER` (comment). `ENVIRONMENT` is unchanged. `Production_ENV` was skipped, because the owner is recreating it. `env.review.example` also lost its grants line, because the required `git grep` covers it.
+- **Docs.** `AGENTS.md` (the two coverage-gate sentences only), `docs/configuration/PRODUCTION_ENV_REFERENCE.md` (the flag row leaves "must be exactly these"; the `ENVIRONMENT` row and bullets no longer mention the audit; the audit section is "every environment", with the role list and the production note on `KNOWLEDGE_COVERAGE_ARTIFACT_DIR`, the production vLLM and TEI, `KNOWLEDGE_COVERAGE_PACE_MS` and the shared request limiter), `docs/configuration/ENVIRONMENT_VARIABLES.md`, and under `docs/knowledge-gap-audit/`: `RELEASE_READINESS.md` (dated note; both Gate C flag items and checklist step 17 withdrawn; step 2 now asks for a second admin), `DASHBOARD_AND_CSV_CONTRACT.md`, `OPERATIONAL_RUNBOOK.md` and `A2_1_CORRECTION_REPORT.md`. Older reports that describe how past runs were guarded are left as history.
+- **Release-evaluation tools.** `scripts/_staging_guard.py`, `scripts/retrieval_eval.py` and `scripts/answer_quality_eval.py` stay staging-only. They are release-test tools, and `AGENTS.md` forbids connectivity tests against production. The one approved exception is below.
+
+### Removed keys and codes
+
+- Env key `KNOWLEDGE_COVERAGE_ACCESS_GRANTS`: `_coverage_grants` in `web_permissions.py`, `CoverageSettings.access_grants` and `grants_for` in `settings.py`, its `SPECS` entry, and all env-file lines.
+- `coverage_enabled_in_production`: the raise, and its entries in `SAFE_API_CODES`, `ERROR_CODES`, `SAFE_ERRORS`, the `jobs.py` interrupt list and the validator relationship check. `static/js/*.js` had no label for it.
+- `invalid_coverage_access_grants`, from `INTERNAL_ONLY` in `tests/test_coverage_code_registry.py`.
+- `unconfirmed_service_target`: nothing raises it any more, so it is gone from `INTERNAL_ONLY`.
+- `staging_confirmation_required`, renamed to `live_run_confirmation_required`. Other scripts that raise a `RuntimeError` with the same text (`kb_taxonomy_p4_compare.py`, `production_repair_acceptance.py`) are not audit code and are unchanged.
+
+### New codes
+
+- `invalid_coverage_flag`: `SAFE_API_CODES`.
+- `audit_service_unconfigured`: `SAFE_API_CODES`, `ERROR_CODES`, `SAFE_ERRORS` and the `jobs.py` interrupt list, where `coverage_enabled_in_production` was, so a run that fails for a missing endpoint records the reason.
+- `live_run_confirmation_required`: `INTERNAL_ONLY`. Only a CLI run without `--confirmed` raises it, and the CLI prints it.
+
+### Decisions not covered by the command
+
+The person running this step approved these:
+
+1. **`scripts/_staging_guard.py` docstring.** The required `git grep` matched its docstring "Same comparison as knowledge_audit.runtime.confirm_staging, plus ENVIRONMENT." Only that docstring changed; it now describes the check itself. The guard's behavior is unchanged.
+2. **`scripts/knowledge_coverage_resources.py`.** It had its own `TEI_RERANK_URL` loopback and `.env` check. It now uses the same non-empty `require_configured` check, so `unconfirmed_service_target` could be deleted.
+
+Also recorded, with no question asked:
+
+3. **Partial capability sets in tests.** No real role has results view and export without evidence view. Four tests checked that restricted projection through grants, so they now narrow `COVERAGE_ROLE_CAPABILITIES['admin']` with `monkeypatch.setitem`. With the real roles, the restricted-export path is not reachable today.
+4. **Empty flag value.** `KNOWLEDGE_COVERAGE_ENABLED=` (empty) raises `invalid_coverage_flag`, as the command says for any value other than `true` or `false`. Only an unset key means on.
+
+### Changed existing tests
+
+| Test | Change |
+|---|---|
+| `tests/test_coverage_deployment_gate.py::test_coverage_enabled_truth_table` | New table: unset and `true` are on in every environment; `false` is off; `1` and `""` raise `invalid_coverage_flag`. |
+| `::test_production_refuses_enabled_audit` → `::test_production_runs_enabled_audit` | Renamed; with `ENVIRONMENT=production` the flag is on and `require_coverage_enabled` passes. |
+| `::test_mount_only_on_staging` → `::test_mount_follows_flag_in_every_environment` | Renamed; mounts in staging, production and development when the flag is unset or `true`, and not when it is `false`. |
+| `::test_entry_points_fail_before_work` | Parameter `confirm_staging` → `confirm_live_run`. |
+| `::test_permissions_cached_and_deny_by_default` → `::test_permissions_from_role_without_loading_settings` | The grant cache is gone. Asserts the admin's role capabilities, with none for `false` or an invalid flag, and that settings are never loaded. |
+| `::test_validator_rejects_enabled_production` → `::test_validator_accepts_enabled_production` | The validator accepts `true`/`false` under production and flags `1`/`maybe` as critical. |
+| `tests/test_coverage_order_verification.py` helper `patched_engine_inputs` (used by `::test_build_engine_uses_the_pinned_pass_count`) | Patches `confirm_live_run`; the `.env` reranker-target patch is gone. This is the loopback and `.env` target test. |
+| `tests/test_coverage_code_registry.py` `INTERNAL_ONLY` | `live_run_confirmation_required` replaces `staging_confirmation_required`; `unconfirmed_service_target` and `invalid_coverage_access_grants` removed. |
+| `tests/test_coverage_manifest_versions.py::test_manifest_schema_and_policy_keys` | `coverage-settings-7`; `access_policy` expected; `access_grants_sha256` absent. |
+| `tests/test_coverage_depth_settings.py::test_defaults_keep_the_settings_manifest_unchanged` | `coverage-settings-7`. |
+| `tests/test_coverage_depth_settings.py::test_api_entry_budget_defaults_to_and_is_bounded_by_configured_maximum` | Grants removed; the admin role grants access. |
+| `tests/test_coverage_continuation.py` fixture `client_runtime`, `tests/test_coverage_dedupe.py` fixture `client_store`, `tests/test_coverage_sizing.py` fixture `client_runtime` | Grants removed; the admin role grants access. |
+| `tests/test_coverage_sizing.py::test_estimate_endpoint_shape_and_permissions` | No run-start is now `dashboard_viewer`; the test takes the `setup` fixture. |
+| `tests/test_knowledge_coverage_access_jobs.py::test_default_deny_real_auth_owner_csrf_and_restricted_export` | Alice is `user` (403), then `admin` (200); bob is `admin`; restricted export via the narrowed role map. |
+| `tests/test_knowledge_coverage_access_jobs.py::test_upload_mapping_no_arbitrary_paths_and_full_input_pilot_export` | Grants removed. |
+| `tests/test_knowledge_coverage_access_jobs.py::test_configuration_validation_and_propagation` | The `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` parameter case is removed, because the key no longer exists; the other five cases are unchanged. |
+| `tests/test_knowledge_coverage_calibration.py::test_calibration_api_default_deny_ownership_export_projection` | `user` then `admin`; partial sets via the narrowed role map; bob is `admin`. |
+| `tests/test_knowledge_coverage_corrections.py::test_immutable_export_pair_survives_row_mutation_and_repeated_downloads` | Grants removed; restricted case via the narrowed role map. |
+| `tests/test_knowledge_execution_recovery.py::test_full_mode_api_idempotency_csrf_owner_and_revoked_grant` | Two admins; revocation is now a role change to `user`. |
+| `tests/test_knowledge_recommendations.py::test_owned_csrf_review_capability_and_pinned_downloads` | Two admins; the no-review check is the owner as `dashboard_viewer`. |
+| `tests/test_knowledge_run_export.py::test_run_export_api_owner_csrf_explicit_review_and_permission_revocation` | Two admins; partial sets via the narrowed role map, restored before bob. |
+| `tests/test_web_permissions.py::test_role_by_api_route_matrix`, `::test_login_landing_pages_and_forged_links`, `::test_dashboard_viewer_exact_grants_navigation_and_read_only_template` | Expected permissions are now `ROLE_PERMISSIONS | COVERAGE_ROLE_CAPABILITIES` for the role, because the audit is on by default. These failed in the first full run (below). `ROLE_PERMISSIONS` itself is unchanged and still asserted. |
+| `tests/knowledge_coverage_browser_app.py`, `tests/knowledge_recommendation_browser_app.py` | Grants env removed; both synthetic accounts are admins, so the reviewer is a second admin. The browser harnesses were not run (not required). |
+
+No existing test was deleted.
+
+### Tests added
+
+`tests/test_coverage_role_access.py`, 4 tests (11 cases):
+
+1. `test_gate_is_the_flag_alone`, for `ENVIRONMENT` development, staging, production and unset: with the flag unset, `coverage_enabled()` is true and `mount()` includes `/knowledge-coverage`; with `false` both are off; `maybe` raises `invalid_coverage_flag`.
+2. `test_roles_grant_coverage_capabilities`, for the same four environments: `admin` gets all five capabilities; `dashboard_viewer` gets exactly the three read capabilities; `user`, `moderator`, `analytics_viewer`, `knowledge_editor` and an unknown role get none; with the flag `false`, nobody gets any.
+3. `test_page_and_sidebar_follow_role` (web-auth fixtures, TestClient): `dashboard_viewer` gets 200 on `GET /knowledge-coverage` and the "Knowledge coverage" link on `/app`; `user` gets 403 and no link.
+4. `test_live_run_guard_uses_configured_endpoints`: with `ENVIRONMENT=production` and non-loopback values (`http://10.0.0.5:8000/v1` and others), `confirm_live_run(confirmed=True, model=True, snapshot=True)` passes; each key emptied in turn raises `audit_service_unconfigured`; not confirmed raises `live_run_confirmation_required`.
+
+### AGENTS.md note
+
+Retrieval, prompts, models and the chatbot are unchanged, so no retrieval or answer-quality test applies. This is no performance change, so no benchmark was run.
+
+### Checks
+
+In conda `faq`, before commit:
+
+```text
+conda run --no-capture-output -n faq python -m compileall -q knowledge_audit scripts web_permissions.py
+exit 0
+git diff --check
+no output, exit 0
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+git grep -n "KNOWLEDGE_COVERAGE_ACCESS_GRANTS\|coverage_enabled_in_production\|grants_for\|confirm_staging" -- . ':!docs/knowledge-gap-audit/READINESS_FIX_LOG.md'
+no output, exit 1
+```
+
+Full suite, first run after all changes:
+
+```text
+conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q
+5 failed, 1227 passed, 26 deselected, 55 warnings, 295 subtests passed in 337.80s (0:05:37)
+FAILED tests/test_web_permissions.py::test_role_by_api_route_matrix[admin]
+FAILED tests/test_web_permissions.py::test_role_by_api_route_matrix[dashboard_viewer]
+FAILED tests/test_web_permissions.py::test_login_landing_pages_and_forged_links[admin-/app-/app-None]
+FAILED tests/test_web_permissions.py::test_login_landing_pages_and_forged_links[dashboard_viewer-/app-/app-None]
+FAILED tests/test_web_permissions.py::test_dashboard_viewer_exact_grants_navigation_and_read_only_template
+```
+
+All five pinned "no role has coverage capabilities". After the change in the table above, the failing file, then the full suite once more:
+
+```text
+conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q tests/test_web_permissions.py
+24 passed, 23 warnings in 14.94s
+conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q
+1232 passed, 26 deselected, 61 warnings, 295 subtests passed in 335.67s (0:05:35)
+```
+
+No clean-worktree run and no browser harnesses (not required).
+
+### Manual check
+
+Not done by eye. The agent running this step cannot view a browser and has no staging web credentials, so it did not start the app on staging and log in. As an automated substitute, not committed, the web-auth fixtures rendered both pages for synthetic users through TestClient:
+
+```text
+role=admin            /app 200, link present; /analytics 200, link present
+role=dashboard_viewer /app 200, link present; /analytics 200, link present
+role=user             /app 200, link absent;  /analytics 403 (no analytics permission), link absent
+```
+
+The by-eye check on staging with an admin, a dashboard viewer and a plain user is still owed, after FastAPI is restarted on this commit.

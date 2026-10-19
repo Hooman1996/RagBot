@@ -216,22 +216,25 @@ def test_calibration_api_default_deny_ownership_export_projection(audit_runtime,
     import main
     store,*_=audit_runtime;artifacts,meta,rows=fixture_artifacts(store)
     url='/api/knowledge-coverage/calibrations/'+meta['calibration_id']
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS','{}')
+    import web_permissions
+    setup.users[1]['role']='user';setup.users[2]['role']='admin'
     with TestClient(main.app,raise_server_exceptions=False) as client:
         assert client.get(url).status_code==401
         login(client,'alice')
         assert client.get(url).status_code==403
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}))
+        setup.users[1]['role']='admin'
         assert client.get('/api/knowledge-coverage/calibrations').json()[0]['scope']=='controlled_candidates_fictional_only'
         assert client.get(url).json()['configuration']['batch_max_entries']==2
         body=client.get(url+'/export').content;manifest=client.get(url+'/export-manifest').json()
         assert hashlib.sha256(body).hexdigest()==manifest['csv_sha256']
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':['coverage_export_download']}))
+        # No real role has these partial sets, so restrict the role map for these checks.
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset({'coverage_export_download'}))
         assert client.get(url).status_code==403
         assert client.get(url+'/export').status_code==403
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':['coverage_export_download','coverage_results_view']}))
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset({'coverage_export_download','coverage_results_view'}))
         assert client.get(url+'/export-manifest').json()['evidence_visible'] is False
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'2':sorted(CAPABILITIES)}))
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES))
+        setup.users[1]['role']='user'
         login(client,'bob')
         for suffix in ('','/export','/export-manifest'):assert client.get(url+suffix).status_code==404
         assert client.get('/api/knowledge-coverage/calibrations').json()==[]

@@ -22,7 +22,7 @@ from knowledge_audit.pipeline import CoverageEvaluator
 from knowledge_audit.preparation import QueryPreparer, prepare_dataset
 from knowledge_audit.privacy import AuditError, Redactor
 from knowledge_audit.recommendations import eligibility
-from knowledge_audit.settings import CAPABILITIES, load_coverage_settings
+from knowledge_audit.settings import load_coverage_settings
 from tests.test_answering_service import Classifier, ImmediateRunner, Processor, Rewriter
 from tests.test_knowledge_coverage_access_jobs import coverage_staging, seed
 from tests.test_knowledge_coverage_pipeline import LabeledModel, Retrieval
@@ -312,7 +312,6 @@ def client_store(tmp_path, setup, monkeypatch):
     monkeypatch.setattr(jobs, 'start', lambda *a: None)
     monkeypatch.setattr(main.app.state, 'coverage_runtime', (load_coverage_settings({}), store, jobs), raising=False)
     setup.users[1]['role'] = 'admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS', json.dumps({'1': sorted(CAPABILITIES)}))
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, 'alice')
         yield client, store, d, s

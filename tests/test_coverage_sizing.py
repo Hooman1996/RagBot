@@ -10,7 +10,7 @@ import main
 from knowledge_audit import sizing
 from knowledge_audit.jobs import CoverageJobs, versions
 from knowledge_audit.operations import Limits
-from knowledge_audit.settings import CAPABILITIES, load_coverage_settings
+from knowledge_audit.settings import load_coverage_settings
 from tests.test_answering_service import ImmediateRunner
 from tests.test_knowledge_coverage_access_jobs import coverage_staging, seed
 from tests.test_web_auth import csrf, login, setup
@@ -128,7 +128,6 @@ def client_runtime(seeded, setup, monkeypatch):
     monkeypatch.setattr(jobs, 'start', lambda *a: None)
     monkeypatch.setattr(main.app.state, 'coverage_runtime', (load_coverage_settings({}), store, jobs), raising=False)
     setup.users[1]['role'] = 'admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS', json.dumps({'1': sorted(CAPABILITIES)}))
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, 'alice')
         yield client, store, d, s, data
@@ -145,7 +144,7 @@ def estimate_body(d, s, data, mode='full_input', **extra):
     return {k: v for k, v in body(d, s, data, mode, **extra).items() if k not in {'budget_acknowledged', 'idempotency_key'}}
 
 
-def test_estimate_endpoint_shape_and_permissions(client_runtime, monkeypatch):
+def test_estimate_endpoint_shape_and_permissions(client_runtime, setup, monkeypatch):
     client, store, d, s, data = client_runtime
     assert route_permission('POST', '/api/knowledge-coverage/runs/estimate') == 'coverage_run_start'
     empty = client.post('/api/knowledge-coverage/runs/estimate', json=estimate_body(d, s, data), headers=csrf(client))
@@ -168,7 +167,7 @@ def test_estimate_endpoint_shape_and_permissions(client_runtime, monkeypatch):
                          headers=csrf(client)).json()
     assert subset['row_count'] == 6 and subset['estimate']['completions'] == {'expected': 150, 'high': 240}
     assert MARKER not in json.dumps(sized) and MARKER not in json.dumps(subset)
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS', json.dumps({'1': sorted(CAPABILITIES - {'coverage_run_start'})}))
+    setup.users[1]['role'] = 'dashboard_viewer'
     for path, payload in (('runs/estimate', estimate_body(d, s, data)), ('runs', body(d, s, data, sizing_acknowledged=True))):
         assert client.post('/api/knowledge-coverage/' + path, json=payload, headers=csrf(client)).status_code == 403
 

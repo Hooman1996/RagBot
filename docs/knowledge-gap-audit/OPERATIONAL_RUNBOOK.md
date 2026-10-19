@@ -10,20 +10,22 @@ quality acceptance and real-query calibration remain pending.
 1. Check the reviewed branch/commit and clean scoped application deployment through
    the normal operator process. Historical pre-A6 runs must not be resumed through
    changed implementation code. Do not edit pinned manifests, hashes or ledgers.
-2. Confirm the root dotenv mechanism and development/staging target identities.
-   `confirm_staging` must accept actual targets matching the established root
-   config, including loopback generation and TEI embedding/reranking services.
+2. Confirm the configured service endpoints. `confirm_live_run` requires an
+   explicit `--confirmed` and non-empty `TEI_EMBED_URL`, `VLLM_URL`,
+   `POSTGRES_HOST` and `QDRANT_HOST` (and `TEI_RERANK_URL` for runs), and uses
+   them as configured, in every environment.
    Reconfirm generation model/context/version, TEI model/limits, SDK retries zero,
-   configured client/admission limits and source/index consistency. Never substitute
-   production. Weight/tokenizer aliases are not immutable weight provenance.
+   configured client/admission limits and source/index consistency.
+   Weight/tokenizer aliases are not immutable weight provenance.
 3. Check available disk headroom, filesystem ownership/permissions, GPU/resource
    telemetry if available, normal-workload conditions and shared admission. Missing
    GPU telemetry is unverified, not evidence of spare capacity. A small interference
    experiment is not a production-capacity or 200-concurrent-user SLA result.
-4. Explicitly authorize the operator/account and scope. Existing per-user
-   `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` defaults deny. Starting needs existing start
-   and KB-read rights; evidence/export/recommendation review require their existing
-   separate capabilities. Do not grant an arbitrary account or broaden a role.
+4. Explicitly authorize the operator/account and scope. Access comes from the
+   role: `admin` can start, view, export and review; `dashboard_viewer` can view
+   and export; other roles have none. Starting needs start and KB-read rights;
+   evidence/export/recommendation review require their separate capabilities.
+   Do not give an arbitrary account the `admin` or `dashboard_viewer` role.
 5. Select an owned validated dataset and frozen content snapshot. CSV imports retain
    all selected user-query identities, including duplicates/invalid records. Confirm
    calendar/timezone/role/column mapping. Inspect incomplete history separately from

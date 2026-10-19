@@ -285,11 +285,9 @@ def test_creation_failure_retry_uses_same_run_identity(tmp_path,monkeypatch):
 def test_full_mode_api_idempotency_csrf_owner_and_revoked_grant(audit_runtime,setup,monkeypatch):
     import main
     from fastapi.testclient import TestClient
-    from knowledge_audit.settings import CAPABILITIES
     from tests.test_web_auth import login,csrf
     store,d,s,meta,jobs=audit_runtime
     setup.users[1]['role']=setup.users[2]['role']='admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}))
     monkeypatch.setattr(jobs,'start',lambda *a:None)
     # No completed reference run exists, so the unsized run is acknowledged.
     payload={'dataset_id':d['dataset_id'],'snapshot_id':s['snapshot_id'],'execution_mode':'full_input','budget_acknowledged':True,
@@ -306,7 +304,7 @@ def test_full_mode_api_idempotency_csrf_owner_and_revoked_grant(audit_runtime,se
         assert client.post('/api/knowledge-coverage/runs',json={**payload,'selected_count':918},headers=csrf(client)).status_code==422
         login(client,'bob')
         assert client.post('/api/knowledge-coverage/runs',json=payload,headers=csrf(client)).status_code==404
-        login(client,'alice');monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS','{}')
+        login(client,'alice');setup.users[1]['role']='user'
         assert client.post('/api/knowledge-coverage/runs/'+first.json()['run_id']+'/retry',headers=csrf(client)).status_code==403
 
 

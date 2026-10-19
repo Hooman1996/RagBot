@@ -54,13 +54,13 @@ def _specs() -> dict[str, VariableSpec]:
         # Application and direct Uvicorn entry point.
         "ENVIRONMENT": VariableSpec(
             allowed=("development", "staging", "production"),
-            component="Coverage gate, database reset guard, structured logging",
+            component="Database reset guard, structured logging",
             restart="FastAPI",
-            usage="knowledge_audit/settings.py coverage gate; new_architecture/setup_dbs.py reset guard; utils/structured_logging.py",
+            usage="new_architecture/setup_dbs.py reset guard; utils/structured_logging.py",
         ),
         "KNOWLEDGE_COVERAGE_ENABLED": VariableSpec(
-            kind="bool", default="false", component="Knowledge coverage audit",
-            restart="FastAPI", usage="coverage gate: true only with ENVIRONMENT=staging",
+            kind="bool", default="true", allowed=("true", "false"), component="Knowledge coverage audit",
+            restart="FastAPI", usage="coverage gate: on unless false, in every environment; access is by role",
         ),
         "API_HOST": VariableSpec(
             default="0.0.0.0", component="Uvicorn", restart="FastAPI"
@@ -362,9 +362,6 @@ def _specs() -> dict[str, VariableSpec]:
         ),
         "KNOWLEDGE_COVERAGE_ARTIFACT_DIR": VariableSpec(
             kind="path", default="/root/projects/faq-private/knowledge-coverage", component="Knowledge coverage", restart="FastAPI",
-        ),
-        "KNOWLEDGE_COVERAGE_ACCESS_GRANTS": VariableSpec(
-            default="{}", component="Knowledge coverage permissions", restart="FastAPI",
         ),
         "KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES": VariableSpec(
             kind="int", default="5242880", minimum=1024, maximum=20971520, component="Knowledge coverage", restart="FastAPI",
@@ -887,10 +884,6 @@ def analyze_environment(
         findings.append(
             {"severity": "critical", "variable": variable, "message": message}
         )
-
-    if (effective.get("KNOWLEDGE_COVERAGE_ENABLED", "").strip().lower() == "true"
-            and effective.get("ENVIRONMENT", "").strip().lower() == "production"):
-        add_relationship_error("KNOWLEDGE_COVERAGE_ENABLED", "coverage_enabled_in_production")
 
     def as_number(name: str) -> float | None:
         value = effective.get(name)

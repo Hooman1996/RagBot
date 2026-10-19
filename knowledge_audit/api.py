@@ -272,11 +272,11 @@ async def snapshots(request: Request, user: WebUser):
 async def snapshot_capture(request: Request, user: WebUser):
     require(user, "coverage_run_start", "kb_read")
     settings, store, _ = runtime(request)
-    from knowledge_audit.runtime import confirm_staging
+    from knowledge_audit.runtime import confirm_live_run
     from knowledge_audit.snapshot import capture_snapshot, read_postgres_snapshot
     from scripts.kb_signature import create_signature
     from new_architecture.app.services.history.database import DatabaseManager
-    confirm_staging(confirmed=True, snapshot=True)
+    confirm_live_run(confirmed=True, snapshot=True)
     path = await safe_call(private_directory, store.root / "archive" / ("capture_" + secrets.token_hex(16)))
     await safe_call(capture_snapshot, path, Redactor(secrets.token_bytes(32)), signature_provider=create_signature,
         content_provider=lambda: read_postgres_snapshot(DatabaseManager().get_connection),
@@ -565,7 +565,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
     return {"state": "queued"}
 
 
-SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
+SAFE_API_CODES = {"coverage_disabled", "invalid_coverage_flag", "audit_service_unconfigured", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
     "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_coverage_dedupe", "invalid_coverage_second_reviewer", "second_reviewer_required", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",

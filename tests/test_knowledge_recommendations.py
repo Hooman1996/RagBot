@@ -255,7 +255,6 @@ def test_owned_csrf_review_capability_and_pinned_downloads(audit_runtime,setup,m
     import main
     from knowledge_audit.recommendation_jobs import RecommendationJobs
     from tests.test_answering_service import ImmediateRunner
-    from knowledge_audit.settings import CAPABILITIES
     store,d,s,run,coverage_jobs=audit_runtime
     snap=store.snapshot(s['snapshot_id'],1);data,redactor=store.dataset(d['dataset_id'],1)
     row=evaluate(snap,LabeledModel(snap,{'1':['a1']}),Retrieval([],['1']),dataset=data)[0]
@@ -265,8 +264,6 @@ def test_owned_csrf_review_capability_and_pinned_downloads(audit_runtime,setup,m
     jobs=RecommendationJobs(recs,coverage_jobs,ImmediateRunner(),factory)
     monkeypatch.setattr(main.app.state,'recommendation_runtime',(recs,jobs),raising=False)
     setup.users[1]['role']='admin';setup.users[2]['role']='admin'
-    grants=CAPABILITIES-{'coverage_recommendation_review'}
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(grants),'2':sorted(grants)}))
     with TestClient(main.app,raise_server_exceptions=False) as client:
         assert client.get('/api/knowledge-coverage/runs/'+run['run_id']+'/rows/'+row['source_row_id']+'/recommendations').status_code==401
         login(client,'alice')
@@ -284,8 +281,10 @@ def test_owned_csrf_review_capability_and_pinned_downloads(audit_runtime,setup,m
         assert detail['revision']['state']=='completed',detail
         assert detail['results'][row['source_row_id']]['recommendation_status']=='drafted',detail
         review={'source_row_id':row['source_row_id'],'recommendation_id':'q1','decision':'approved','note':'Synthetic question-only review.'}
+        # A dashboard viewer has no review capability.
+        setup.users[1]['role']='dashboard_viewer'
         assert client.post(url+'/reviews',json=review,headers=csrf(client)).status_code==403
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}))
+        setup.users[1]['role']='admin'
         monkeypatch.setenv('KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER','false')
         assert client.post(url+'/reviews',json=review).status_code==403
         old=client.post(url+'/export-revisions',json={},headers=csrf(client)).json()

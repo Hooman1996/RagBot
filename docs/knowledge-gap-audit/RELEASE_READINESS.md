@@ -2,7 +2,7 @@
 
 This is the record of which release gates the `knowledge-gap-audit` branch meets and what a person still has to do. Steps 00 to 14 each fixed one finding from the review of `cda143d`. Step 15 checked that the fixes fit together. A gate is marked Done only when every item in it is Done, and an item is Done only when its evidence was actually produced and recorded.
 
-**This branch must not deploy the audit to production.** The audit runs only with `KNOWLEDGE_COVERAGE_ENABLED=true` together with `ENVIRONMENT=staging`.
+**Owner decision, 2026-10-19.** On 2026-10-19 the owner decided the audit is role-based and enabled in every environment: `admin` and `dashboard_viewer` get audit access from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`, and the audit is on unless `KNOWLEDGE_COVERAGE_ENABLED=false`, whatever `ENVIRONMENT` says (step [17] in `READINESS_FIX_LOG.md`).
 
 ## Summary
 
@@ -18,7 +18,7 @@ All tests named below pass in the step 15 regression run (see "Step 15 validatio
 |---|---|---|---|---|
 | F3: reranker batch size from the server limit, with a verified fallback | 01 | `396f053` | `tests/test_reranker_batching.py::RerankerBatchingTests::test_server_below_contract_uses_server_limit`, `::test_capability_failures_use_contract_but_cancellation_propagates` | Fixed, operator step pending (L6 for production, Gate C) |
 | F4: the offline suite runs to completion behind one command | 02 | `33bcc23` | `scripts/run_offline_tests.sh` in a clean checkout; `tests/test_request_admission.py::AdmissionLimiterLifecycleTests::test_fairness_is_documented_without_being_promised`, `tests/test_p2_concurrency.py::ConcurrentRequestTests::test_twenty_mocked_requests_overlap_and_loop_stays_responsive` | Fixed |
-| F9 and F10: the audit is gated to staging; production credentials stay local | 03 | `1bb1c7b` | `tests/test_coverage_deployment_gate.py::test_production_refuses_enabled_audit`, `::test_mount_only_on_staging`, `::test_environment_example_and_ignore_contract`; `scripts/check_tracked_secrets.py` | Fixed, operator step pending (credential rotation and the Git history decision, Gate C) |
+| F9 and F10: the audit is gated to staging; production credentials stay local | 03 | `1bb1c7b` | `tests/test_coverage_deployment_gate.py::test_production_runs_enabled_audit`, `::test_mount_follows_flag_in_every_environment` (renamed in [17]), `::test_environment_example_and_ignore_contract`; `scripts/check_tracked_secrets.py` | Staging-only gate withdrawn by the 2026-10-19 owner decision ([17]); credentials: fixed, operator step pending (credential rotation and the Git history decision, Gate C) |
 | Depth settings: audit depths and entry budget from the environment | 03a | `f30c2c1` | `tests/test_coverage_depth_settings.py::test_pipeline_uses_configured_depths_and_budget_ceiling`, `::test_run_started_under_other_depths_is_identity_drift` | Fixed |
 | F1: a proof is accepted only after every conflict has a verdict | 04 | `e74cbfe` | `tests/test_coverage_conflict_verdicts.py::test_contradicting_conflict_blocks_the_proof`, `::test_unassessed_conflict_is_undetermined` | Fixed |
 | F16a: `verification_token_overflow` is kept | 04 | `e74cbfe` | `tests/test_coverage_conflict_verdicts.py::test_verification_overflow_reason_is_kept` | Fixed |
@@ -69,7 +69,7 @@ No gate is met. Every gate below has at least one Owed item.
 
 ### Gate C: production release of the shared retrieval path (P1 to P3 and step 01) — Owed
 
-**This branch must not deploy the audit to production.** Gate C covers only the shared chatbot retrieval changes (RRF, retrieval depths and reranker batching).
+**Owner decision, 2026-10-19.** The audit is role-based and enabled in every environment, production included (step [17]). Gate C covers only the shared chatbot retrieval changes (RRF, retrieval depths and reranker batching).
 
 | Item | Status | How |
 |---|---|---|
@@ -78,8 +78,8 @@ No gate is met. Every gate below has at least one Owed item.
 | L6: the production reranker's `--max-client-batch-size`, read from its deployment configuration, with `TEI_RERANK_VERIFIED_MAX_BATCH_SIZE` set to it | Owed | Checklist step 15. |
 | Production credentials rotated | Owed | Checklist step 16. |
 | Removal of the old credentials from Git history decided by the owner | Owed | Checklist step 16. |
-| `KNOWLEDGE_COVERAGE_ENABLED=false` in `Production_ENV` and `Production_ENV.example` | Done | Checked in step 15 by a script that prints key names only. |
-| `KNOWLEDGE_COVERAGE_ENABLED=false` (or unset) in the running production deployment | Owed | Checklist step 17. Not checkable from this repository. |
+| `KNOWLEDGE_COVERAGE_ENABLED=false` in `Production_ENV` and `Production_ENV.example` | Withdrawn | Withdrawn by the 2026-10-19 owner decision: the audit is enabled in every environment ([17]). |
+| `KNOWLEDGE_COVERAGE_ENABLED=false` (or unset) in the running production deployment | Withdrawn | Withdrawn by the 2026-10-19 owner decision: the audit is enabled in every environment ([17]). A withdrawn item does not count toward the gate. |
 
 ### Gate D: quality acceptance of the audit — Owed
 
@@ -95,7 +95,7 @@ Run every command from `/root/projects/faq` on `knowledge-gap-audit`, on the sta
 
 1. **Secure the staging host first.** Do every item in "Staging host" below.
 
-2. **Grant `coverage_recommendation_review` to a second web user.** In the staging `.env`, add that user's ID to `KNOWLEDGE_COVERAGE_ACCESS_GRANTS`, keeping the existing entries, for example `{"<EXISTING_ID>": [...], "<SECOND_USER_ID>": ["coverage_results_view", "coverage_recommendation_review"]}`. The second user must not be the run owner. Then check the file and restart FastAPI:
+2. **Give a second web user the `admin` role.** Recommendation approval needs a second admin, who must not be the run owner. Access comes from the role ([17]); no environment change grants it. Then check the staging `.env`, which [17] changed, and restart FastAPI:
 
    ```bash
    conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file .env --mode staging | grep '^Summary'
@@ -171,9 +171,9 @@ Run every command from `/root/projects/faq` on `knowledge-gap-audit`, on the sta
 
 16. **Production credentials.** The owner rotates the five production credentials that were in Git history before step 03 (`QDRANT_API_KEY`, `POSTGRES_PASSWORD`, `DEFAULT_DB_PASSWORD`, `MINIO_ACCESS_KEY`, `MINIO_SECRET_KEY`) and decides whether to remove them from the Git history. Rewriting history is the owner's decision; it needs a force-push and every clone to be re-cloned.
 
-17. **Production audit flag.** The owner of the production deployment confirms that `KNOWLEDGE_COVERAGE_ENABLED` is `false` or unset there.
+17. **Production audit flag.** Withdrawn by the 2026-10-19 owner decision: the audit is enabled in every environment ([17]). `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` must point to a persistent directory on the production host.
 
-18. **Production `ENVIRONMENT` label.** `Production_ENV.example` carries `ENVIRONMENT="development"`, copied from the production file. The owner decides whether production should say `production`, and records the decision in the release log. With `development`, the audit gate still stays off, because it needs exactly `staging`, but `coverage_enabled_in_production` can't fire. Changing it is a production configuration change and is not made from this repository.
+18. **Production `ENVIRONMENT` label.** `Production_ENV.example` carries `ENVIRONMENT="development"`, copied from the production file. The owner decides whether production should say `production`, and records the decision in the release log. Since [17] the audit does not read `ENVIRONMENT`; the label still guards the reset tools. Changing it is a production configuration change and is not made from this repository.
 
 ## Staging host
 

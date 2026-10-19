@@ -43,7 +43,6 @@ This is the hand-over list of every environment variable the RagBot application 
 
 | Variable | Value | Why |
 |---|---|---|
-| `KNOWLEDGE_COVERAGE_ENABLED` | `false` | The audit is staging-only. With `true` and `ENVIRONMENT=production`, the app refuses to start. |
 | `RAG_PIPELINE_DEBUG` | `false` | When true, it prints raw queries, history, chunks and answers to stdout, and with the prompt sub-flag also full prompts. |
 | `WEB_COOKIE_MODE` | `https` | `local-http` is accepted only with `WEB_ENVIRONMENT=development`. |
 | `WEB_ENVIRONMENT` | `production` | This is also the default. |
@@ -54,8 +53,8 @@ This is the hand-over list of every environment variable the RagBot application 
 ### Owner decisions
 
 - **`ENVIRONMENT`.** The template has `development`. The destructive reset tools (`new_architecture/setup_dbs.py`, `new_architecture/knowledge_reset.py`) refuse to run only when `ENVIRONMENT=production`, and default to `development` when it is unset. The code distinguishes three cases:
-  - `staging` enables the audit and the evaluation tools;
-  - `production` blocks resets, and refuses to start with the audit on;
+  - `staging` enables the evaluation tools;
+  - `production` blocks resets;
   - any other value counts as neither.
 
   Setting `production` is recommended.
@@ -77,7 +76,7 @@ Required means startup fails without the variable. A blank in the template colum
 
 | Variable | Required | Code default | Template | What it does |
 |---|---|---|---|---|
-| `ENVIRONMENT` | No | audit gate `""`; reset tools `development` | `development` | Deployment stage. Gates the audit, guards the reset tools, and is the last fallback for the log `environment` field. See Owner decisions. |
+| `ENVIRONMENT` | No | reset tools `development` | `development` | Deployment stage. Guards the reset tools and is the last fallback for the log `environment` field. The audit does not read it. See Owner decisions. |
 | `API_HOST` | No | `0.0.0.0` | `0.0.0.0` | Bind address, used only by `python main.py`. Ignored under `uvicorn main:app` or gunicorn. |
 | `API_PORT` | No | `7000` | `8080` | Listen port, used only by `python main.py`. |
 
@@ -269,15 +268,16 @@ Set all five so every path reaches the same database.
 | `MINIO_BUCKET` | Yes | none | (fill in) | Bucket for source documents. Startup checks that it exists, and the health check uses it. |
 | `MINIO_SECURE` | Tools only | `false` | `False` | TLS for the data-insertion and reset tools only; the app ignores it. `new_architecture/insert_data.py` treats any non-empty value, `False` included, as on. |
 
-### Knowledge-coverage audit (staging only)
+### Knowledge-coverage audit (every environment)
 
-The audit is active only when `KNOWLEDGE_COVERAGE_ENABLED=true` and `ENVIRONMENT=staging` are both set. With it off, none of the other keys are loaded, so production needs only `KNOWLEDGE_COVERAGE_ENABLED=false`. The template carries the rest so the key list is identical across environments.
+The audit is on unless `KNOWLEDGE_COVERAGE_ENABLED=false`, and behaves the same whatever `ENVIRONMENT` says. Access is by role, from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`: `admin` can start runs, view results and evidence, download exports and review recommendations; `dashboard_viewer` can view results and evidence and download exports; every other role has no access. With the flag `false`, none of the other keys are loaded.
+
+**Production note.** `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` must point to a persistent directory on the production host. Audit runs use the production vLLM and TEI, paced by `KNOWLEDGE_COVERAGE_PACE_MS` and admitted through the same request limiter as chat.
 
 | Variable | Code default | What it does |
 |---|---|---|
-| `KNOWLEDGE_COVERAGE_ENABLED` | off | Feature flag; only `true` enables it. Must be `false` in production. |
+| `KNOWLEDGE_COVERAGE_ENABLED` | on | Feature flag; on unless `false`. Any value other than `true` or `false` fails with `invalid_coverage_flag`. |
 | `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Store for audit datasets, runs and exports. Must be an absolute path outside the repository and `/tmp`, with no symlinks. |
-| `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` | `{}` | JSON map of user id to audit capabilities. Empty denies everyone. |
 | `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Largest dataset upload (1024 to 20971520). |
 | `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Maximum tokens per audit completion (256 to 4096). |
 | `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Token safety margin (32 to 1024). |
@@ -297,7 +297,7 @@ The audit is active only when `KNOWLEDGE_COVERAGE_ENABLED=true` and `ENVIRONMENT
 | `KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET` | `300` | Most entries judged per question. |
 | `KNOWLEDGE_COVERAGE_VERIFICATION_PASSES` | `2` | Verification passes (1 or 2). |
 | `KNOWLEDGE_COVERAGE_DEDUPE` | `true` | Copies results for repeated questions rather than re-evaluating them. |
-| `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER` | `true` | Requires a second person to approve recommendations. |
+| `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER` | `true` | Requires a second admin, not the run owner, to approve recommendations. |
 | `KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS` | `""` | Comma-separated public bank contacts that the redactor keeps rather than masks. |
 
 ### Knowledge ingestion tools (command-line only)

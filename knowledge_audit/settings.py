@@ -1,6 +1,5 @@
-"""Validated permanent A2 configuration. Access is explicitly deny by default."""
+"""Validated permanent A2 configuration. Access comes from roles in web_permissions."""
 from dataclasses import dataclass, field, asdict
-import json
 import os
 from pathlib import Path
 
@@ -14,12 +13,15 @@ CAPABILITIES = frozenset({"coverage_run_start", "coverage_results_view",
 
 
 def coverage_enabled(environ=None) -> bool:
+    """On unless KNOWLEDGE_COVERAGE_ENABLED is false; identical in every environment."""
     env = os.environ if environ is None else environ
-    enabled = env.get("KNOWLEDGE_COVERAGE_ENABLED", "").strip().lower() == "true"
-    environment = env.get("ENVIRONMENT", "").strip().lower()
-    if enabled and environment == "production":
-        raise AuditError("coverage_enabled_in_production")
-    return enabled and environment == "staging"
+    raw = env.get("KNOWLEDGE_COVERAGE_ENABLED")
+    if raw is None:
+        return True
+    value = raw.strip().lower() if isinstance(raw, str) else None
+    if value not in {"true", "false"}:
+        raise AuditError("invalid_coverage_flag")
+    return value == "true"
 
 
 def require_coverage_enabled(environ=None) -> None:
@@ -30,7 +32,6 @@ def require_coverage_enabled(environ=None) -> None:
 @dataclass(frozen=True)
 class CoverageSettings:
     artifact_dir: Path
-    access_grants: dict[str, list[str]]
     upload_max_bytes: int
     model_max_tokens: int
     token_margin: int
@@ -75,9 +76,12 @@ class CoverageSettings:
 
     def manifest(self):
         from utils.read_only_audit import canonical_sha256
-        return {"artifact_dir": str(self.artifact_dir), "access_grants_sha256": canonical_sha256(self.access_grants),
+        from web_permissions import COVERAGE_ROLE_CAPABILITIES
+        roles = {role: sorted(caps) for role, caps in COVERAGE_ROLE_CAPABILITIES.items()}
+        return {"artifact_dir": str(self.artifact_dir),
+                "access_policy": {"version": "coverage-roles-1", "roles_sha256": canonical_sha256(roles)},
                 "upload_max_bytes": self.upload_max_bytes, "model_max_tokens": self.model_max_tokens,
-                "token_margin": self.token_margin, "schema": "coverage-settings-6", "operational_policy": "audit-operations-2", "operational_limits": asdict(self.operational_limits), "recommendation_max_completions": self.recommendation_max_completions, "retention_policy": {"version":"manual-dependency-retention-1","days":self.retention_days,"automatic_deletion":False}, "max_run_rows": self.max_run_rows, "execution_policy": "coverage-execution-1", "checkpoint_policy": "audit-boundaries-2",
+                "token_margin": self.token_margin, "schema": "coverage-settings-7", "operational_policy": "audit-operations-2", "operational_limits": asdict(self.operational_limits), "recommendation_max_completions": self.recommendation_max_completions, "retention_policy": {"version":"manual-dependency-retention-1","days":self.retention_days,"automatic_deletion":False}, "max_run_rows": self.max_run_rows, "execution_policy": "coverage-execution-1", "checkpoint_policy": "audit-boundaries-2",
                 "structured_output_mode": "json_schema_strict_1", "proof_reuse_version": "question-ledger-2",
                 "run_identity_version": "run-identity-1", "export_revision_version": "immutable-export-1",
                 "json_syntax_recovery_attempts": 1, "recovery_policy": "json-invalid-stop-one-fresh-response-1",
@@ -102,15 +106,6 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         raise AuditError("invalid_durable_artifact_directory")
     if any(p.is_symlink() for p in (path, *path.parents)):
         raise AuditError("artifact_symlink_forbidden")
-    try:
-        grants = json.loads(env.get("KNOWLEDGE_COVERAGE_ACCESS_GRANTS", "{}"))
-        if not isinstance(grants, dict) or any(not isinstance(uid, str) or not uid.isascii() or
-                not uid.isdecimal() or int(uid) <= 0 or str(int(uid)) != uid or
-                not isinstance(caps, list) or any(not isinstance(c, str) or c not in CAPABILITIES for c in caps)
-                for uid, caps in grants.items()):
-            raise ValueError()
-    except (ValueError, TypeError):
-        raise AuditError("invalid_coverage_access_grants") from None
     def integer(key, default, low, high):
         try:
             raw = env.get(key, str(default))
@@ -137,7 +132,7 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
     raw_second = env.get("KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER", "true")
     if not isinstance(raw_second, str) or raw_second.strip().lower() not in {"true", "false"}:
         raise AuditError("invalid_coverage_second_reviewer")
-    return CoverageSettings(path, grants,
+    return CoverageSettings(path,
         integer("KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", 5242880, 1024, 20971520),
         integer("KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS", 1200, 256, 4096),
         integer("KNOWLEDGE_COVERAGE_TOKEN_MARGIN", 128, 32, 1024),
@@ -157,7 +152,3 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         integer("KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET",300,1,1000),
         contacts, verification_passes=passes, dedupe=raw_dedupe.strip().lower() == "true",
         require_second_reviewer=raw_second.strip().lower() == "true")
-
-
-def grants_for(user_id: int) -> frozenset[str]:
-    return frozenset(load_coverage_settings().access_grants.get(str(user_id), []))

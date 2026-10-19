@@ -1,6 +1,8 @@
-"""The settings manifest pins every policy this branch added, under schema coverage-settings-6."""
+"""The settings manifest pins every policy this branch added, under schema coverage-settings-7."""
 from knowledge_audit import dedupe, failures, operations, recovery, referrals
 from knowledge_audit.settings import load_coverage_settings
+from utils.read_only_audit import canonical_sha256
+from web_permissions import COVERAGE_ROLE_CAPABILITIES
 
 POLICY_KEYS = {
     "proof_reuse_version": "question-ledger-2",
@@ -17,7 +19,10 @@ POLICY_KEYS = {
 
 def test_manifest_schema_and_policy_keys():
     manifest = load_coverage_settings({}).manifest()
-    assert manifest["schema"] == "coverage-settings-6"
+    assert manifest["schema"] == "coverage-settings-7"
+    assert "access_grants_sha256" not in manifest
+    roles = {role: sorted(caps) for role, caps in COVERAGE_ROLE_CAPABILITIES.items()}
+    assert manifest["access_policy"] == {"version": "coverage-roles-1", "roles_sha256": canonical_sha256(roles)}
     assert {key: manifest[key] for key in POLICY_KEYS} == POLICY_KEYS
     # Hard-coded manifest strings must follow the modules that own them.
     assert manifest["failure_policy"] == failures.VERSION

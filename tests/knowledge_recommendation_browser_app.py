@@ -1,6 +1,5 @@
 """Isolated A4 Chromium fixture: synthetic auth/artifacts/models, no services."""
 import asyncio
-import json
 import os
 from tests.knowledge_coverage_browser_app import create_app as coverage_app,SYNTHETIC_OWNER
 from tests.test_knowledge_recommendations import DraftModel
@@ -8,7 +7,6 @@ from tests.test_answering_service import ImmediateRunner
 from knowledge_audit.recommendation_jobs import RecommendationJobs
 from knowledge_audit.recommendation_store import RecommendationStore
 from knowledge_audit.recommendations import RecommendationEngine
-from knowledge_audit.settings import CAPABILITIES
 
 SYNTHETIC_REVIEWER = 990002
 
@@ -16,7 +14,7 @@ SYNTHETIC_REVIEWER = 990002
 def create_app(port):
     app=coverage_app(port)
     import main
-    # A second fictional account that may review, but not draft or see evidence.
+    # A second fictional admin, who may approve the owner's recommendations.
     reviewer={'id':SYNTHETIC_REVIEWER,'username':'reviewer-synthetic','full_name':'Synthetic Reviewer','role':'admin','is_active':True}
     owner_db,owner_auth=main.db_manager,main.authentication_service
     class Database:
@@ -26,8 +24,6 @@ def create_app(port):
             if username==reviewer['username'] and password=='synthetic-browser-only':return dict(reviewer)
             return owner_auth.authenticate(username,password)
     main.db_manager=Database();main.authentication_service=Authentication()
-    os.environ['KNOWLEDGE_COVERAGE_ACCESS_GRANTS']=json.dumps({str(SYNTHETIC_OWNER):sorted(CAPABILITIES),
-        str(SYNTHETIC_REVIEWER):['coverage_recommendation_review','coverage_results_view']})
     _,store,coverage_jobs=app.state.coverage_runtime
     recs=RecommendationStore(store)
     class SlowDraft(DraftModel):

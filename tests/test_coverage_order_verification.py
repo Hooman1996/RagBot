@@ -168,8 +168,7 @@ def patched_engine_inputs(monkeypatch):
     from knowledge_audit import service
     monkeypatch.setenv('KNOWLEDGE_COVERAGE_ENABLED', 'true'); monkeypatch.setenv('ENVIRONMENT', 'staging')
     monkeypatch.setenv('TEI_RERANK_URL', 'http://localhost:7998'); monkeypatch.setenv('VLLM_URL', 'http://localhost:8000/v1')
-    monkeypatch.setattr(service, 'confirm_staging', lambda **kwargs: None)
-    monkeypatch.setattr('dotenv.dotenv_values', lambda path: {'TEI_RERANK_URL': 'http://localhost:7998'})
+    monkeypatch.setattr(service, 'confirm_live_run', lambda **kwargs: None)
     async def capable(search):
         return None
     monkeypatch.setattr(service, '_require_reranker_capability', capable)
