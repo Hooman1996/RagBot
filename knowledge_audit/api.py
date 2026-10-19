@@ -572,7 +572,13 @@ SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run",
     "snapshot_policy_superseded", "run_active", "run_already_continued", "continuation_identity_drift",
-    "ambiguous_run_chain", "chain_identity_drift", "run_chain_changed"}
+    "ambiguous_run_chain", "chain_identity_drift", "run_chain_changed",
+    # Codes the run, row and recommendation records already keep (jobs, pipeline, recommendation jobs/store).
+    "audit_serving_drift", "audit_identity_unpinned", "snapshot_identity_mismatch", "candidate_snapshot_mismatch",
+    "audit_access_revoked", "checkpoint_identity_mismatch", "checkpoint_content_mismatch",
+    "recommendation_source_drift", "run_already_owned", "recommendation_metadata_policy_changed",
+    # Review refusals, reported like second_reviewer_required.
+    "recommendation_not_reviewable", "recommendation_source_requires_review", "invalid_review_decision"}
 
 # A4 responsibilities and revisions remain separate from coverage run versions.
 from knowledge_audit.recommendation_api import router as recommendation_router

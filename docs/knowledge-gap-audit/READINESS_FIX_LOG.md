@@ -1898,3 +1898,144 @@ exit 0
 ```
 
 These results were then added to this log and the commit was amended; the amendment changes only this file.
+
+## [15] Integration check, AGENTS.md sync and release-readiness record
+
+This step checks that steps 00 to 14 fit together, makes the docs match the code, and writes `docs/knowledge-gap-audit/RELEASE_READINESS.md`.
+
+### Integration fixes
+
+**a. Codes.** An AST scan of `knowledge_audit/` found 187 distinct codes in `AuditError("…")` literals, counting both branches of a conditional code. A code counts as surfaced when its own string is stored on a row, run or recommendation record, written to an export or sent as an API detail. Every boundary masks other codes (generic 409/500 text, `audit_failed`, `failures.category`) or translates them into a fixed sentence.
+
+- 12 surfaced codes were in no allow-list, and 3 review refusals were added for consistency. Added to `SAFE_API_CODES` in `knowledge_audit/api.py`:
+  - kept on run records by `CoverageJobs.work` (`invalidate`/`interrupt` sets): `audit_serving_drift`, `audit_identity_unpinned`, `snapshot_identity_mismatch`, `candidate_snapshot_mismatch`, `audit_access_revoked`, `checkpoint_identity_mismatch`, `checkpoint_content_mismatch`. `candidate_snapshot_mismatch` is also stored on rows by `CoverageEvaluator.evaluate`;
+  - kept on recommendation records by `RecommendationJobs.work`: `recommendation_source_drift` and `run_already_owned` (`audit_serving_drift` too);
+  - written into `review_unavailable_reasons` and run-export projection reasons: `recommendation_metadata_policy_changed`;
+  - the other `decide` refusals, so they are reported like `second_reviewer_required`: `recommendation_not_reviewable`, `recommendation_source_requires_review`, `invalid_review_decision`.
+- Added to `ERROR_CODES` in `knowledge_audit/pipeline.py`: `empty_normalized_query` and `preparation_components_missing`, which `QueryPreparer.prepare` stores in a row's `preparation_errors`. Neither can be raised inside `assess` or escape `prepare`, so `evaluate`'s handling is unchanged.
+- After these additions, 95 raised codes are allow-listed and the other 92 are in `INTERNAL_ONLY` in the new test, each with a one-line reason.
+- `static/js/knowledge_coverage.js` had no label for 12 review codes that predate the review: `evidence_conflict`, `verification_unresolved`, `incompatible_conditions`, `entry_too_long`, `evaluation_failed`, `subset_batch_uncertainty`, `batch_support_unresolved`, `batch_uncertain`, `compatibility_unverified`, `bounded_bundle_search_unresolved`, `reconciliation_token_overflow`, `verification_token_overflow`. English labels were added. The file has one English `LABELS` map and no Persian text, so English is the only language it uses.
+
+**b. Manifest.** `CoverageSettings.manifest()` `"schema"` is `coverage-settings-6`. Runs created under `coverage-settings-5` stop with `audit_runtime_identity_drift`, as after steps 07, 08 and 12.
+
+**c. Env keys.** No change needed. The 28 `KNOWLEDGE_COVERAGE_*` and `TEI_RERANK_*` keys in `SPECS` are exactly the keys the non-test code reads, and all 28 are in `env.example`, `.env.example.generated`, `Production_ENV.example`, `.env` and `Production_ENV`. The local files were checked by a script that printed key names and booleans only. `KNOWLEDGE_COVERAGE_ENABLED` is `false` in `Production_ENV` and `Production_ENV.example`.
+
+**d. CSV contract.** `docs/knowledge-gap-audit/DASHBOARD_AND_CSV_CONTRACT.md` gained "Readiness fixes: current column lists", generated from `knowledge_audit/export.py`: the column groups in order (34 + 55, then the 9 A6.1 execution, 3 A6.2 operations and 1 chain columns with their conditions), `residual_review_codes`, `deduplicated_from_row_id`, chain-only `source_run_id`, the chain export manifest keys, `reviewer_user_id` and `run_owner_id` in the review data, and `coverage-settings-6`.
+
+### AGENTS.md changes
+
+- Under "FastAPI endpoint paths": "Knowledge-coverage and recommendation routes" (43 routes, generated as the difference between `main.app.routes` imported in-process with `KNOWLEDGE_COVERAGE_ENABLED=true`/`ENVIRONMENT=staging` and with the flag `false`, with sockets and `psycopg2.connect` blocked as in `tests/offline_guard.py`), noting that `knowledge_audit.api.mount` includes the router only when both hold; and "Routes from `internal_evaluation_api.py`" (3 routes).
+- Under "Configuration": the coverage gate line, and "`pytest.ini` now exists." in front of the rest of the old sentence.
+- Under "Tests and benchmarks": the three `scripts/benchmark_coverage_*.py` scripts with one line each, replacing "no benchmark runner or benchmark command was found".
+
+### Changed existing tests
+
+| Test | Old | New | Why |
+|---|---|---|---|
+| `tests/test_coverage_depth_settings.py::test_defaults_keep_the_settings_manifest_unchanged` | `manifest['schema'] == 'coverage-settings-5'` | `manifest['schema'] == 'coverage-settings-6'` | The schema string moved in 1b. Every other assertion is unchanged. |
+
+No other existing test changed. The full offline suite in the main checkout passed with the new allow-list entries (below).
+
+### Tests added
+
+- `tests/test_coverage_code_registry.py` (4 tests): every raised literal is allow-listed or internal-only; `INTERNAL_ONLY` is disjoint from the allow-lists and has no stale entries; an internal-only code never appears as a string outside `AuditError(...)` except at the two translation sites (`safe_call`'s 404 and `run_export_api.MESSAGES`); every code in `BLOCKING_CODES`, `RESIDUAL_CODES`, `SEARCH_CODES` and `NOTE_CODES` has a label in each `LABELS*` map. A mutation check (removing `audit_access_revoked` from `SAFE_API_CODES` and the `evidence_conflict` label) failed two tests; both were restored.
+- `tests/test_coverage_manifest_versions.py` (1 test): `schema == "coverage-settings-6"` and the nine policy keys with their values. The test also ties the hard-coded `failure_policy`, `operational_policy` and `checkpoint_policy` strings, and `referral_guard_version` and `dedupe_policy`, to the `VERSION` constants of their modules.
+
+### Decisions not covered by the command
+
+No decision was put to the person running this step. Recorded for review:
+
+1. **What "reaches the API" means.** A code translated into a fixed sentence (`artifact_not_found`/`invalid_artifact_id` as 404 "Audit resource not found", the six `run_export_api.MESSAGES` codes, the two cancel refusals) is internal-only, because its string never leaves the process. The test pins those translation sites.
+2. **Review refusals allow-listed.** `recommendation_not_reviewable`, `recommendation_source_requires_review` and `invalid_review_decision` were masked while `second_reviewer_required` and now `recommendation_metadata_policy_changed` were shown. All five are fixed codes from `RecommendationStore.decide`.
+3. **Settings codes stay internal-only.** `runtime()` loads the settings outside `safe_call`, so a settings error is a generic 500 whatever the allow-list says. Adding the codes would change nothing.
+4. **Predating AGENTS.md drift not fixed.** Twelve routes on `main` (`681cc95`) are missing from the AGENTS.md lists, and `requirements.lock.txt` and `requirements.runtime.candidate.txt` exist although AGENTS.md says no `requirements*.txt` was found. Both predate this branch; the command allows only the listed changes. Both are open items in `RELEASE_READINESS.md`.
+5. **`coverage-csv-6` not bumped.** Steps 04 and 12 added columns under the same CSV schema string. Bumping it changes the export contract, so it is an open item.
+
+### AGENTS.md note
+
+This step changes documentation, labels, allow-lists and the manifest schema string. Retrieval, prompts, models and the chatbot are unchanged, so no retrieval or answer-quality test applies. No performance change; the benchmarks below are recorded as the final baseline.
+
+### Checks
+
+In conda `faq`, before commit:
+
+```text
+timeout 1800 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -m "not integration and not artifact" -q
+1215 passed, 26 deselected, 59 warnings, 295 subtests passed in 341.41s (0:05:41)
+
+node --test tests/knowledge_coverage.frontend.test.cjs
+# tests 6, # pass 6, # fail 0
+```
+
+The suite grew from 1210 in step 14 to 1215: the 4 + 1 new tests.
+
+Section 3 step 1, fast checks (before commit, so `git diff --check cda143d..HEAD` covered steps 00 to 14; repeated after commit below):
+
+```text
+conda run --no-capture-output -n faq python -m compileall -q knowledge_audit utils scripts
+exit 0
+for f in $(git diff --name-only cda143d..HEAD -- 'static/js/*.js'); do node --check "$f" || echo "FAIL $f"; done
+no output (static/js/knowledge_coverage.js, static/js/knowledge_recommendations.js)
+git diff --check cda143d..HEAD
+no output, exit 0
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+```
+
+Section 3 step 2, benchmarks (load average 1.33 at the start, right after the suite):
+
+```text
+conda run --no-capture-output -n faq python scripts/benchmark_coverage_budgets.py
+{"boundaries_per_iteration": 12, "checkpoint_only": {"measurements_ms": [477.924, 427.012, 423.857], "median_ms": 427.012}, "checkpoint_with_allowance": {"measurements_ms": [716.815, 722.887, 724.625], "median_ms": 722.887}, "input_rows": 918, "iterations": 3, "live_dispatches": 0, "scope": "mocked_file_io_no_service_throughput", "version": "a62-file-io-1"}
+
+conda run --no-capture-output -n faq python scripts/benchmark_coverage_progress.py
+{"baseline_full_rows_checkpoint_and_progress": {"median_ms": 826.223, "reads": {"index": 0, "metadata": 4600, "row": 4595}}, "baseline_full_rows_poll": {"median_ms": 868.995, "reads": {"index": 0, "metadata": 4595, "row": 4590}}, "indexed_checkpoint_and_progress": {"median_ms": 35.202, "reads": {"index": 10, "metadata": 20, "row": 5}}, "indexed_poll": {"median_ms": 7.95, "reads": {"index": 5, "metadata": 10, "row": 0}}, "iterations": 5, "model_dispatches": 0, "rows": 918, "scope": "synthetic_file_io_only"}
+
+conda run --no-capture-output -n faq python scripts/benchmark_coverage_dedupe.py
+{"calls_by_role": {"aspects": 50, "batch": 50, "scope": 50, "verification": 100}, "copied_rows": 0, "distinct_questions": 40, "iterations": 3, "median_wall_ms": 15101.372, "model_calls": 250, "retrieval_fetches": 100, "rows": 50, "scope": "mocked_model_and_retrieval", "variant": "dedupe_off", "wall_ms": [15125.198, 15101.372, 15073.512]}
+{"calls_by_role": {"aspects": 40, "batch": 40, "scope": 40, "verification": 80}, "copied_rows": 10, "distinct_questions": 40, "iterations": 3, "median_wall_ms": 13201.804, "model_calls": 200, "retrieval_fetches": 80, "rows": 50, "scope": "mocked_model_and_retrieval", "variant": "dedupe_on", "wall_ms": [13201.804, 13025.809, 13273.244]}
+{"iterations": 3, "measurements_ms": [231.224, 184.675, 183.0], "median_ms": 184.675, "rows": 918, "sources": 40, "variant": "map_rebuild_918"}
+```
+
+Read counts and call counts equal the step 11 and step 12 records; medians are within the run-to-run spread recorded there.
+
+Section 3 step 3, regression tests for the findings (37 node IDs, listed per finding in `RELEASE_READINESS.md`; parametrized cases expand to 57):
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q <the 37 node IDs>
+57 passed, 3 warnings, 10 subtests passed in 50.26s
+```
+
+After commit, the fast checks were repeated so that `git diff --check cda143d..HEAD` covers this commit:
+
+```text
+python -m compileall -q knowledge_audit utils scripts: exit 0
+node --check: no failures (static/js/knowledge_coverage.js, static/js/knowledge_recommendations.js)
+git diff --check cda143d..HEAD: no output, exit 0
+scripts/check_tracked_secrets.py: tracked secrets: 0 matches
+```
+
+Section 3 step 4, clean-checkout full run. `/tmp/faq-a21-browser-node` exists, so the browser stage ran with `REQUIRE_BROWSER=1`. A first attempt on the initial commit was stopped by hand before it finished, to correct one AGENTS.md phrase (the dedupe benchmark prints three JSON lines, not one); it produced no result and is not reported. The run below is on the amended commit `1c0a7d1`. `uptime` before it showed a load average of 0.73, the host's normal level.
+
+```text
+uptime
+git worktree add /tmp/faq-clean-15 HEAD
+cd /tmp/faq-clean-15 && BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 timeout 3600 conda run --no-capture-output -n faq scripts/run_offline_tests.sh; status=$?
+cd /root/projects/faq && git worktree remove --force /tmp/faq-clean-15; echo "exit $status"
+1215 passed, 26 deselected, 59 warnings, 295 subtests passed in 341.35s (0:05:41)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+Offline frontend audit: PASS
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+The pytest count equals the main-checkout run. The clean checkout has no local env files, so the secret stage's NOT RUN result is expected; the main checkout's scan passed. These results were then added to this log and to `RELEASE_READINESS.md`, and the commit was amended; the amendment changes only those two files.

@@ -26,7 +26,7 @@ def test_defaults_keep_the_settings_manifest_unchanged():
     manifest = settings.manifest()
     assert manifest['initial_depths'] == [150] * 3 and manifest['expanded_depths'] == [300] * 3
     assert manifest['initial_entries'] == 50 and manifest['maximum_distinct_entries'] == 300
-    assert manifest['schema'] == 'coverage-settings-5'
+    assert manifest['schema'] == 'coverage-settings-6'
 
 
 def test_overrides_are_reflected_and_orderings_validated():

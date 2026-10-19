@@ -873,3 +873,66 @@ older full counterproof cannot be removed while a comparable possible-gap run is
 retained. Unknown nested files hold their whole unit, and queued/running work holds
 all cleanup candidates. Coordination is nonblocking; a missing published allowance
 ledger fails closed instead of recreating a zero-usage budget.
+
+## Readiness fixes: current column lists (knowledge-gap-audit, step 15)
+
+This section is the current column contract, taken from `knowledge_audit/export.py`.
+Where it differs from the sections above, this section applies. Earlier sections
+still describe historical captures, whose stored bytes are never rewritten.
+
+### Coverage CSV columns, in order
+
+A coverage CSV row has these groups of columns, in this order. Each group is
+present under the condition shown.
+
+| Group | Present when | Columns |
+|---|---|---|
+| `FIELDS` (34) | always | `schema_version`, `run_id`, `export_id`, `source_row_id`, `source_query_id`, `source_record_ordinal`, `processing_ordinal`, `safe_session_ref`, `timestamp`, `timestamp_status`, `input_query_redacted`, `normalized_query_redacted`, `standalone_query_redacted`, `canonical_retrieval_query_redacted`, `existing_intent`, `scope_status`, `processing_status`, `coverage_status`, `preparation_status`, `model_selected`, `model_prepared`, `rewrite_status`, `history_status`, `timestamp_provenance`, `history_provenance`, `preparation_errors`, `uncertainty_codes`, `kb_snapshot_id`, `configuration_id`, `preparation_code_id`, `input_id`, `input_scope`, `selected_input_row_count`, `source_input_row_count` |
+| rest of `COVERAGE_FIELDS` (55) | always | `outcome`, `support_arrangement`, `production_context_sufficiency`, `production_reachability`, `requested_aspects`, `supported_aspects`, `unresolved_aspects`, `supporting_faq_ids`, `supporting_chunk_ids`, `supporting_sentence_refs`, `explanation`, `verification_result`, `verification_reason`, `verifications`, `production_candidate_ids`, `production_context_ids`, `production_baseline_version`, `evaluated_entry_ids`, `evaluated_entry_count`, `retrieved_candidate_count`, `stopping_reason`, `evaluation_scope`, `evidence_visibility`, `error_code`, `error_reason`, `attempt_count`, `recommendations`, `recommendation_status`, `proposed_question`, `category`, `subcategory`, `proposed_new_category`, `proposed_new_subcategory`, `related_existing_faq_ids`, `equivalent_existing_faq_ids`, `rubric_version`, `model_versions`, `prompt_versions`, `tokenizer_versions`, `normalization_version`, `alias_version`, `classifier_version`, `run_settings_version`, `review_codes`, `residual_review_codes`, `run_identity_id`, `export_revision_id`, `review_codes_by_phase`, `evidence_phases`, `validation_diagnostics`, `output_recovery_count`, `recovery_policy`, `failure_diagnostics`, `batch_max_entries`, `deduplicated_from_row_id` |
+| A6.1 execution (9) | the run meta has `execution_version` (A6.1 and later runs) | `execution_mode`, `selected_for_execution`, `execution_selected_row_count`, `checkpoint_reuse_count`, `unknown_completion_count`, `validated_checkpoint_count`, `request_journal`, `model_evaluated`, `entry_model_dispatched` |
+| A6.2 operations (3) | the run meta has `operational_policy` (A6.2 and later runs) | `operational_budget`, `retention_policy`, `pause_reason` |
+| chain (1) | chain exports only | `source_run_id` |
+
+Columns added by the readiness fixes:
+
+| Column | Step | Meaning |
+|---|---|---|
+| `residual_review_codes` | 04 | JSON array, placed after `review_codes`. Unexamined-evidence and note codes: shown, never blocking and never reported as resolved. Kept in restricted exports. |
+| `deduplicated_from_row_id` | 12 | The `source_row_id` of the same-run row whose result this row copied, or `""` for a row evaluated on its own. Rows exported before step 12 have `""`. Kept in restricted exports as an opaque reference. `dedupe_key_sha256` is not exported. |
+| `source_run_id` | 11 | Chain exports only, as the last column: the run that supplied this row's result. `operational_budget` and `pause_reason` in that row come from the same run. Kept in restricted exports as an opaque reference. |
+
+The `schema_version` cell is still `coverage-csv-6` for new captures (`coverage-csv-5`
+or `coverage-csv-4` for older run kinds). Steps 04 and 12 added columns without
+changing that string, so two `coverage-csv-6` files can have different headers.
+Read columns by header name, not by position.
+
+### Chain export
+
+Chain exports are stored under `runs/<root>/chain-exports/{evidence|restricted}/rev_<32 hex>/`
+as `coverage.csv` and `manifest.json`, with `latest.json` beside them. The CSV is
+the coverage CSV above over the merged rows, plus `source_run_id`. The manifest
+is the run-export manifest plus `chain_export_version` (`coverage-chain-export-1`),
+`chain_root_run_id`, `chain_run_ids`, `chain_results_sha256`, `chain_runs`,
+`merge_identity_sha256` and `source_run_row_counts`.
+
+### Recommendation review data
+
+From step 14, review data records who decided and whose run it was:
+
+- each review revision and each decision carries `reviewer_user_id` and `run_owner_id`;
+- in the recommendation and run CSVs, each decision embedded in a row's
+  `recommendations[].review` carries both fields;
+- the recommendation export manifest carries `reviewer_user_id` (of the pinned
+  review revision, `null` when unreviewed) and `run_owner_id`.
+
+The CSV column lists of `coverage-recommendations-csv-1` and `coverage-run-csv-1`
+are unchanged.
+
+### Settings manifest
+
+`CoverageSettings.manifest()` is `coverage-settings-6` from step 15. It covers the
+policy keys this branch added: `proof_reuse_version`, `referral_guard_version`,
+`reachability_policy_version`, `verification_passes`, `verification_policy`,
+`failure_policy`, `operational_policy`, `checkpoint_policy`, `dedupe_policy` and
+`recommendation_review_policy`. Runs created under `coverage-settings-5` cannot
+resume (`audit_runtime_identity_drift`).
