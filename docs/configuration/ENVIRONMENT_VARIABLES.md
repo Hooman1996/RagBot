@@ -22,6 +22,65 @@ reproduced here.
 
 ## Summary
 
+### P2 retrieval depth contract
+
+`RAG_BM25_CANDIDATE_LIMIT` is an optional positive integer, default **50**,
+measured in lexical candidates per query. It limits the score-sorted BM25
+slice; nonpositive scores remain excluded afterward. The corpus/revision cache
+does not depend on query depths. The existing `RAG_SEMANTIC_CANDIDATE_LIMIT`
+independently limits dense candidates, and `RAG_RETRIEVAL_TOP_K` limits final
+distinct fused entries. Source defaults are 50 / 50 / 10 respectively; existing
+runtime values are preserved. These import-scoped settings are not hot-reloaded.
+No service restart is performed as part of P2.
+
+Internal `RAGSystem.retrieve` and `PersianHybridSearch.search` accept keyword-only
+`bm25_candidate_limit` and `semantic_candidate_limit` overrides, alongside
+`top_k`. None uses the configured value. Explicit overrides must be positive
+integers (booleans, strings and floats are rejected); they do not mutate process
+environment, settings or cached corpus state. No web/UI controls are added.
+
+Final depth need not fit either individual branch and has no configured
+theoretical upper bound. Actual results are bounded by eligible distinct union
+membership: small branches or overlap yield fewer entries, never padding or
+duplication. Context top-k must still not exceed the configured final top-k.
+Effective depths/counts are recorded in request-local retrieval diagnostics.
+Expanded reranking uses sequential P3 requests bounded by the independent client
+batch setting below. Do not send more than the verified target limit per request.
+
+### P3 reranker batch contract
+
+`TEI_RERANK_MAX_CLIENT_BATCH_SIZE` is an optional positive integer, default **50**,
+measured in texts per HTTP rerank request. It is independent of embedding batch
+settings and does not configure any TEI server flag. Existing custom values are
+preserved. The target limit is deployment-specific: the reranking client reads
+`/info` on its first nonempty operation and rejects settings above that target's
+`max_client_batch_size` before sending texts. Missing/invalid capabilities fail
+closed. A successful capability result is cached per target URL for the client
+lifetime; recreate the client after server-limit changes. No service is restarted
+as part of P3. Settings are loaded at import/startup, not hot-reloaded.
+
+Both answer-context and related-question paths use sequential batches, complete
+index/finite-score validation and global score merging, followed by their existing
+selection policies. There are no per-batch top-k losses or retries. Answer-context
+keeps `raw_scores=False`; related questions keep the field omitted, as before.
+Any failed batch fails the logical operation without returning a partial ranking.
+Content-safe metrics distinguish rerank request counts/sizes/times from the initial
+capability GET. Original full chunks/metadata and scoring text policies are kept.
+Batching does not remove per-input token limits or the generation context budget.
+
+This key is propagated to the same main-chatbot templates and private runtime
+files as the lexical key. The source-authored `.env.example.generated` template
+and validator manifest are guarded by tests; unrelated HTTP evaluation services
+do not configure this client and receive no new key.
+
+Main templates `env.example`, `Production_ENV` and `.env.example.generated`
+include this key. The generated-named template is source-authored; no automatic
+repository generator was found. Keep the loader, validator `_specs` manifest and
+templates aligned; `tests/test_retrieval_depths.py` checks that contract. Preserve
+private runtime values and propagate new permanent keys to applicable existing
+main-chatbot env files without committing them. Separate evaluation services use
+the main chatbot through HTTP and do not load this retrieval implementation's env.
+
 | Variable | Required | Secret | Used by | Default | Restart required |
 |---|---|---:|---|---|---|
 | `ENVIRONMENT` | Apparently unused | No | No consumer found | None | None |
@@ -52,6 +111,7 @@ reproduced here.
 | `VLLM_URL` | No | Internal | OpenAI-compatible vLLM client | `http://localhost:8000/v1` | FastAPI |
 | `TEI_EMBED_URL` | Yes | Internal | TEI embedding clients | None on active path | FastAPI/tool |
 | `TEI_RERANK_URL` | Yes | Internal | TEI reranking client | Mixed: none/localhost `7998` | FastAPI |
+| `TEI_RERANK_MAX_CLIENT_BATCH_SIZE` | No | No | Both TEI reranking paths | `50` texts/request | FastAPI |
 | `EMBEDDING_MODEL` | Behaviorally unused | Internal | Loaded as legacy metadata | None | FastAPI |
 | `EMBEDDING_MODEL_NAME` | Legacy only | Internal | Inactive local embedding class | None | Legacy command |
 | `LLM_MODEL` | Behaviorally unused | Internal | Loaded only | None | None |
@@ -79,8 +139,9 @@ reproduced here.
 | `VLLM_HTTP_WRITE_TIMEOUT_SECONDS` | No | No | vLLM HTTPX | `5` | FastAPI |
 | `VLLM_HTTP_POOL_TIMEOUT_SECONDS` | No | No | vLLM HTTPX | `3` | FastAPI |
 | `QDRANT_CONCURRENCY` | No | No | Retrieval semaphore | `4` | FastAPI |
-| `RAG_RETRIEVAL_TOP_K` | No | No | Retrieval | `10` | FastAPI |
-| `RAG_SEMANTIC_CANDIDATE_LIMIT` | No | No | Retrieval | `50` | FastAPI |
+| `RAG_RETRIEVAL_TOP_K` | No | No | Maximum final fused entries | `10` | FastAPI |
+| `RAG_BM25_CANDIDATE_LIMIT` | No | No | Maximum lexical candidates | `50` | FastAPI |
+| `RAG_SEMANTIC_CANDIDATE_LIMIT` | No | No | Maximum dense candidates | `50` | FastAPI |
 | `RAG_RELATED_QUESTIONS_RERANK_THRESHOLD` | No | No | Web and mobile related questions | `0.1` | FastAPI |
 | `MOBILE_RELATED_QUESTIONS_RERANK_THRESHOLD` | Legacy only | No | Settings parser only; no behavioral consumer | `0.5` | None |
 | `RAG_MAX_NEW_TOKENS` | No | No | General generation | `500` | FastAPI |
@@ -826,6 +887,62 @@ this repository. Qdrant is the opposite: active code uses `QDRANT_HOST`,
 does not mean the host machine or another container. A Docker service name is
 needed for another container on the same Compose network.
 
+## A2 knowledge-coverage pilot settings (2026-10-14)
+
+These optional settings affect the separate audit page/runner, not production
+answering defaults. `knowledge_audit.settings.load_coverage_settings` validates
+the complete configuration. Invalid audit settings deny new access or prevent
+audit runtime creation; they do not grant new legacy role privileges. Runtime
+manifests include effective limits and a grant-map hash, not authentication data.
+
+| Variable | Default | Type and validation |
+|---|---|---|
+| `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Absolute durable directory outside repository/static and `/tmp`; no symlink traversal; owner-only directories 0700/files 0600. Provision appropriate ownership before running under another service account. |
+| `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` | `{}` | JSON object: canonical positive web-user-ID strings to arrays of explicitly allowed audit capabilities. Unknown capabilities/roles/invalid IDs fail closed. No automatic admin grant. |
+| `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Integer 1024–20971520; decoded CSV bytes, with an additional bounded JSON/base64 transport envelope. |
+| `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Integer 256–4096; reserved structured-output tokens for each audit completion. Complete input plus this reserve/margin must fit the served context limit. |
+| `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
+| `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` | `2` | Audit-local integer 1–5; whole Q/A entries per batch, with fewer when required by served-token budgeting. Pinned in run/configuration/export identity; changed cap rejects resume. |
+
+A2.2 adds no env variables and does not alter those defaults or production HTTP
+settings. Fixed manifest policies `audit-failures-1` and `full-entries-two-1` add
+content-safe failure categories and cap audit batches at two complete entries.
+The existing 40-second effective staging model read timeout, 50-second
+admission/completion deadline and zero network retries are inherited unchanged;
+the source default for model read remains 45 seconds. Tokenization is outside that
+outer deadline and retains its HTTP timeout. Diagnostic read overrides are local
+experiments only, not permanent runtime values. Existing templates/private runtime
+envs require no new keys; the user-deleted staging template remains deleted.
+
+Allowed capabilities are `coverage_run_start`, `coverage_results_view`,
+`coverage_evidence_view`, `coverage_export_download`. An entirely synthetic
+example grants all four to imaginary account 123:
+
+```dotenv
+KNOWLEDGE_COVERAGE_ACCESS_GRANTS={"123":["coverage_run_start","coverage_results_view","coverage_evidence_view","coverage_export_download"]}
+```
+
+Existing `kb_read` is additionally required for snapshot capture/run start/source
+evidence. Evidence/export require results access too. Explicit capability grants
+do not transfer another user's dataset or run. Trusted CLI `--owner-id` assigns
+ownership when importing; default 0 is the isolated operator namespace. Identical
+validated snapshots can be explicitly registered for another owner without
+sharing datasets/runs. No browser path-read or snapshot-grant endpoint exists.
+
+Constants in the versioned run manifest: five pilot queries, sequential model
+calls, configurable 1–5 entries per batch (default two), initial depths 150/150/150 and 50 initial entries,
+broader depths 300/300/300, maximum 300 distinct evaluated entries. The per-run
+budget is validated 1–300. These are current A2 limits, not unused env knobs.
+Existing performance/history/classifier settings are reused where semantics match.
+
+All six names/defaults appear in `env.example`, `Production_ENV`,
+`.env.example.generated` and `scripts/validate_environment.py`. The generated-named
+template is source-authored; no automatic generator was found. Existing private
+`.env`/`.env_latest` were extended with missing keys only; no private values were
+committed or overwritten and the deleted staging template was not recreated.
+No running service was restarted. A future approved runtime loads these values
+through the existing dotenv/startup mechanism.
+
 ## Settings not present
 
 No repository environment consumers or startup manifests were found for
@@ -836,3 +953,73 @@ pool, Redis runtime, JWT secret/token lifetime/authentication flags,
 observability exporters, or a full `DATABASE_URL`. These may be configured
 outside the repository, but inventing local variables would not affect the
 current code.
+
+
+A3 adds only `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES=2`. Defaults/validation and
+all applicable tracked templates (`env.example`, `env.review.example`,
+`Production_ENV`, `.env.example.generated`) agree. Existing local `.env` and
+`.env_latest` receive only the missing key; existing values stay preserved.
+No generator implementation exists for the source-authored generated-named
+template; no deleted staging template is recreated. Manifest policy becomes
+`full-entries-configurable-1`, settings schema `coverage-settings-3`, CSV v4.
+The A3 campaign's 120-completion ceiling and preselected 12+3 controlled records
+are versioned operator experiment bounds, not unused permanent env settings.
+No production retrieval/timeouts/output defaults or role grants change.
+
+
+## A4 recommendation review access
+
+No new permanent env variable or default is introduced.
+`KNOWLEDGE_COVERAGE_ACCESS_GRANTS` additionally accepts the explicit capability
+`coverage_recommendation_review`, default denied by `{}`. It permits owned
+question/taxonomy review only, requires results/evidence/kb_read too, and does not
+grant KB writes or confirm factual answers. Existing role permissions and real
+account grants are unchanged. All four applicable tracked templates document the
+capability; private `.env`/`.env_latest` bytes remain unchanged. No template
+generator exists for the source-authored generated-named file; the deleted staging
+template stays deleted. Fixed versioned A4 bounds: up to five selected rows, up
+to three gaps/questions, twenty title candidates, sequential responsibilities and
+40 total staging pilot completion dispatches including checks/recovery. These are
+experiment/schema/algorithm bounds, not unused runtime knobs. Existing model
+output/token-margin/deadline/admission/zero-network-retry settings are reused.
+
+### A6.1 execution size
+
+`KNOWLEDGE_COVERAGE_MAX_RUN_ROWS` defaults to **10000**, integer range **5–100000**.
+It limits selected audit rows in pilot/subset/full-input modes; an oversized
+selection is rejected, never truncated. The default execution mode remains an
+explicit pilot of at most five rows. `coverage-settings-4` includes this value
+and the execution/checkpoint policy identities; changing pinned configuration
+requires a new run. The maximum is a selection guard, not measured capacity or
+permission to run customer inputs. A6.1 validates 918 synthetic rows only.
+Batch cap 2 by default, distinct-entry maximum 300, sequential inference, existing
+model/output/deadline settings and explicit default-deny grants are unchanged.
+Updated root examples (`env.example`, `env.review.example`, `Production_ENV`,
+`.env.example.generated`) and existing private `.env`/`.env_latest`; no generated
+template source exists beyond the source-authored generated-named example.
+
+## A6.2 finite audit operations and manual retention
+
+All settings are strict integers, appear in run configuration/export identities, and
+are audit-local. Run requests may tighten completion/token/time/failure ceilings or
+increase disk/pacing protections. They cannot relax configured ceilings. No in-place
+allowance extension is implemented: a depleted allowance requires a new run with
+explicit settings; consumed reservations on the old run remain intact.
+
+| Variable | Default | Range | Meaning |
+|---|---:|---|---|
+| `KNOWLEDGE_COVERAGE_MAX_COMPLETIONS` | 200 | 1–100000 | Reserved completion attempts across all recovery attempts. |
+| `KNOWLEDGE_COVERAGE_MAX_TOKENS` | 1000000 | 1–1000000000 | Conservative completion prompt plus maximum output token allowance. |
+| `KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS` | 3600 | 1–604800 | Cumulative execution seconds; abandoned active intervals include downtime. |
+| `KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES` | 3 | 1–100 | Consecutive service/model failures before pause. |
+| `KNOWLEDGE_COVERAGE_MIN_FREE_BYTES` | 1073741824 | 0–1099511627776 | Minimum free artifact filesystem bytes before dispatch. |
+| `KNOWLEDGE_COVERAGE_PACE_MS` | 500 | 0–60000 | Audit-local delay before shared admission in milliseconds. |
+| `KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS` | 20 | 1–10000 | Separate completion allowance per recommendation revision. |
+| `KNOWLEDGE_COVERAGE_RETENTION_DAYS` | 30 | 1–3650 | Manual cleanup age threshold; automatic deletion is always disabled. |
+
+Automatic deletion has no scheduled worker and is disabled. Retention is a trusted
+operator dry-run/explicit-plan apply operation; holds, retained dependencies and
+active/recoverable work are protected. Expiry does not silently change access.
+No separate generator for the source-authored `.env.example.generated` exists.
+Private `.env`/`.env_latest` receive only missing keys, without changing old values.
+A configured maximum is not measured capacity.

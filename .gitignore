@@ -1,10 +1,10 @@
 # Secrets and local environment
-# /.env
+/Production_ENV
+/.env
 /.env.*
 !/.env.example
 !/.env.example.generated
 !/.env.recommended.rtx5880-staging
-/env.example
 *.pem
 *.key
 *.p12
@@ -17,7 +17,6 @@ id_ed25519
 /.vscode/
 /.codex/
 /.qdrant-initialized
-/t -q
 *.code-workspace
 *.swp
 *.swo
@@ -95,9 +94,6 @@ celerybeat.pid
 /new_architecture/app/temp/
 /new_architecture/app/cache/
 
-# Private root-level knowledge-base exports
-/FAQ - end of 23031405 (v2).csv
-/تحویل هومن - خانم اله_بداشتی2.csv
 
 # RAG source documents: preserve only the clone-time directory
 /data_insertion_chunks/DOCUMENTS/*

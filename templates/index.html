@@ -25,6 +25,7 @@
         </div>
 
         <div class="sidebar__nav">
+            {% include "_coverage_nav_link.html" %}
             <a href="/app" class="sidebar__nav-item active">
                 <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#chat"></use></svg>
                 <span data-i18n="nav_chat">Chat</span>

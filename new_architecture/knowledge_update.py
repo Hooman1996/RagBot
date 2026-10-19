@@ -15,9 +15,10 @@ import math
 import os
 import time
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Callable, Protocol
+from utils.faq_content import FaqContentError
 
 
 LOGGER = logging.getLogger("knowledge_update")
@@ -74,6 +75,8 @@ class KnowledgeUpdateResult:
     knowledge_update_id: str
     updated_stores: tuple[str, ...]
     stage_durations_ms: dict[str, float]
+    no_op: bool = False
+    updated_content: str = field(default="", repr=False)
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -83,6 +86,7 @@ class KnowledgeUpdateResult:
             "knowledge_update_id": self.knowledge_update_id,
             "updated_stores": list(self.updated_stores),
             "stage_durations_ms": self.stage_durations_ms,
+            "no_op": self.no_op,
         }
 
 
@@ -339,12 +343,13 @@ class KnowledgeUpdateCoordinator:
         self,
         *,
         chunk_id: int,
-        content: str,
-        normalized_content: str,
+        content: str | None = None,
+        normalized_content: str | None = None,
         changed_by: str,
+        prepare_content: Callable[[str], tuple[str, str]] | None = None,
     ) -> KnowledgeUpdateResult:
         update_id = str(uuid.uuid4())
-        answer_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+        answer_hash = hashlib.sha256((content or "").encode("utf-8")).hexdigest()
         revision = f"{update_id}:{answer_hash[:16]}"
         durations: dict[str, float] = {}
         repository = self._repository_factory()
@@ -361,6 +366,11 @@ class KnowledgeUpdateCoordinator:
         )
         try:
             preflight = repository.read_fresh(chunk_id)
+            if prepare_content is not None:
+                content, normalized_content = prepare_content(preflight.content if preflight else "")
+            if content is None or normalized_content is None:
+                raise ValueError("Knowledge update requires prepared content.")
+            prepared_content = content
             if preflight is not None and preflight.content == content:
                 vector = preflight.vector
                 durations["embedding"] = 0.0
@@ -377,10 +387,16 @@ class KnowledgeUpdateCoordinator:
             locked = repository.lock(chunk_id)
             if locked is None:
                 raise KnowledgeChunkNotFound("CHUNK_NOT_FOUND", update_id)
+            if prepare_content is not None:
+                # Re-resolve omissions against the relevant row while locked.
+                # A concurrent taxonomy change cannot be restored from preflight.
+                content, normalized_content = prepare_content(locked.content)
+            answer_hash = hashlib.sha256(content.encode("utf-8")).hexdigest()
+            revision = f"{update_id}:{answer_hash[:16]}"
             if locked.content == content:
                 vector = locked.vector
                 durations["embedding"] = 0.0
-            elif preflight is not None and preflight.content == content:
+            elif prepared_content != content or (preflight is not None and preflight.content == prepared_content):
                 # The row changed after the preflight read. Embed while holding
                 # the lock so the requested content still receives its vector.
                 stage = "EMBEDDING_FAILED"
@@ -391,6 +407,23 @@ class KnowledgeUpdateCoordinator:
                 ) * 1000
             stage = "QDRANT_UPDATE_FAILED"
             previous_point = self._vector_store.read(chunk_id)
+            if (locked.content == content and previous_point is not None
+                    and previous_point.payload.get("content") == content
+                    and previous_point.payload.get("text") == content
+                    and vectors_equivalent(previous_point.vector, locked.vector)
+                    and previous_point.payload.get("chunk_id") == chunk_id
+                    and previous_point.payload.get("chunk_index") == locked.chunk_index
+                    and previous_point.payload.get("document_id") == locked.document_id
+                    and previous_point.payload.get("document") == locked.document_title):
+                # A true no-op is proved under the same lock, including Qdrant.
+                # Stale/missing derived state still follows the repair pipeline.
+                repository.rollback()
+                self._log("UPDATE_UNCHANGED", update_id=update_id, chunk_id=chunk_id,
+                    answer_hash=answer_hash, duration_ms=sum(durations.values()))
+                return KnowledgeUpdateResult(True, str(chunk_id),
+                    previous_point.payload.get("knowledge_revision") or f"unchanged:{answer_hash[:16]}",
+                    update_id, (), {k:round(v,3) for k,v in durations.items()},
+                    no_op=True, updated_content=content)
             stage = "POSTGRES_UPDATE_FAILED"
             repository.stage(
                 chunk_id=chunk_id,
@@ -544,7 +577,18 @@ class KnowledgeUpdateCoordinator:
                 stage_durations_ms={
                     key: round(value, 3) for key, value in durations.items()
                 },
+                updated_content=content,
             )
+        except FaqContentError as exc:
+            try:
+                repository.rollback()
+            except Exception as rollback_exc:
+                self._log("UPDATE_FAILED", update_id=update_id, chunk_id=chunk_id,
+                    answer_hash=answer_hash, reason_code="POSTGRES_ROLLBACK_FAILED", repair_required=True)
+                raise KnowledgeUpdateFailure("POSTGRES_UPDATE_FAILED", update_id, repair_required=True) from rollback_exc
+            self._log("UPDATE_FAILED", update_id=update_id, chunk_id=chunk_id,
+                answer_hash=answer_hash, reason_code="INVALID_FAQ_CONTENT")
+            raise
         except KnowledgeChunkNotFound:
             repository.rollback()
             self._log(
@@ -558,7 +602,13 @@ class KnowledgeUpdateCoordinator:
         except Exception as exc:
             repair_required = committed or not compensation_safe
             if not committed:
-                repository.rollback()
+                try:
+                    repository.rollback()
+                except Exception:
+                    repair_required = True
+                    compensation_safe = False
+                    self._log("POSTGRES_ROLLBACK_FAILED", update_id=update_id,
+                        chunk_id=chunk_id, answer_hash=answer_hash, repair_required=True)
                 if qdrant_attempted and compensation_safe:
                     try:
                         self._vector_store.restore(chunk_id, previous_point)

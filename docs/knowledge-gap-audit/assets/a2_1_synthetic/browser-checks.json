@@ -1,0 +1,20 @@
+{
+  "browser_version": "153.0.8010.0",
+  "fixture": "synthetic-auth-and-artifacts-only",
+  "checks": [
+    "signed_synthetic_auth_and_keyboard_skip",
+    "csv_bom_persian_multiline_mapping_and_invalid_row_preservation",
+    "background_progress_cancellation_and_pinned_retry",
+    "supported_aspects_numbered_evidence_keyboard_return_and_themes",
+    "filters_missing_aspects_and_explicit_error_stopping_reason",
+    "actual_csv_and_manifest_download_same_immutable_revision",
+    "persian_rtl_responsive_390_and_1024_no_page_overflow"
+  ],
+  "screenshots": [
+    "desktop-dark.png",
+    "desktop-light.png",
+    "error-detail-light.png",
+    "mobile-rtl-light.png",
+    "mobile-rtl-dark.png"
+  ]
+}

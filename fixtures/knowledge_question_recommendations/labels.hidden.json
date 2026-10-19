@@ -1,0 +1,28 @@
+{
+  "version": "a4-fictional-labels-1",
+  "authority": "literal_fixture_facts_not_model_or_human_customer_labels",
+  "cases": {
+    "compatibility": {
+      "automatic_recommendation": false,
+      "full_coverage": false,
+      "expected_outcome": "needs_review",
+      "self_contained": true,
+      "reason": "Weekday duration and weekend cutoff cannot form one applicable proof."
+    },
+    "partial": {
+      "expected_outcome": "possible_partial_gap",
+      "expected_missing": "Submission cutoff",
+      "automatic_recommendation": true,
+      "expected_action": "review_existing_faq"
+    },
+    "total": {
+      "expected_outcome": "possible_gap",
+      "expected_missing": "Replacement fee",
+      "automatic_recommendation": true
+    },
+    "duplicate_pending": {
+      "expected_outcome": "pending",
+      "automatic_recommendation": false
+    }
+  }
+}

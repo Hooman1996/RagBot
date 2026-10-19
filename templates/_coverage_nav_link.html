@@ -1,0 +1,6 @@
+{% if 'coverage_results_view' in permissions %}
+<a href="/knowledge-coverage" class="sidebar__nav-item{% if coverage_active %} active{% endif %}"{% if coverage_active %} aria-current="page"{% endif %}>
+    <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#knowledge"></use></svg>
+    <span>Knowledge coverage</span>
+</a>
+{% endif %}

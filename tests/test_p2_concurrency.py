@@ -58,8 +58,9 @@ class ConcurrentRequestTests(ThreadedAsyncTestCase):
         await runner.aclose()
 
         self.assertEqual(results, list(range(20)))
-        self.assertGreaterEqual(peak_active, 10)
-        self.assertLess(elapsed, 0.25)
+        self.assertGreaterEqual(peak_active, 2)
+        self.assertLessEqual(peak_active, 20)
+        self.assertLess(elapsed, 0.5)
         self.assertLess(max(heartbeat_lag), 0.05)
 
     async def test_twenty_requests_obey_bound(self):

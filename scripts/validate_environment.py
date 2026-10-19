@@ -54,9 +54,13 @@ def _specs() -> dict[str, VariableSpec]:
         # Application and direct Uvicorn entry point.
         "ENVIRONMENT": VariableSpec(
             allowed=("development", "staging", "production"),
-            component="Unused metadata",
-            restart="none (not consumed)",
-            usage="apparently unused",
+            component="Coverage gate, database reset guard, structured logging",
+            restart="FastAPI",
+            usage="knowledge_audit/settings.py coverage gate; new_architecture/setup_dbs.py reset guard; utils/structured_logging.py",
+        ),
+        "KNOWLEDGE_COVERAGE_ENABLED": VariableSpec(
+            kind="bool", default="false", component="Knowledge coverage audit",
+            restart="FastAPI", usage="coverage gate: true only with ENVIRONMENT=staging",
         ),
         "API_HOST": VariableSpec(
             default="0.0.0.0", component="Uvicorn", restart="FastAPI"
@@ -340,6 +344,99 @@ def _specs() -> dict[str, VariableSpec]:
             component="Data insertion/TEI policy",
             restart="FastAPI or data-insertion command",
         ),
+        "TEI_RERANK_MAX_CLIENT_BATCH_SIZE": VariableSpec(
+            kind="int", default="50", minimum=1,
+            component="TEI reranker client", restart="FastAPI",
+        ),
+        "TEI_RERANK_VERIFIED_MAX_BATCH_SIZE": VariableSpec(
+            kind="int", minimum=1, required=("production",),
+            component="TEI reranker client", restart="FastAPI",
+        ),
+        "TEI_RERANK_CAPABILITY_TTL_SECONDS": VariableSpec(
+            kind="int", default="600", minimum=1,
+            component="TEI reranker client", restart="FastAPI",
+        ),
+        "TEI_RERANK_CAPABILITY_RETRY_SECONDS": VariableSpec(
+            kind="int", default="30", minimum=1,
+            component="TEI reranker client", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_ARTIFACT_DIR": VariableSpec(
+            kind="path", default="/root/projects/faq-private/knowledge-coverage", component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_ACCESS_GRANTS": VariableSpec(
+            default="{}", component="Knowledge coverage permissions", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES": VariableSpec(
+            kind="int", default="5242880", minimum=1024, maximum=20971520, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS": VariableSpec(
+            kind="int", default="1200", minimum=256, maximum=4096, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_TOKEN_MARGIN": VariableSpec(
+            kind="int", default="128", minimum=32, maximum=1024, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_COMPLETIONS": VariableSpec(
+            kind="int", default="200", minimum=1, maximum=100000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_TOKENS": VariableSpec(
+            kind="int", default="1000000", minimum=1, maximum=1000000000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_EXECUTION_SECONDS": VariableSpec(
+            kind="int", default="3600", minimum=1, maximum=604800, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_CONSECUTIVE_FAILURES": VariableSpec(
+            kind="int", default="3", minimum=1, maximum=100, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MIN_FREE_BYTES": VariableSpec(
+            kind="int", default="1073741824", minimum=0, maximum=1099511627776, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_PACE_MS": VariableSpec(
+            kind="int", default="500", minimum=0, maximum=60000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_RECOMMENDATION_MAX_COMPLETIONS": VariableSpec(
+            kind="int", default="20", minimum=1, maximum=10000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_RETENTION_DAYS": VariableSpec(
+            kind="int", default="30", minimum=1, maximum=3650, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_RUN_ROWS": VariableSpec(
+            kind="int", default="10000", minimum=5, maximum=100000, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES": VariableSpec(
+            kind="int", default="2", minimum=1, maximum=5, component="Knowledge coverage", restart="FastAPI",
+        ),
+        "KNOWLEDGE_COVERAGE_INITIAL_DEPTH": VariableSpec(
+            kind="int", default="150", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/retrieval.py AuditRetrieval initial fetch depth; knowledge_audit/pipeline.py CoverageEvaluator initial pool",
+        ),
+        "KNOWLEDGE_COVERAGE_BROADER_DEPTH": VariableSpec(
+            kind="int", default="300", minimum=2, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/retrieval.py AuditRetrieval broader fetch depth; knowledge_audit/pipeline.py CoverageEvaluator broadening",
+        ),
+        "KNOWLEDGE_COVERAGE_INITIAL_ENTRIES": VariableSpec(
+            kind="int", default="50", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/retrieval.py AuditRetrieval entries kept from the reranked initial pool",
+        ),
+        "KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET": VariableSpec(
+            kind="int", default="300", minimum=1, maximum=1000, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/pipeline.py CoverageEvaluator entry budget ceiling; knowledge_audit/api.py run entry_budget default",
+        ),
+        "KNOWLEDGE_COVERAGE_VERIFICATION_PASSES": VariableSpec(
+            kind="int", default="2", minimum=1, maximum=2, component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/pipeline.py CoverageEvaluator.verify passes per accepted proof; 2 re-verifies in reversed evidence order",
+        ),
+        "KNOWLEDGE_COVERAGE_DEDUPE": VariableSpec(
+            kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/dedupe.py repeated-question key and copy; knowledge_audit/pipeline.py CoverageEvaluator.evaluate reuses the same run's completed result",
+        ),
+        "KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER": VariableSpec(
+            kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/recommendation_store.py RecommendationStore.decide refuses an approval by the run owner; reviewers need coverage_recommendation_review",
+        ),
+        "KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS": VariableSpec(
+            default="", component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/privacy.py Redactor.kb_text public-contact allow-list for KB snapshots",
+        ),
         "VLLM_HTTP_MAX_CONNECTIONS": VariableSpec(
             kind="int", default="32", minimum=1, component="vLLM client", restart="FastAPI"
         ),
@@ -373,6 +470,9 @@ def _specs() -> dict[str, VariableSpec]:
         ),
         "RAG_RETRIEVAL_TOP_K": VariableSpec(
             kind="int", default="10", minimum=1, component="Retrieval", restart="FastAPI"
+        ),
+        "RAG_BM25_CANDIDATE_LIMIT": VariableSpec(
+            kind="int", default="50", minimum=1, component="Retrieval", restart="FastAPI"
         ),
         "RAG_SEMANTIC_CANDIDATE_LIMIT": VariableSpec(
             kind="int", default="50", minimum=1, component="Retrieval", restart="FastAPI"
@@ -788,6 +888,10 @@ def analyze_environment(
             {"severity": "critical", "variable": variable, "message": message}
         )
 
+    if (effective.get("KNOWLEDGE_COVERAGE_ENABLED", "").strip().lower() == "true"
+            and effective.get("ENVIRONMENT", "").strip().lower() == "production"):
+        add_relationship_error("KNOWLEDGE_COVERAGE_ENABLED", "coverage_enabled_in_production")
+
     def as_number(name: str) -> float | None:
         value = effective.get(name)
         if value is None or _validate_value(name, value, SPECS[name]):
@@ -826,17 +930,6 @@ def analyze_environment(
         add_relationship_error(
             "TEI_EMBED_INSERT_BATCH_SIZE",
             "cannot exceed TEI_EMBED_MAX_CLIENT_BATCH_SIZE",
-        )
-    top_k = as_number("RAG_RETRIEVAL_TOP_K")
-    candidate_limit = as_number("RAG_SEMANTIC_CANDIDATE_LIMIT")
-    if (
-        top_k is not None
-        and candidate_limit is not None
-        and top_k > candidate_limit
-    ):
-        add_relationship_error(
-            "RAG_RETRIEVAL_TOP_K",
-            "cannot exceed RAG_SEMANTIC_CANDIDATE_LIMIT",
         )
 
     severity_counts = {

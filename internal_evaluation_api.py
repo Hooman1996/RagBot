@@ -537,6 +537,7 @@ def build_runtime_snapshot(
         },
         "retrieval": {
             "top_k": PERFORMANCE_SETTINGS.rag_retrieval_top_k,
+            "bm25_candidate_limit": PERFORMANCE_SETTINGS.rag_bm25_candidate_limit,
             "candidate_limit": PERFORMANCE_SETTINGS.rag_semantic_candidate_limit,
             "qdrant_collection": getattr(
                 search_engine,
@@ -546,6 +547,7 @@ def build_runtime_snapshot(
             "knowledge_sources": list(selected_documents or []),
         },
         "rerank": {
+            "client_batch_size": PERFORMANCE_SETTINGS.tei_rerank_max_client_batch_size,
             "model": os.getenv("RERANKER_MODEL"),
             "enabled": PERFORMANCE_SETTINGS.rag_context_rerank_enabled,
             "top_k": PERFORMANCE_SETTINGS.rag_context_rerank_top_k,

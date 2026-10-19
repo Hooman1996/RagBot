@@ -175,12 +175,19 @@ class RAGSystem:
         """
         self.search_engine.add_documents(documents=documents)
 
-    async def retrieve(self, query, top_k=None, allowed_docs=None, rerank=False):
+    async def retrieve(self, query, top_k=None, allowed_docs=None, rerank=False,
+                       *, bm25_candidate_limit=None, semantic_candidate_limit=None):
         self._ensure_open()
+        depths = {}
+        if bm25_candidate_limit is not None:
+            depths["bm25_candidate_limit"] = bm25_candidate_limit
+        if semantic_candidate_limit is not None:
+            depths["semantic_candidate_limit"] = semantic_candidate_limit
         results = await self.search_engine.search(
             query=query,
-            top_k=top_k or PERFORMANCE_SETTINGS.rag_retrieval_top_k,
+            top_k=PERFORMANCE_SETTINGS.rag_retrieval_top_k if top_k is None else top_k,
             allowed_docs=allowed_docs,
+            **depths,
         )
         return results
 
@@ -210,7 +217,9 @@ class RAGSystem:
         self._vllm_active += 1
         try:
             async with trace_span("vllm"):
-                return await self.client.chat.completions.create(**kwargs)
+                from utils.audit_dispatch import audit_dispatch
+                return await audit_dispatch('completion',lambda:self.client.chat.completions.create(**kwargs),
+                    messages=kwargs.get('messages'),model=kwargs.get('model'),output_tokens=kwargs.get('max_tokens'))
         except APITimeoutError as exc:
             self._vllm_timeout_total += 1
             raise ServiceTimeoutError("Language model service timed out") from exc

@@ -82,6 +82,8 @@ class RetrievalNormalizationConsistencyTests(unittest.IsolatedAsyncioTestCase):
         requests = []
 
         async def handler(request):
+            if request.method == "GET":
+                return httpx.Response(200, json={"max_client_batch_size": 64})
             requests.append(json.loads(request.content))
             return httpx.Response(
                 200,

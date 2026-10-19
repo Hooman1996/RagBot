@@ -1,5 +1,6 @@
 """Offline monitoring contract and resource isolation; no live dependencies."""
 import asyncio
+import gc
 import json
 import io
 import logging
@@ -275,9 +276,19 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
         for component_timeout, overall_timeout in ((.03, .2), (1, .03)):
             with patch.object(health, "PER_COMPONENT_SECONDS", component_timeout), patch.object(health, "REFRESH_SECONDS", overall_timeout), \
                  patch.object(health, "REUSE_SECONDS", 0), patch.object(self.coordinator, "probe_vllm", slow):
-                started = time.monotonic()
-                status, body = await self.report()
-                self.assertLess(time.monotonic() - started, .3)
+                # A full GC of the whole suite's heap takes about 0.5 s; keep it
+                # out of the timed window so only the deadlines are measured.
+                enabled = gc.isenabled()
+                gc.collect()
+                gc.disable()
+                try:
+                    started = time.monotonic()
+                    status, body = await self.report()
+                    elapsed = time.monotonic() - started
+                finally:
+                    if enabled:
+                        gc.enable()
+                self.assertLess(elapsed, .3)
                 self.assertEqual((status, body["checks"]["vllm"]["code"]), (503, "CHECK_TIMEOUT"))
                 self.assertEqual(set(body["checks"]), set(health.COMPONENTS))
 

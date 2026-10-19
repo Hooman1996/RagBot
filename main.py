@@ -69,7 +69,8 @@ from utils.structured_logging import log_event, start_logging
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
-from web_permissions import permissions_for
+from web_permissions import permissions_for, permissions_for_user
+from knowledge_audit.api import mount
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
                       set_cookies, clear_cookies, web_auth_middleware, safe_user,
                       validate_config, job_access_token, valid_job_access)
@@ -414,6 +415,9 @@ async def lifespan(app: FastAPI):
                 cleanup_errors.append(exc)
 
         await cleanup(app.state.health_coordinator.aclose)
+        if hasattr(app.state, "coverage_runtime"):
+            await cleanup(app.state.coverage_runtime[2].aclose)
+            del app.state.coverage_runtime
         if mass_answer_job_manager is not None:
             await cleanup(mass_answer_job_manager.aclose)
         if rag_system is not None:
@@ -510,6 +514,7 @@ app.mount("/static", VersionedStaticFiles(directory=str(STATIC_DIR)), name="stat
 app.include_router(kb_router)
 app.include_router(mobile_router)
 app.include_router(internal_evaluation_router)
+mount(app)
 
 
 # --- GLOBAL BUSINESS RECOVERY EXCEPTION HANDLER FOR BANK STANDARDS ---
@@ -611,14 +616,14 @@ async def home(request: Request):
 @app.get("/app", response_class=HTMLResponse)
 async def app_page(request: Request):
     return templates.TemplateResponse("index.html", {"request": request,
-                                                      "permissions": permissions_for(request.state.web_user.role)},
+                                                      "permissions": permissions_for_user(request.state.web_user.role, request.state.web_user.id)},
                                       headers={"Cache-Control": "no-store"})
 
 
 @app.get("/analytics", response_class=HTMLResponse)
 async def analytics_page(request: Request):
     return templates.TemplateResponse("analytics.html", {"request": request,
-                                                          "permissions": permissions_for(request.state.web_user.role),
+                                                          "permissions": permissions_for_user(request.state.web_user.role, request.state.web_user.id),
                                                           "analytics_contract_version": ANALYTICS_CONTRACT_VERSION},
                                       headers={"Cache-Control": "private, no-store, max-age=0",
                                                "Pragma": "no-cache", "Vary": "Cookie"})

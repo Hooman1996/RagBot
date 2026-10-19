@@ -1,0 +1,1 @@
+{"boundaries_per_iteration": 12, "checkpoint_only": {"measurements_ms": [500.22, 513.81, 556.253], "median_ms": 513.81}, "checkpoint_with_allowance": {"measurements_ms": [803.584, 795.736, 707.821], "median_ms": 795.736}, "input_rows": 918, "iterations": 3, "live_dispatches": 0, "scope": "mocked_file_io_no_service_throughput", "version": "a62-file-io-1"}

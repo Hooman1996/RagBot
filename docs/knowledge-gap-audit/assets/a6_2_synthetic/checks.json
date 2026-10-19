@@ -1,0 +1,16 @@
+{
+  "browser_version": "153.0.8010.0",
+  "synthetic_rows": 918,
+  "live_dispatches": 0,
+  "checks": [
+    "explicit_full_budget_acknowledgement_and_keyboard_start",
+    "durable_two_call_pause_zero_missing_gap_and_918_pending",
+    "exhausted_recovery_refused_without_reset",
+    "immutable_918_csv_manifest_hash_and_allowance",
+    "light_dark_keyboard_and_390_rtl_no_page_overflow"
+  ],
+  "screenshots": [
+    "a62-paused-light.png",
+    "a62-paused-dark-rtl.png"
+  ]
+}

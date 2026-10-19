@@ -17,6 +17,20 @@ def _positive_int(name: str, default: int) -> int:
     return value
 
 
+def _optional_positive_int(name: str) -> int | None:
+    raw = os.getenv(name)
+    if raw is None or not raw.strip():
+        return None
+    return _positive_int(name, 1)
+
+
+def validate_retrieval_depth(name: str, value: int) -> int:
+    """Validate internal request overrides without coercion or shared mutation."""
+    if isinstance(value, bool) or not isinstance(value, int) or value < 1:
+        raise ValueError(f"{name} must be a positive integer")
+    return value
+
+
 def _positive_float(name: str, default: float) -> float:
     raw = os.getenv(name, str(default))
     try:
@@ -108,6 +122,10 @@ class PerformanceSettings:
     tei_http_pool_timeout_seconds: float
     tei_embed_insert_batch_size: int
     tei_embed_max_client_batch_size: int
+    tei_rerank_max_client_batch_size: int
+    tei_rerank_verified_max_batch_size: int | None
+    tei_rerank_capability_ttl_seconds: int
+    tei_rerank_capability_retry_seconds: int
     vllm_http_max_connections: int
     vllm_http_max_keepalive_connections: int
     vllm_http_keepalive_expiry_seconds: float
@@ -118,6 +136,7 @@ class PerformanceSettings:
     qdrant_concurrency: int
     rag_query_canonicalization_enabled: bool
     rag_retrieval_top_k: int
+    rag_bm25_candidate_limit: int
     rag_semantic_candidate_limit: int
     rag_context_rerank_enabled: bool
     rag_context_rerank_top_k: int
@@ -231,6 +250,18 @@ def load_performance_settings() -> PerformanceSettings:
         tei_embed_max_client_batch_size=_positive_int(
             "TEI_EMBED_MAX_CLIENT_BATCH_SIZE", 50
         ),
+        tei_rerank_max_client_batch_size=_positive_int(
+            "TEI_RERANK_MAX_CLIENT_BATCH_SIZE", 50
+        ),
+        tei_rerank_verified_max_batch_size=_optional_positive_int(
+            "TEI_RERANK_VERIFIED_MAX_BATCH_SIZE"
+        ),
+        tei_rerank_capability_ttl_seconds=_positive_int(
+            "TEI_RERANK_CAPABILITY_TTL_SECONDS", 600
+        ),
+        tei_rerank_capability_retry_seconds=_positive_int(
+            "TEI_RERANK_CAPABILITY_RETRY_SECONDS", 30
+        ),
         vllm_http_max_connections=_positive_int(
             "VLLM_HTTP_MAX_CONNECTIONS", 32
         ),
@@ -257,6 +288,7 @@ def load_performance_settings() -> PerformanceSettings:
             "RAG_QUERY_CANONICALIZATION_ENABLED", True
         ),
         rag_retrieval_top_k=_positive_int("RAG_RETRIEVAL_TOP_K", 10),
+        rag_bm25_candidate_limit=_positive_int("RAG_BM25_CANDIDATE_LIMIT", 50),
         rag_semantic_candidate_limit=_positive_int(
             "RAG_SEMANTIC_CANDIDATE_LIMIT", 50
         ),
@@ -339,11 +371,6 @@ def load_performance_settings() -> PerformanceSettings:
         raise ValueError(
             "VLLM_HTTP_MAX_KEEPALIVE_CONNECTIONS cannot exceed "
             "VLLM_HTTP_MAX_CONNECTIONS"
-        )
-    if settings.rag_retrieval_top_k > settings.rag_semantic_candidate_limit:
-        raise ValueError(
-            "RAG_RETRIEVAL_TOP_K cannot exceed "
-            "RAG_SEMANTIC_CANDIDATE_LIMIT"
         )
     if settings.rag_context_rerank_top_k > settings.rag_retrieval_top_k:
         raise ValueError(

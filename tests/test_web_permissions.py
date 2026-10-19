@@ -11,9 +11,56 @@ import kb_manager
 from tests.test_web_auth import setup, login, csrf
 from web_permissions import PERMISSIONS, ROLE_PERMISSIONS, route_permission
 
+from tests.test_knowledge_coverage_access_jobs import coverage_staging
+
+pytestmark = pytest.mark.usefixtures("coverage_staging")
+
 
 # Independent expected inventory: method and FastAPI route path -> grant.
 EXPECTED = {
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/export-options'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/combined-export-preview'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/combined-export-revisions'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/combined-export'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/combined-export-manifest'): 'coverage_export_download',
+    ('GET', '/knowledge-coverage'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/rows/{row_id}/recommendations'): 'coverage_evidence_view',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/recommendations'): 'coverage_run_start',
+    ('GET', '/api/knowledge-coverage/recommendations/reviewable'): 'coverage_recommendation_review',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/review-view'): 'coverage_recommendation_review',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}'): 'coverage_evidence_view',
+    ('POST', '/api/knowledge-coverage/recommendations/{revision_id}/cancel'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/recommendations/{revision_id}/reviews'): 'coverage_recommendation_review',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/metadata/{faq_id}'): 'coverage_evidence_view',
+    ('POST', '/api/knowledge-coverage/recommendations/{revision_id}/export-revisions'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/export'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/recommendations/{revision_id}/export-manifest'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/calibrations'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/calibrations/{calibration_id}'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/calibrations/{calibration_id}/export'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/calibrations/{calibration_id}/export-manifest'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/datasets'): 'coverage_run_start',
+    ('GET', '/api/knowledge-coverage/datasets'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/datasets/{dataset_id}/rows'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/snapshots'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/snapshots'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/runs'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/runs/estimate'): 'coverage_run_start',
+    ('GET', '/api/knowledge-coverage/runs'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/results'): 'coverage_results_view',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/rows/{row_id}'): 'coverage_evidence_view',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/export'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/export-revisions'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/export-manifest'): 'coverage_export_download',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/cancel'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/retry'): 'coverage_run_start',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/continuation-preview'): 'coverage_results_view',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/continuation-estimate'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/continuations'): 'coverage_run_start',
+    ('POST', '/api/knowledge-coverage/runs/{run_id}/chain-export-revisions'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/chain-export'): 'coverage_export_download',
+    ('GET', '/api/knowledge-coverage/runs/{run_id}/chain-export-manifest'): 'coverage_export_download',
     ('GET', '/app'): 'chat', ('POST', '/api/query'): 'chat',
     ('GET', '/api/sessions'): 'sessions', ('POST', '/api/sessions'): 'sessions',
     ('GET', '/api/sessions/{session_id}'): 'sessions',
@@ -53,7 +100,7 @@ EXEMPT = {
 
 
 def concrete(path):
-    for name in ('session_id', 'query_id', 'document_id', 'chunk_id', 'job_id'):
+    for name in ('session_id', 'query_id', 'document_id', 'chunk_id', 'job_id', 'dataset_id', 'run_id', 'row_id'):
         path = path.replace('{' + name + '}', '123')
     return path
 

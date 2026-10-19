@@ -28,6 +28,8 @@ document.addEventListener('DOMContentLoaded', () => {
             qaWrapper: document.getElementById('new-chunk-qa-fields-wrapper'),
             question: document.getElementById('new-chunk-question'),
             answer: document.getElementById('new-chunk-answer'),
+            mainCategory: document.getElementById('new-chunk-main-category'),
+            subCategory: document.getElementById('new-chunk-sub-category'),
             changedBy: document.getElementById('new-chunk-operator-name')
         }
     };
@@ -42,7 +44,31 @@ document.addEventListener('DOMContentLoaded', () => {
                 ? `${data.detail.message} (شناسه پیگیری: ${updateId})`
                 : data.detail.message;
         }
+        if (Array.isArray(data?.detail)) return data.detail.map(item => item.msg).join('؛ ');
         return fallback;
+    }
+
+    function validateTaxonomy(main, sub, focusTarget) {
+        if (sub && !main) {
+            displayToastNotify('برای زیردسته، ابتدا دسته‌بندی را وارد کنید.', 'error');
+            focusTarget.focus();
+            return false;
+        }
+        if ([main, sub].some(value => /[\r\n]|question\s+category\s*:|sub\s*_\s*category\s*:/i.test(value))) {
+            displayToastNotify('فقط نام دسته‌بندی و زیردسته را در فیلدهای مربوط وارد کنید.', 'error');
+            focusTarget.focus();
+            return false;
+        }
+        return true;
+    }
+
+    function taxonomyControls(chunk) {
+        return `<div class="kb-taxonomy-fields" aria-describedby="taxonomy-help-${chunk.id}">
+            <div><label for="main-category-${chunk.id}">دسته‌بندی</label><input id="main-category-${chunk.id}" type="text" dir="auto" value="${escapeHTML(chunk.main_category || '')}" aria-describedby="taxonomy-help-${chunk.id}"></div>
+            <div><label for="sub-category-${chunk.id}">زیردسته</label><input id="sub-category-${chunk.id}" type="text" dir="auto" value="${escapeHTML(chunk.sub_category || '')}" aria-describedby="taxonomy-help-${chunk.id}"></div>
+            <p id="taxonomy-help-${chunk.id}" class="kb-taxonomy-help">اختیاری؛ با تغییر یا پاک‌کردن دسته‌بندی، زیردسته را دوباره مشخص کنید.</p>
+            ${chunk.taxonomy_error ? '<p class="kb-taxonomy-error" role="alert">دسته‌بندی مبهم است؛ محتوای منبع باید پیش از ذخیره بررسی شود.</p>' : ''}
+        </div>`;
     }
 
     // Event Bindings
@@ -67,6 +93,7 @@ document.addEventListener('DOMContentLoaded', () => {
         });
 
         UI.saveNewChunkBtn.addEventListener('click', () => commitNewChunkToPipeline());
+        UI.addChunkForm.mainCategory.addEventListener('input', () => { UI.addChunkForm.subCategory.value = ''; });
     }
 
     async function loadAvailableDocuments() {
@@ -119,6 +146,8 @@ document.addEventListener('DOMContentLoaded', () => {
         if (canWrite) document.getElementById('global-add-chunk-trigger').addEventListener('click', () => {
             UI.addChunkForm.question.value = '';
             UI.addChunkForm.answer.value = '';
+            UI.addChunkForm.mainCategory.value = '';
+            UI.addChunkForm.subCategory.value = '';
             UI.addChunkModal.classList.remove('hidden');
             UI.addChunkModal.classList.add('flex');
         });
@@ -221,6 +250,9 @@ document.addEventListener('DOMContentLoaded', () => {
                 `;
             }
 
+            if (chunk.is_qa) {
+                dynamicBodyLayout += canWrite ? taxonomyControls(chunk) : `<div class="kb-taxonomy-summary" dir="auto">دسته‌بندی: ${escapeHTML(chunk.main_category || 'ثبت نشده')}؛ زیردسته: ${escapeHTML(chunk.sub_category || 'ثبت نشده')}</div>`;
+            }
             card.innerHTML = `
                 <div class="flex justify-between items-center border-b border-slate-800/60 pb-3">
                     <div class="flex items-center gap-2">
@@ -249,6 +281,12 @@ document.addEventListener('DOMContentLoaded', () => {
             UI.workspace.appendChild(card);
 
             if (canWrite) document.getElementById(`sync-btn-${chunk.id}`).addEventListener('click', (e) => executeAtomicPipelineSync(chunk, e.target));
+            if (canWrite && chunk.is_qa) {
+                const mainInput = document.getElementById(`main-category-${chunk.id}`);
+                const subInput = document.getElementById(`sub-category-${chunk.id}`);
+                mainInput.addEventListener('input', () => { subInput.value = ''; });
+                if (chunk.taxonomy_error) document.getElementById(`sync-btn-${chunk.id}`).disabled = true;
+            }
             document.getElementById(`history-btn-${chunk.id}`).addEventListener('click', () => launchHistoryTrackingModal(chunk.id));
             if (canWrite) document.getElementById(`delete-btn-${chunk.id}`).addEventListener('click', () => dispatchDeleteExecutionPipeline(chunk.id));
         });
@@ -264,6 +302,14 @@ document.addEventListener('DOMContentLoaded', () => {
             alert("پر کردن فیلد متن اصلی / پاسخ الزامیست.");
             return;
         }
+        const main = UI.addChunkForm.mainCategory.value.trim();
+        const sub = UI.addChunkForm.subCategory.value.trim();
+        if (isQa && !questionVal) {
+            displayToastNotify('متن سوال را وارد کنید.', 'error');
+            UI.addChunkForm.question.focus();
+            return;
+        }
+        if (isQa && !validateTaxonomy(main, sub, UI.addChunkForm.mainCategory)) return;
 
         UI.saveNewChunkBtn.disabled = true;
         UI.saveNewChunkBtn.textContent = "در حال ایجاد چانک...";
@@ -277,7 +323,9 @@ document.addEventListener('DOMContentLoaded', () => {
                     is_qa: isQa,
                     question: isQa ? questionVal : null,
                     answer: answerVal,
-                    changed_by: operator
+                    changed_by: operator,
+                    ...(isQa && main ? { main_category: main } : {}),
+                    ...(isQa && sub ? { sub_category: sub } : {})
                 })
             });
 
@@ -348,7 +396,7 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'bg-slate-900 p-4 rounded-lg border border-slate-800 flex flex-col gap-2 justify-between items-start md:flex-row md:items-center transition-all hover:border-slate-700';
 
             const textSnippet = ver.is_qa
-                ? `<strong>سوال:</strong> ${escapeHTML(ver.question)}<br><strong>پاسخ:</strong> ${escapeHTML(ver.answer)}`
+                ? `<strong>سوال:</strong> ${escapeHTML(ver.question)}<br><strong>پاسخ:</strong> ${escapeHTML(ver.answer)}<br><strong>دسته‌بندی:</strong> ${escapeHTML(ver.main_category || 'ثبت نشده')}؛ <strong>زیردسته:</strong> ${escapeHTML(ver.sub_category || 'ثبت نشده')}`
                 : escapeHTML(ver.answer);
             const dateParsed = new Date(ver.created_at).toLocaleString('fa-IR');
 
@@ -422,6 +470,22 @@ document.addEventListener('DOMContentLoaded', () => {
         const inputArea = document.getElementById(`target-field-${chunk.id}`);
         const operatorName = document.getElementById(`operator-field-${chunk.id}`).value.trim() || "Hooman (AI Engineer)";
         const originalHTML = buttonInstance.innerHTML;
+        const taxonomy = {};
+        if (chunk.is_qa) {
+            if (chunk.taxonomy_error) {
+                displayToastNotify('دسته‌بندی مبهم است؛ محتوای منبع باید بررسی شود.', 'error');
+                return;
+            }
+            const mainInput = document.getElementById(`main-category-${chunk.id}`);
+            const subInput = document.getElementById(`sub-category-${chunk.id}`);
+            const main = mainInput.value.trim();
+            const sub = subInput.value.trim();
+            // Unchanged metadata is omitted so stale form values cannot undo a
+            // concurrent taxonomy update when only the answer is edited.
+            if (main !== (chunk.main_category || '')) taxonomy.main_category = main || null;
+            if (sub !== (chunk.sub_category || '')) taxonomy.sub_category = sub || null;
+            if (Object.keys(taxonomy).length && !validateTaxonomy(main, sub, mainInput)) return;
+        }
 
         buttonInstance.disabled = true;
         buttonInstance.innerHTML = `⏳ اعمال تغییرات...`;
@@ -435,13 +499,23 @@ document.addEventListener('DOMContentLoaded', () => {
                     is_qa: chunk.is_qa,
                     question: chunk.question,
                     answer: inputArea.value,
-                    changed_by: operatorName
+                    changed_by: operatorName,
+                    ...taxonomy
                 })
             });
 
             const result = await response.json();
             if (response.ok) {
-                displayToastNotify("بروزرسانی موفقیت‌آمیز در پایگاه داده و Qdrant اعمال گردید.", "success");
+                if (typeof result.answer === 'string') {
+                    inputArea.value = result.answer;
+                    Object.assign(chunk, { answer: result.answer, main_category: result.main_category,
+                        sub_category: result.sub_category, taxonomy_error: result.taxonomy_error });
+                    if (chunk.is_qa) {
+                        document.getElementById(`main-category-${chunk.id}`).value = result.main_category || '';
+                        document.getElementById(`sub-category-${chunk.id}`).value = result.sub_category || '';
+                    }
+                }
+                displayToastNotify(result.no_op ? 'تغییری برای ثبت وجود نداشت.' : "بروزرسانی موفقیت‌آمیز در پایگاه داده و Qdrant اعمال گردید.", "success");
             } else {
                 throw new Error(apiErrorMessage(result, "Error processing pipeline script."));
             }

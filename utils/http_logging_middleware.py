@@ -41,6 +41,8 @@ def route_log_policy(path: str) -> RouteLogPolicy:
     """Central policy; it has no effect on routing or authentication."""
     if path == "/static" or path.startswith("/static/"):
         return RouteLogPolicy(False, False, False)
+    if path == "/knowledge-coverage" or path.startswith("/api/knowledge-coverage/"):
+        return RouteLogPolicy(True, False, False)
     if path in {"/", "/app", "/analytics", "/api/health", "/docs",
                 "/api/health/live", "/api/health/ready", "/api/health/details",
                 "/redoc", "/openapi.json", "/favicon.ico", "/knowledge-base/"}:
@@ -184,7 +186,10 @@ class HttpLoggingMiddleware:
         path = scope.get("path", "")
         method = scope.get("method", "")
         policy = route_log_policy(path)
-        safe_path = scrub_text(path, hmac_secret=self.settings.pii_hmac_secret,
+        # Audit paths are caller-controlled too; invalid resource IDs must not
+        # turn names/customer text into operational telemetry.
+        log_path = "/api/knowledge-coverage/[resource]" if path.startswith("/api/knowledge-coverage/") else path
+        safe_path = scrub_text(log_path, hmac_secret=self.settings.pii_hmac_secret,
                                max_chars=2048)
         safe_method = scrub_text(method, hmac_secret=self.settings.pii_hmac_secret,
                                  max_chars=32)

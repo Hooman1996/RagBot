@@ -23,6 +23,7 @@ VERSIONED_ASSETS = frozenset({
     "js/web_auth.js", "js/analytics.js", "js/i18n.js", "js/api.js",
     "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/app.js",
     "js/kb_manager.js",
+    "css/knowledge_coverage.css", "js/knowledge_coverage.js", "js/knowledge_recommendations.js", "js/knowledge_run_export.js",
 })
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 

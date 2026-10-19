@@ -78,6 +78,15 @@ class HttpLoggingMiddlewareTests(unittest.IsolatedAsyncioTestCase):
         self.runtime.close()
         return [json.loads(line) for line in self.stream.getvalue().splitlines()]
 
+    async def test_audit_body_query_string_and_invalid_path_are_private(self):
+        app = HttpLoggingMiddleware(echo_app, self.settings)
+        await exchange(app, path='/api/knowledge-coverage/runs/SyntheticCustomer',
+                       body=b'{"csv_base64":"SyntheticPrivateInput"}')
+        serialized = json.dumps(self.events())
+        for private in ('SyntheticCustomer', 'SyntheticPrivateInput', 'raw-secret', 'do-not-log'):
+            self.assertNotIn(private, serialized)
+        self.assertIn('/api/knowledge-coverage/[resource]', serialized)
+
     async def test_pair_trusted_id_headers_json_and_timing(self):
         body = json.dumps({"query": "hello", "password": "do-not-log-me"}).encode()
         sent = await exchange(
