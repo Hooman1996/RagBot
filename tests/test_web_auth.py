@@ -188,3 +188,30 @@ def test_tamper_secret_and_cookie_configuration(setup, monkeypatch):
         web_auth.cookie_secure()
     monkeypatch.setenv("WEB_PUBLIC_ORIGIN", "https://ragbot.example")
     assert web_auth.cookie_secure() is True
+
+
+@pytest.mark.parametrize("value, expected", [
+    ("299", RuntimeError), ("7201", RuntimeError),
+    ("300", 300), ("3600", 3600), ("7200", 7200), (None, 900),
+])
+def test_session_seconds_range(monkeypatch, value, expected):
+    if value is None:
+        monkeypatch.delenv("WEB_SESSION_SECONDS", raising=False)
+    else:
+        monkeypatch.setenv("WEB_SESSION_SECONDS", value)
+    if expected is RuntimeError:
+        with pytest.raises(RuntimeError, match="between 300 and 7200"):
+            web_auth.session_seconds()
+    else:
+        assert web_auth.session_seconds() == expected
+
+
+def test_two_hour_session_expires_after_two_hours(setup, monkeypatch):
+    monkeypatch.setenv("WEB_SESSION_SECONDS", "7200")
+    issued = 1_800_000_000
+    monkeypatch.setattr(web_auth.time, "time", lambda: issued)
+    token, _ = web_auth.create_session(1)
+    monkeypatch.setattr(web_auth.time, "time", lambda: issued + 7000)
+    assert web_auth.verify_session(token) is not None
+    monkeypatch.setattr(web_auth.time, "time", lambda: issued + 7300)
+    assert web_auth.verify_session(token) is None

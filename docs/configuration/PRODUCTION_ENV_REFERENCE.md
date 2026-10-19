@@ -92,7 +92,7 @@ These are validated at startup and on every login.
 | `WEB_PUBLIC_ORIGIN` | Yes | none | (fill in) | The external origin, checked against the browser's `Origin` header on login and every state-changing request (CSRF protection). Must be `https://` in https mode. |
 | `WEB_COOKIE_MODE` | No | `https` | `https` | `https` sets Secure cookies. `local-http` is for development only. |
 | `WEB_ENVIRONMENT` | No | `production` | `production` | Browser-auth stage. Only `development` changes behavior: it allows `local-http`. Also the log environment fallback. |
-| `WEB_SESSION_SECONDS` | No | `900` | `900` | Browser session lifetime in seconds, 300 to 3600. |
+| `WEB_SESSION_SECONDS` | No | `900` | `900` | Browser session lifetime in seconds, 300 to 7200. |
 
 ### Logging
 

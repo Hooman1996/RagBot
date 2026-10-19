@@ -52,8 +52,8 @@ def cookie_secure() -> bool:
 
 def session_seconds() -> int:
     value = int(os.getenv("WEB_SESSION_SECONDS", "900"))
-    if not 300 <= value <= 3600:
-        raise RuntimeError("WEB_SESSION_SECONDS must be between 300 and 3600")
+    if not 300 <= value <= 7200:
+        raise RuntimeError("WEB_SESSION_SECONDS must be between 300 and 7200")
     return value
 
 
