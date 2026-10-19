@@ -16,15 +16,17 @@
         coverage_pending:'This question has not been evaluated.',coverage_needs_context:'Preceding context is missing.',
         coverage_needs_review:'The evaluation needs review.',coverage_excluded:'This question is excluded from KB auditing.'
     };
+    const errors = {second_reviewer_required:'Approval needs a reviewer other than the run owner.'};
     const display = value => labels[value] || String(value || 'Unavailable').replaceAll('_',' ');
+    async function request(path,options) {const response=await global.fetch('/api/knowledge-coverage/'+path,options);const body=await response.json();if(!response.ok)throw new Error(typeof body.detail==='string'?(errors[body.detail]||body.detail):'Recommendation operation could not complete.');return body;}
+    function decisionPost(path,value) {return request(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value || {})});}
     function mount(container,identity) {
         const document=container.ownerDocument, workspace=document.getElementById('coverageRoot');
         const root=document.createElement('section');root.className='coverage-recommendations';root.setAttribute('aria-label','Knowledge-team question recommendations');root.tabIndex=-1;container.append(root);
         let revision='',timer=null,stopped=false,requestSequence=0;let current=null,revisionPicker=null;
         function el(tag,text,className) {const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
         function paragraph(text) {const n=el('p',text);n.dir='auto';return n;}
-        async function api(path,options) {const response=await global.fetch('/api/knowledge-coverage/'+path,options);const body=await response.json();if(!response.ok)throw new Error(typeof body.detail==='string'?body.detail:'Recommendation operation could not complete.');return body;}
-        function post(path,value) {return api(path,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(value || {})});}
+        const api=request,post=decisionPost;
         function button(title,fn,className) {const n=el('button',title,className||'coverage-secondary');n.type='button';n.addEventListener('click',async()=>{if(stopped||!root.isConnected)return;n.disabled=true;try{await fn();}catch(error){message(error.message,true);}finally{n.disabled=false;if(!n.isConnected&&root.isConnected)root.focus();}});return n;}
         function message(text,error) {if(stopped||!root.isConnected)return;let status=root.querySelector('.recommendation-status');if(!status){status=el('p',undefined,'recommendation-status');status.setAttribute('aria-live','polite');root.append(status);}status.textContent=text;status.setAttribute('role',error?'alert':'status');}
         function clearTimer() {if(timer){global.clearInterval(timer);timer=null;}}
@@ -91,8 +93,12 @@
                     const noteLabel=el('label','Review note · optional');const note=el('textarea');note.maxLength=600;note.rows=2;note.dir='auto';noteLabel.append(note);card.append(noteLabel);
                     const controls=el('div',undefined,'recommendation-review-controls');
                     [['Approve question proposal','approved'],['Request changes','needs_changes'],['Reject proposal','rejected']].forEach(([title,state])=>{
-                        const control=button(title,async()=>{await post('recommendations/'+revision+'/reviews',{source_row_id:identity.rowId,recommendation_id:item.recommendation_id,decision:state,note:note.value});if(stopped||!root.isConnected)return;await load();});
-                        if(state==='approved' && (!result.eligibility.eligible || result.approval_allowed===false))control.disabled=true;controls.append(control);
+                        const ownerBlocked=state==='approved' && value.review_policy==='second-reviewer-1';
+                        const control=button(title,ownerBlocked?async()=>message('Another reviewer must approve.'):async()=>{await post('recommendations/'+revision+'/reviews',{source_row_id:identity.rowId,recommendation_id:item.recommendation_id,decision:state,note:note.value});if(stopped||!root.isConnected)return;await load();});
+                        if(state==='approved' && (!result.eligibility.eligible || result.approval_allowed===false))control.disabled=true;
+                        // The run owner's Approve stays focusable so its reason is reachable by keyboard; the server refuses it regardless.
+                        else if(ownerBlocked){control.setAttribute('aria-disabled','true');control.title='Another reviewer must approve';}
+                        controls.append(control);
                     });
                     card.append(controls);
                 }else if(workspace.dataset.canReview!=='true')card.append(paragraph('Review controls require an explicit recommendation-review grant.'));
@@ -113,6 +119,49 @@
         base();message('Checking recommendation eligibility…');availability().catch(error=>message(error.message,true));
         return {refresh:load,stop};
     }
-    global.KnowledgeRecommendations={mount};
-    if(typeof module!=='undefined'&&module.exports)module.exports={mount};
+    function mountQueue(section) {
+        // Other owners' completed drafts: only questions, taxonomy, gaps and decisions are served here.
+        const document=section.ownerDocument;
+        function el(tag,text,className) {const n=document.createElement(tag);if(text!==undefined)n.textContent=text;if(className)n.className=className;return n;}
+        function paragraph(text) {const n=el('p',text);n.dir='auto';return n;}
+        const heading=el('h2','Waiting for my review'),list=el('ul',undefined,'recommendation-queue'),detail=el('div',undefined,'recommendation-queue-detail');
+        const status=el('p','Loading drafts from other owners…','recommendation-status');status.setAttribute('aria-live','polite');detail.tabIndex=-1;
+        section.replaceChildren(heading,paragraph('Approve, reject or request changes on question drafts that another person prepared. Customer questions and evidence are not shown.'),status,list,detail);
+        function say(text,error) {status.textContent=text;status.setAttribute('role',error?'alert':'status');}
+        async function refresh() {
+            const value=await request('recommendations/reviewable');list.replaceChildren();
+            if(!value.revisions.length){say('Nothing is waiting for your review.');return;}
+            say(value.revisions.length+' draft revision(s) waiting.');
+            value.revisions.forEach(info=>{const item=el('li');const open=el('button',info.created_at+' · '+info.selected_row_ids.length+' row(s) · '+info.recommendation_revision_id.slice(-8),'coverage-link');open.type='button';
+                open.addEventListener('click',()=>show(info.recommendation_revision_id).catch(error=>say(error.message,true)));item.append(open);list.append(item);});
+        }
+        async function show(revision) {
+            const view=await request('recommendations/'+encodeURIComponent(revision)+'/review-view');detail.replaceChildren(el('h3','Draft revision '+revision.slice(-8)));
+            Object.values(view.rows).forEach(row=>{
+                (row.gap_specifications||[]).forEach(gap=>{const block=el('div',undefined,'recommendation-gap');block.append(el('strong','Missing information · '+gap.missing_aspect_ids.join(', ')),paragraph(gap.missing_information));
+                    if(gap.conditions.length)block.append(paragraph('Conditions: '+gap.conditions.join(' · ')));detail.append(block);});
+                row.recommendations.forEach(item=>{
+                    const card=el('article',undefined,'recommendation-card');card.setAttribute('data-recommendation-id',item.recommendation_id);card.append(paragraph(item.recommended_question));
+                    const path=el('p',item.category+' / '+(item.subcategory||'No subcategory'),'recommendation-taxonomy');path.dir='auto';card.append(path,el('span',display(item.taxonomy_status)+' · human review required','coverage-badge'));
+                    const decision=row.decisions[item.recommendation_id]||{status:'unreviewed'};card.append(el('p','Recommendation review: '+display(decision.status),'recommendation-review-state'));
+                    if(row.recommendation_status==='drafted'){
+                        const noteLabel=el('label','Review note · optional');const note=el('textarea');note.maxLength=600;note.rows=2;note.dir='auto';noteLabel.append(note);card.append(noteLabel);
+                        const controls=el('div',undefined,'recommendation-review-controls');
+                        [['Approve question proposal','approved'],['Request changes','needs_changes'],['Reject proposal','rejected']].forEach(([title,state])=>{
+                            const control=el('button',title,'coverage-secondary');control.type='button';
+                            control.addEventListener('click',async()=>{control.disabled=true;try{await decisionPost('recommendations/'+encodeURIComponent(revision)+'/reviews',{source_row_id:row.source_row_id,recommendation_id:item.recommendation_id,decision:state,note:note.value});await show(revision);detail.focus();}catch(error){say(error.message,true);control.disabled=false;}});
+                            controls.append(control);});
+                        card.append(controls);
+                    }else card.append(paragraph('This draft is not open for review: '+display(row.recommendation_status)+'.'));
+                    detail.append(card);
+                });
+            });
+        }
+        refresh().catch(error=>say(error.message,true));
+        return {refresh,show};
+    }
+    global.KnowledgeRecommendations={mount,mountQueue};
+    if(typeof module!=='undefined'&&module.exports)module.exports={mount,mountQueue};
+    const queue=global.document&&global.document.getElementById('coverageReviewQueue');
+    if(queue)mountQueue(queue);
 })(typeof window!=='undefined'?window:globalThis);

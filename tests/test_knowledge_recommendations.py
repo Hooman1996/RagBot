@@ -20,6 +20,7 @@ from tests.test_knowledge_coverage_access_jobs import coverage_staging
 pytestmark = pytest.mark.usefixtures("coverage_staging")
 
 KEY=b'fictional-recommendation-only-key-12345678'
+REVIEWER=frozenset({'coverage_recommendation_review'})
 
 
 class DraftModel:
@@ -210,7 +211,7 @@ def test_immutable_coverage_recommendation_review_export_revisions_and_duplicate
     assert len(decoded)==3 and [r['source_row_id'] for r in decoded]==source['manifest']['row_ids']
     assert decoded[1]['outcome']=='pending' and decoded[2]['outcome']=='pending'
     assert json.loads(decoded[0]['recommendations'])[0]['review']['status']=='unreviewed'
-    review=recs.decide(meta['recommendation_revision_id'],1,row['source_row_id'],'q1','approved','Question only; no KB write.')
+    review=recs.decide(meta['recommendation_revision_id'],2,REVIEWER,row['source_row_id'],'q1','approved','Question only; no KB write.')
     assert recs.download(meta['recommendation_revision_id'],1,True,revision['export_revision_id'])==(body,manifest)
     new=recs.compose(meta['recommendation_revision_id'],1,True,review['review_revision_id'])
     assert new['export_id']!=manifest['export_id'] and new['review_revision_id']==review['review_revision_id']
@@ -285,6 +286,7 @@ def test_owned_csrf_review_capability_and_pinned_downloads(audit_runtime,setup,m
         review={'source_row_id':row['source_row_id'],'recommendation_id':'q1','decision':'approved','note':'Synthetic question-only review.'}
         assert client.post(url+'/reviews',json=review,headers=csrf(client)).status_code==403
         monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}))
+        monkeypatch.setenv('KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER','false')
         assert client.post(url+'/reviews',json=review).status_code==403
         old=client.post(url+'/export-revisions',json={},headers=csrf(client)).json()
         csv_old=client.get(url+'/export?export_revision_id='+old['export_revision_id']).content
@@ -406,7 +408,7 @@ def test_late_conflict_blocks_approval_and_projects_review_without_overwriting_d
     assert projected['recommendation_status']=='needs_review' and not projected['eligibility']['eligible']
     assert recs.results(rid,1)[row['source_row_id']]['recommendation_status']=='drafted'
     assert recs.owned(rid,1)['results_sha256']==original_hash
-    with pytest.raises(AuditError,match='recommendation_source_requires_review'):recs.decide(rid,1,row['source_row_id'],'q1','approved','')
+    with pytest.raises(AuditError,match='recommendation_source_requires_review'):recs.decide(rid,1,REVIEWER,row['source_row_id'],'q1','approved','')
     exported=recs.compose(rid,1,False);body,_=recs.download(rid,1,False,exported['export_revision_id'])
     parsed=list(csv.DictReader(io.StringIO(body.decode('utf-8-sig'))))
     assert parsed[0]['recommendation_status']=='needs_review' and parsed[0]['evidence_visibility']=='restricted'
@@ -431,4 +433,17 @@ def test_legacy_metadata_policy_keeps_saved_draft_but_blocks_new_approval(tmp_pa
     assert effective['recommendation_status']=='needs_review' and effective['approval_allowed'] is False
     assert effective['review_unavailable_reasons']==['recommendation_metadata_policy_changed']
     assert recs.results(rid,1)[row['source_row_id']]['recommendation_status']=='drafted'
-    with pytest.raises(AuditError,match='recommendation_metadata_policy_changed'):recs.decide(rid,1,row['source_row_id'],'q1','approved','')
+    with pytest.raises(AuditError,match='recommendation_metadata_policy_changed'):recs.decide(rid,1,REVIEWER,row['source_row_id'],'q1','approved','')
+
+
+@pytest.mark.parametrize('value,provided,raises',[
+    ('۵ روز','5 روز',False),('5 روز','۵ روز',False),('٥ روز','5 روز',False),
+    ('1,000,000 ریال','۱٬۰۰۰٬۰۰۰ ریال',False),('05:00','5:00',False),
+    ('مدت تأیید چقدر است؟ a3','',False),('آیا یک حساب دیگر هم می‌توان باز کرد؟','',False),
+    ('پنج روز','',True),('five days','',True),('نه ماه','',True),('7 days','5 days',True)])
+def test_numbers_are_compared_by_value(value,provided,raises):
+    from knowledge_audit.recommendations import _no_new_numbers
+    if raises:
+        with pytest.raises(AuditError,match='invented_numeric_premise'):_no_new_numbers(value,provided)
+    else:
+        _no_new_numbers(value,provided)

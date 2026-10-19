@@ -2,6 +2,12 @@
 
 Only a dedicated trailing metadata block is structural. Inline/quoted prose and
 non-FAQ text are not reinterpreted as taxonomy. No title-based inference.
+
+One legacy form is also recognized: the old chunker's inline footer with no
+newline, ``answer: ...text.question category : Label.`` (colon spaced as the
+chunker wrote it), on the last line of a FAQ whose rest is a single label (no
+``:``, no other marker). It is read as the
+category only; ``compose_faq`` always writes the line-start form.
 """
 from __future__ import annotations
 from dataclasses import dataclass
@@ -18,6 +24,7 @@ _META_LINE = re.compile(r'^\s*(?:question\s+category|sub\s*_\s*category)\s*:', r
 _META_TOKEN = re.compile(r'(question\s+category|sub\s*_\s*category)\s*:\s*', re.I)
 _QUESTION = re.compile(r'^\s*question\s*:\s*(.*?)(?=\s+answer\s*\d*\s*:|$)', re.I | re.S)
 _ANSWER = re.compile(r'\s+answer\s*(\d*)\s*:[ \t]*', re.I)
+FOOTER_VERSION = "faq-footer-2"
 
 
 def clean_taxonomy(value: str | None) -> str | None:
@@ -50,7 +57,29 @@ def split_taxonomy_suffix(value: str) -> tuple[str, dict[str, str | None], str |
     if error:
         # Ambiguity never silently removes source text or chooses a taxonomy.
         return value.strip(),{},error
+    if not metadata and lines:
+        legacy=_legacy_inline_footer(lines)
+        if legacy:return legacy
     return ''.join(lines[:start]).strip(),metadata,None
+
+
+def _legacy_inline_footer(lines):
+    """The old chunker's ``...text.question category : Label.`` last line."""
+    line=lines[-1]
+    tokens=[t for t in _META_TOKEN.finditer(line) if t.group(1).lower().startswith('question')]
+    if not tokens:return None
+    token=tokens[-1]
+    before=''.join(lines[:-1])+line[:token.start()]
+    rest=line[token.end():]
+    label=rest[:-1] if rest.endswith('.') else rest
+    # The chunker always wrote "question category :"; prose rarely spaces the colon.
+    if (not re.match(r'[ \t]+:',line[token.end(1):]) or not line[:token.start()].strip() or not _ANSWER.search(before)
+            or not 1<=len(label)<=120 or ':' in rest or '\n' in rest or '\r' in rest
+            or _META_TOKEN.search(rest)):
+        return None
+    main=_clean_category_field(rest) or None
+    if main is None:return None
+    return before.strip(),{'main_category':main,'sub_category':None},None
 
 
 @dataclass(frozen=True)

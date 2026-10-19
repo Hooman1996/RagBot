@@ -568,7 +568,7 @@ async def retry(run_id: str, request: Request, user: WebUser, payload: RecoveryP
 SAFE_API_CODES = {"coverage_disabled", "coverage_enabled_in_production", "budget_ledger_missing","budget_completions","budget_tokens","budget_elapsed","budget_failures","budget_disk","budget_new_run_required","unknown_remote_completion","budget_identity_mismatch","invalid_run_selection", "invalid_execution_mode", "run_selection_exceeds_maximum",
     "full_input_selection_is_server_resolved", "idempotency_request_conflict", "invalid_idempotency_key",
     "unknown_remote_completion_requires_choice", "audit_version_drift", "audit_runtime_identity_drift",
-    "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_coverage_dedupe", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
+    "invalid_pilot_selection", "invalid_entry_budget", "sizing_class_without_reference", "invalid_non_covered_share", "invalid_verification_passes", "invalid_coverage_dedupe", "invalid_coverage_second_reviewer", "second_reviewer_required", "invalid_column_mapping", "invalid_timestamp_mapping", "ambiguous_csv_header",
     "csv_syntax_or_encoding_error", "invalid_source_timezone", "invalid_calendar", "invalid_csv_format",
     "snapshot_capture_mismatch", "snapshot_cross_store_inconsistent", "source_or_index_drift", "incompatible_run",
     "snapshot_policy_superseded", "run_active", "run_already_continued", "continuation_identity_drift",

@@ -5,7 +5,7 @@ from pydantic import Field
 from web_auth import WebUser
 from web_permissions import permissions_for_user
 from knowledge_audit.schemas import StrictModel
-from knowledge_audit.recommendation_store import RecommendationStore
+from knowledge_audit.recommendation_store import RecommendationStore,public_meta,review_policy
 from knowledge_audit.recommendation_jobs import RecommendationJobs,build_recommendation_engine
 from knowledge_audit.recommendations import eligibility
 
@@ -54,12 +54,6 @@ def services(request):
     return recommendations,jobs
 
 
-def public_meta(meta):
-    return {k:meta[k] for k in ('recommendation_revision_id','source_run_id','source_export_id','source_export_revision_id',
-        'snapshot_id','created_at','finished_at','state','phase','error_code','selected_row_ids','versions','serving_identity',
-        'human_gap_review_status','calibration_status','operational_settings','pause_reason') if k in meta}
-
-
 def evidence_access(user,*extra):
     require(user,'coverage_results_view','coverage_evidence_view','kb_read',*extra)
 
@@ -89,6 +83,21 @@ async def create(run_id: str,payload: DraftPayload,request: Request,user: WebUse
     return public_meta(meta)
 
 
+@router.get('/api/knowledge-coverage/recommendations/reviewable')
+async def reviewable(request: Request,user: WebUser):
+    require(user,'coverage_recommendation_review')
+    store,_=services(request)
+    revisions=await safe_call(store.list_reviewable,user.id,permissions_for_user(user.role,user.id))
+    return {'revisions':revisions,'review_policy':await safe_call(review_policy)}
+
+
+@router.get('/api/knowledge-coverage/recommendations/{revision_id}/review-view')
+async def review_view(revision_id: str,request: Request,user: WebUser):
+    require(user,'coverage_recommendation_review')
+    store,_=services(request)
+    return await safe_call(store.reviewer_view,revision_id,user.id,permissions_for_user(user.role,user.id))
+
+
 @router.get('/api/knowledge-coverage/recommendations/{revision_id}')
 async def detail(revision_id: str,request: Request,user: WebUser):
     evidence_access(user)
@@ -101,7 +110,8 @@ async def detail(revision_id: str,request: Request,user: WebUser):
         from knowledge_audit.operations import Budget,Limits
         resource=await safe_call(Budget,store.store,store.path(revision_id),user.id,Limits.from_settings(meta['operational_settings'],recommendation=True))
         budget=await safe_call(resource.summary)
-    return {'revision':public_meta(meta),'results':result,'review':review,'operational_budget':budget}
+    return {'revision':public_meta(meta),'results':result,'review':review,'operational_budget':budget,
+        'review_policy':await safe_call(review_policy)}
 
 
 @router.post('/api/knowledge-coverage/recommendations/{revision_id}/cancel')
@@ -117,9 +127,10 @@ async def cancel(revision_id: str,request: Request,user: WebUser):
 
 @router.post('/api/knowledge-coverage/recommendations/{revision_id}/reviews',status_code=201)
 async def decide(revision_id: str,payload: DecisionPayload,request: Request,user: WebUser):
-    evidence_access(user,'coverage_recommendation_review')
+    require(user,'coverage_recommendation_review')
     store,_=services(request)
-    return await safe_call(store.decide,revision_id,user.id,payload.source_row_id,payload.recommendation_id,payload.decision,payload.note)
+    return await safe_call(store.decide,revision_id,user.id,permissions_for_user(user.role,user.id),
+        payload.source_row_id,payload.recommendation_id,payload.decision,payload.note)
 
 
 @router.get('/api/knowledge-coverage/recommendations/{revision_id}/metadata/{faq_id}')

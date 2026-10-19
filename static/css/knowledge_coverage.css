@@ -22,7 +22,7 @@
 .coverage-primary { background: var(--color-accent-primary); color: #071c15; border: 1px solid var(--color-accent-primary); }
 .coverage-secondary { color: var(--text-primary); border: 1px solid var(--border-strong); background: var(--color-bg-base); }
 .coverage-link { color: var(--text-primary); border: 0; background: transparent; padding-inline: 4px; text-decoration: underline; text-underline-offset: 3px; }
-.coverage-page button:disabled { opacity: .5; cursor: not-allowed; }
+.coverage-page button:disabled, .coverage-page button[aria-disabled="true"] { opacity: .5; cursor: not-allowed; }
 .coverage-page :focus-visible, .coverage-skip:focus-visible { outline: 3px solid var(--color-accent-blue); outline-offset: 3px; }
 .coverage-divider { height: 1px; background: var(--border-strong); margin-block: 24px; }
 .coverage-selection-bar, .coverage-run-actions, .coverage-pagination { display: flex; gap: 16px; align-items: center; flex-wrap: wrap; }

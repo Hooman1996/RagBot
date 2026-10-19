@@ -107,7 +107,8 @@ def capture_snapshot(directory: Path, redactor: Redactor, *, signature_provider,
                 "capture_code_sha256": {str(path.relative_to(Path(__file__).resolve().parents[1])):
                     hashlib.sha256(path.read_bytes()).hexdigest() for path in
                     (Path(__file__), Path(__file__).with_name("privacy.py"),
-                     Path(__file__).resolve().parents[1] / "scripts/kb_signature.py")}}
+                     Path(__file__).resolve().parents[1] / "scripts/kb_signature.py",
+                     Path(__file__).resolve().parents[1] / "utils/faq_content.py")}}
     snapshot["snapshot_id"] = canonical_sha256(snapshot)
     private_json(directory / "kb-snapshot.json", snapshot)
     manifest = {"schema_version": "a1-kb-manifest-2", "snapshot_id": snapshot["snapshot_id"],

@@ -79,6 +79,8 @@ ROUTES = (
     ("GET", r"/knowledge-coverage", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/runs/[^/]+/rows/[^/]+/recommendations", "coverage_evidence_view"),
     ("POST", r"/api/knowledge-coverage/runs/[^/]+/recommendations", "coverage_run_start"),
+    ("GET", r"/api/knowledge-coverage/recommendations/reviewable", "coverage_recommendation_review"),
+    ("GET", r"/api/knowledge-coverage/recommendations/[^/]+/review-view", "coverage_recommendation_review"),
     ("GET", r"/api/knowledge-coverage/recommendations/[^/]+", "coverage_evidence_view"),
     ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/cancel", "coverage_run_start"),
     ("POST", r"/api/knowledge-coverage/recommendations/[^/]+/reviews", "coverage_recommendation_review"),

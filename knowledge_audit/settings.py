@@ -46,6 +46,7 @@ class CoverageSettings:
     public_contacts: tuple[str, ...] = ()
     verification_passes: int = 2
     dedupe: bool = True
+    require_second_reviewer: bool = True
 
     def __post_init__(self):
         if not isinstance(self.operational_limits,Limits):raise AuditError("invalid_operational_limits")
@@ -69,6 +70,8 @@ class CoverageSettings:
             raise AuditError("invalid_verification_passes")
         if type(self.dedupe) is not bool:
             raise AuditError("invalid_coverage_dedupe")
+        if type(self.require_second_reviewer) is not bool:
+            raise AuditError("invalid_coverage_second_reviewer")
 
     def manifest(self):
         from utils.read_only_audit import canonical_sha256
@@ -87,7 +90,8 @@ class CoverageSettings:
                 "reachability_policy_version": "redaction-reachability-1",
                 "verification_passes": self.verification_passes,
                 "verification_policy": "order-permuted-2" if self.verification_passes == 2 else "single-pass-1",
-                "dedupe_policy": dedupe.VERSION if self.dedupe else "disabled"}
+                "dedupe_policy": dedupe.VERSION if self.dedupe else "disabled",
+                "recommendation_review_policy": "second-reviewer-1" if self.require_second_reviewer else "owner-review-1"}
 
 
 def load_coverage_settings(environ=None) -> CoverageSettings:
@@ -130,6 +134,9 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
     raw_dedupe = env.get("KNOWLEDGE_COVERAGE_DEDUPE", "true")
     if not isinstance(raw_dedupe, str) or raw_dedupe.strip().lower() not in {"true", "false"}:
         raise AuditError("invalid_coverage_dedupe")
+    raw_second = env.get("KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER", "true")
+    if not isinstance(raw_second, str) or raw_second.strip().lower() not in {"true", "false"}:
+        raise AuditError("invalid_coverage_second_reviewer")
     return CoverageSettings(path, grants,
         integer("KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", 5242880, 1024, 20971520),
         integer("KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS", 1200, 256, 4096),
@@ -148,7 +155,8 @@ def load_coverage_settings(environ=None) -> CoverageSettings:
         integer("KNOWLEDGE_COVERAGE_BROADER_DEPTH",300,2,1000),
         integer("KNOWLEDGE_COVERAGE_INITIAL_ENTRIES",50,1,1000),
         integer("KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET",300,1,1000),
-        contacts, verification_passes=passes, dedupe=raw_dedupe.strip().lower() == "true")
+        contacts, verification_passes=passes, dedupe=raw_dedupe.strip().lower() == "true",
+        require_second_reviewer=raw_second.strip().lower() == "true")
 
 
 def grants_for(user_id: int) -> frozenset[str]:

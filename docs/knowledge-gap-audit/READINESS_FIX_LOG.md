@@ -1762,3 +1762,139 @@ no output
 ```
 
 The clean-checkout full run was skipped by agreement with the owner. This step adds standalone scripts, a runbook and an `AGENTS.md` paragraph; no application or audit module imports the new scripts, so the existing suite can't change. Step 14's clean run covers this commit, and the owner runs the full suite after the push.
+
+## [14] Parse the legacy inline category footer, compare numbers by value, and require a second reviewer for approvals
+
+F12, F13 and F14 in one commit. They touch separate modules with independent tests.
+
+### Part A (F12): legacy inline category footer
+
+`grep -rn faq_content --include=*.py .` shows the parser is used by `kb_manager.py`, `new_architecture/knowledge_update.py` (error type only), `knowledge_audit/snapshot.py`, offline scripts and tests. `main.py`, `agent_graph.py`, `agent_service.py` and `utils/RagSystem.py` don't use it, so the chat answer path is unaffected.
+
+- `hihelp_chunker.py`: the two `data = f"..."` lines moved into `format_chunk(user_question_and_answer, category, sub_category=None)`. Both branches now start the footer on its own line. The file reading and loop are under `if __name__ == "__main__":`. The sub-category branch is chosen by `sub_category is not None`, which keeps the old `type(...) == str` behavior for an empty string.
+- `utils/faq_content.py`: `FOOTER_VERSION = "faq-footer-2"`, and a legacy fallback in `split_taxonomy_suffix` that runs only when no line-start metadata was found. `compose_faq` still writes only the line-start form.
+- `knowledge_audit/snapshot.py`: `utils/faq_content.py` is now hashed into `capture_code_sha256`.
+
+**Accepted form:** last non-empty line, last `question category` token, written as the old chunker wrote it (`question category :`, whitespace before the colon). Text precedes it on that line, an `answer` marker occurs before it, and the rest is one label of 1 to 120 characters with an optional final `.`, no `:`, no other metadata token and no newline. Example: `question: How do I X?\nanswer: Do Y.question category : Cards.` gives category `Cards`, no subcategory and answer `Do Y.`. The label is cleaned with `_clean_category_field`, as line-start footers are.
+
+**Rejected forms (content unchanged, no category):**
+
+- prose with a later colon: `answer: The question category : field in the form is optional, see section 2: details.`;
+- the inline form with no `answer` marker;
+- `question category:` without whitespace before the colon, as in prose (`Explain question category: examples in prose.`) or a quoted line (`> question category: example`);
+- a token with no text before it on the line, which is the existing line-start path.
+
+### Part B (F13): numbers compared by value
+
+`knowledge_audit/recommendations.py`: `NUMERIC_GUARD_VERSION = "numeric-premise-2"`, `_DIGITS` (Persian and Arabic-Indic to ASCII), and `_numbers(text)`. It translates digits, removes `,` `،` `٬` between digits, extracts `\d+(?:[.:/]\d+)*`, strips leading zeros from each integer part, and adds single number words. `_no_new_numbers` keeps the aspect, gap and question ID stripping and raises `invented_numeric_premise` on `_numbers(value) - _numbers(provided)`. `recommendation_versions()` records `"numeric_guard"`.
+
+**Number words** (whole tokens after `normalize_persian_text`, ZWNJ to space and case folding; no compound parsing):
+
+- Persian: یک 1, دو 2, سه 3, چهار 4, پنج 5, شش and شیش 6, هفت 7, هشت 8, نه 9, ده 10, یازده 11, دوازده 12, پانزده 15, بیست 20, سی 30, چهل 40, پنجاه 50, صد 100, دویست 200, پانصد 500, هزار 1000, میلیون 1000000, میلیارد 1000000000.
+- English: one to ten, twenty, thirty, fifty, hundred, thousand, million, billion.
+
+**Unit rule:** `یک`, `دو`, `نه`, `سی` and `one` count only when the next token is روز, ساعت, ماه, سال, هفته, دقیقه, درصد, ریال, تومان, day(s), hour(s), month(s), year(s), week(s), minute(s) or percent.
+
+No existing test relied on `۵` and `5` being different.
+
+### Part C (F14): a second reviewer for approvals
+
+- **Setting.** `CoverageSettings.require_second_reviewer` (default `True`) from `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER`, parsed like `KNOWLEDGE_COVERAGE_DEDUPE`; the error code is `invalid_coverage_second_reviewer`. `manifest()` adds `recommendation_review_policy`: `second-reviewer-1`, or `owner-review-1` when off. The key and comment are in `.env`, `env.example`, `.env.example.generated`, `Production_ENV` and `Production_ENV.example` after `KNOWLEDGE_COVERAGE_DEDUPE`, with a `VariableSpec` in `scripts/validate_environment.py`. `.env` and `Production_ENV` were edited but not staged.
+- **Store.** `reviewable`, `list_reviewable` and `reviewer_view` were added. `decide(rid, actor_id, capabilities, row_id, question_id, decision, note)` authorizes with `reviewable` and does every internal read as `meta['owner_id']`. It records `reviewer_user_id` and `run_owner_id` on the review revision and on each decision. It raises `second_reviewer_required` when the policy is on and the owner approves.
+- **Exports.** The recommendation export manifest carries `reviewer_user_id` (of the pinned review revision; `null` when unreviewed) and `run_owner_id`. Each decision embedded in a CSV row's `recommendations[].review` carries both. CSV columns are unchanged.
+- **API.** `GET /api/knowledge-coverage/recommendations/reviewable` (metadata only) and `GET /api/knowledge-coverage/recommendations/{revision_id}/review-view` (the projection) are registered in `web_permissions.py` under `coverage_recommendation_review`, ahead of the `/recommendations/[^/]+` pattern. Neither requires `coverage_evidence_view`. Both codes are in `SAFE_API_CODES` in `knowledge_audit/api.py`. The dashboard shows "Approval needs a reviewer other than the run owner." for `second_reviewer_required`.
+- **Dashboard.** A "Waiting for my review" section, rendered only with `coverage_recommendation_review`, lists other owners' completed revisions. Opening one shows the projection with Approve, Request changes and Reject. On the owner's own draft, when the policy is `second-reviewer-1`, Approve has `aria-disabled="true"` and the title "Another reviewer must approve". The page's labels are English only (the language toggle changes reading direction), so no Persian strings were added.
+
+**Reviewer projection fields (`reviewer_view`):**
+
+- `revision`: `public_meta` (`recommendation_revision_id`, `source_run_id`, `source_export_id`, `source_export_revision_id`, `snapshot_id`, `created_at`, `finished_at`, `state`, `phase`, `error_code`, `selected_row_ids`, `versions`, `serving_identity`, `human_gap_review_status`, `calibration_status`, `operational_settings`, `pause_reason`);
+- `is_run_owner`, `review_policy`, `review_revision_id`;
+- `rows[row_id]`:
+  - `source_row_id`, `recommendation_status` (the effective status);
+  - `recommendations[]`: `recommendation_id`, `recommended_question`, `category`, `subcategory`, `taxonomy_status`;
+  - `gap_specifications[]`: `gap_id`, `missing_aspect_ids`, `missing_information`, `conditions`, `search_scope_limitations`, `review_requirements`;
+  - `decisions[recommendation_id]`: that row's current decision (`source_row_id`, `recommendation_id`, `status`, redacted `note`, `reviewer_user_id`, `run_owner_id`), or `{status: unreviewed}`.
+
+It never includes the customer, normalized, standalone or retrieval queries, evidence sentences, supports, eligibility details, title lookups or other rows' notes. `list_reviewable` returns `public_meta` only.
+
+### Decisions not covered by the command
+
+1. **Footer colon spacing.** The command's acceptance rule also matched `answer: Explain question category: examples in prose.` and `> question category: example`. Those break the existing `test_inline_quoted_and_fenced_prose_is_not_taxonomy`, which had to stay green unchanged. The fallback therefore also requires whitespace before the colon, which the chunker always wrote.
+2. **Snapshot version.** Admission (`snapshot_policy_superseded`) is gated on `SNAPSHOT_VERSION`, not on the code hash. `SNAPSHOT_VERSION` was left unchanged, so only new snapshot IDs change. Snapshots captured before this step stay admissible, and a fresh staging snapshot remains an owner task.
+3. **Decimals.** In a decimal (one `.` and no `:` or `/`), the fractional part keeps its leading zeros, so `1.05` and `1.5` stay different.
+4. **Check order in `decide`.** `second_reviewer_required` is checked after every existing check, so an owner's approval of an ineligible draft still reports the existing reason.
+5. **Policy timing.** `decide` reads the current setting, not the setting captured when the draft was made. The detail and review-view responses carry `review_policy` for the dashboard.
+6. **Decision route permissions.** `POST .../reviews` now requires only `coverage_recommendation_review`; previously it also required `coverage_results_view`, `coverage_evidence_view` and `kb_read`. A non-owner reviewer works from the projection. The store still allows only the owner, or a review-capable user on a completed revision.
+7. **Support references.** `partial_support_references` (pointers into KB evidence) are left out of the reviewer's gap specifications, because the reviewer may lack evidence access.
+8. **`aria-disabled` and one extra file.** The owner's Approve uses `aria-disabled` instead of `disabled`, so the button and its tooltip stay reachable by keyboard; the server refuses the action regardless. `static/css/knowledge_coverage.css` gives `[aria-disabled="true"]` the existing disabled look; this file is outside the command's stage list.
+9. **`public_meta`** moved to `knowledge_audit/recommendation_store.py`; `recommendation_api.py` imports it.
+10. **Revalidation drift.** `scripts/knowledge_recommendation_revalidate.py` compares a source run's settings with the current `manifest()`. Coverage runs created before this step lack `recommendation_review_policy` and will report `audit_runtime_identity_drift` there, as happened when `dedupe_policy` was added.
+11. **Browser contexts.** In this Chromium build, two contexts of one browser shared the session cookie (the reviewer page resolved to the owner). The harness therefore signs in as the reviewer on a second page of the same context, approves, closes the page and signs back in as the owner.
+
+### Changed existing tests
+
+- `tests/test_knowledge_recommendations.py`: new `REVIEWER` constant. `test_immutable_coverage_recommendation_review_export_revisions_and_duplicate_rows` now approves as user 2 with `REVIEWER`, because the owner can no longer approve by default. `test_late_conflict_blocks_approval_...` and `test_legacy_metadata_policy_...`: signature only. `test_owned_csrf_review_capability_and_pinned_downloads` sets `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER=false`, because the owner approves through the API there.
+- `tests/test_knowledge_run_export.py`: the one approval is made by user 2 with `REVIEWER`; the rejections and the later `needs_changes` are signature only.
+- `tests/test_web_permissions.py`: the two new routes added to the route inventory.
+- `tests/knowledge_run_export_browser_app.py`: sets `KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER=false`, because that harness checks run-level export selection and the owner approves there.
+- `tests/knowledge_recommendations.browser.cjs` and `tests/knowledge_recommendation_browser_app.py`: the owner's Approve is asserted disabled. A second synthetic user (`coverage_results_view` and `coverage_recommendation_review` only) approves by keyboard from "Waiting for my review". New check `owner_approve_disabled_second_reviewer_approves_from_waiting_list`.
+
+### Tests added
+
+- `tests/test_faq_taxonomy.py`: the legacy inline footer parses; prose and unmarked text stay unparsed; `format_chunk` puts the footer on its own line in both branches and both parse back.
+- `tests/test_knowledge_recommendations.py`: `test_numbers_are_compared_by_value` (11 cases).
+- `tests/test_recommendation_second_reviewer.py` (4 tests): the owner's own decisions and the setting off; a second user with the capability; a second user without it; no leaks. Markers are seeded in the customer query (present in the source rows) and in the KB evidence (present in the snapshot), and neither appears in `reviewer_view` or `list_reviewable`.
+
+### AGENTS.md note
+
+- **Footer parsing.** It changes what the KB editor and the audit snapshot read from legacy chunks. The chat answer path doesn't use this parser, so retrieval and answers are unchanged. A chunk's stored text changes only when a person saves it in the editor; it is then written in the line-start form.
+- **Numeric guard and second reviewer.** These change only recommendation checks and permissions.
+- **Tests and benchmarks.** No retrieval or answer-quality test applies. No performance change, so no benchmark is required.
+
+### Checks
+
+In conda `faq`:
+
+```text
+timeout 900 conda run --no-capture-output -n faq python -m pytest -p tests.offline_guard -q tests/test_faq_taxonomy.py tests/test_faq_taxonomy_api.py tests/test_knowledge_recommendations.py tests/test_recommendation_second_reviewer.py tests/test_web_permissions.py tests/test_validate_environment.py
+129 passed, 30 warnings, 24 subtests passed in 20.01s
+
+conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file .env --mode staging | grep -i "summary"
+Summary: 0 critical, 27 warning, 4 informational
+
+conda run --no-capture-output -n faq python scripts/validate_environment.py --env-file Production_ENV --mode production | grep -i "summary"
+Summary: 6 critical, 24 warning, 4 informational
+
+conda run --no-capture-output -n faq python scripts/check_tracked_secrets.py
+tracked secrets: 0 matches
+
+conda run --no-capture-output -n faq python scripts/audit_offline_frontend.py
+Offline frontend audit: PASS
+
+git diff --check
+no output, exit 0
+```
+
+Both env summaries equal those of the same files without the new key, so the 6 production critical findings pre-date this step. For the new key, the validator prints only `set (optional; restart: FastAPI)`.
+
+Before the commit, the two affected browser harnesses passed on their own: `knowledge_recommendations.browser.cjs` (7 checks) and `knowledge_run_export.browser.cjs`.
+
+Clean-checkout full run of `faeedae` (load average 0.45 before the run; `BROWSER_NODE_DIR=/tmp/faq-a21-browser-node REQUIRE_BROWSER=1 scripts/run_offline_tests.sh` in a temporary worktree, then removed). This run also covers step 13:
+
+```text
+1210 passed, 26 deselected, 59 warnings, 295 subtests passed in 338.57s (0:05:38)
+pytest: PASS (0 failed)
+node frontend tests: PASS (3 harnesses)
+offline frontend audit: PASS
+tracked secrets: NOT RUN (no local env files)
+tracked-secret check: PASS
+browser knowledge_coverage.browser.cjs: PASS
+browser knowledge_execution.browser.cjs: PASS
+browser knowledge_operations.browser.cjs: PASS
+browser knowledge_recommendations.browser.cjs: PASS
+browser knowledge_run_export.browser.cjs: PASS
+browser harnesses: PASS (5 harnesses)
+exit 0
+```
+
+These results were then added to this log and the commit was amended; the amendment changes only this file.

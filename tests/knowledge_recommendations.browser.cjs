@@ -33,9 +33,18 @@ async function run(){
   assert.match(await page.locator('.recommendation-card').textContent(),/مهلت ارسال/);assert.match(await page.locator('.recommendation-card').textContent(),/existing path/);
   checks.push('eligible_structured_gap_draft_background_cancel_new_revision_and_persian_question');
   const faq=page.locator('.recommendation-card a').first();const response=await context.request.get(origin+await faq.getAttribute('href'));assert.equal(response.status(),200);assert.equal((await response.json()).coverage_claim,'not_established_by_title');
-  const approve=page.getByRole('button',{name:'Approve question proposal',exact:true});await approve.focus();await page.keyboard.press('Enter');
-  await page.waitForFunction(()=>document.querySelector('.recommendation-review-state')?.textContent.includes('approved'));
-  assert.equal(await page.evaluate(()=>document.activeElement.classList.contains('coverage-recommendations')),true);
+  const ownerApprove=page.getByRole('button',{name:'Approve question proposal',exact:true});
+  assert.equal(await ownerApprove.getAttribute('aria-disabled'),'true');assert.equal(await ownerApprove.getAttribute('title'),'Another reviewer must approve');
+  // Contexts of this Chromium build share cookies, so the reviewer signs in on a second page and the owner signs back in after.
+  const signIn=async username=>assert.equal((await context.request.post(origin+'/api/login',{data:{username,password:'synthetic-browser-only'}})).status(),200);
+  await signIn('reviewer-synthetic');const reviewer=await context.newPage();reviewer.on('pageerror',()=>errors++);
+  assert.equal((await (await context.request.get(origin+'/api/auth/me')).json()).user.username,'reviewer-synthetic');
+  await reviewer.goto(origin+'/knowledge-coverage');await reviewer.locator('#coverageReviewQueue li button').first().click();
+  const approve=reviewer.getByRole('button',{name:'Approve question proposal',exact:true});await approve.focus();await reviewer.keyboard.press('Enter');
+  await reviewer.waitForFunction(()=>document.querySelector('#coverageReviewQueue .recommendation-review-state')?.textContent.includes('approved'));
+  assert.equal(await reviewer.evaluate(()=>document.activeElement.classList.contains('recommendation-queue-detail')),true);
+  assert.doesNotMatch(await reviewer.locator('#coverageReviewQueue').textContent(),/Synthetic partial approval/);await reviewer.close();await signIn('planner-synthetic');
+  checks.push('owner_approve_disabled_second_reviewer_approves_from_waiting_list');
   checks.push('readonly_faq_metadata_link_explicit_question_only_approval_keyboard_focus');
   await page.getByRole('button',{name:'Prepare CSV for this draft revision only',exact:true}).click();
   await page.locator('.recommendation-downloads a').first().waitFor();const csvLink=await page.locator('.recommendation-downloads a').first().getAttribute('href');const manifestLink=await page.locator('.recommendation-downloads a').nth(1).getAttribute('href');

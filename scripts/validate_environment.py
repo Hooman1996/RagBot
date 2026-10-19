@@ -429,6 +429,10 @@ def _specs() -> dict[str, VariableSpec]:
             kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
             usage="knowledge_audit/dedupe.py repeated-question key and copy; knowledge_audit/pipeline.py CoverageEvaluator.evaluate reuses the same run's completed result",
         ),
+        "KNOWLEDGE_COVERAGE_REQUIRE_SECOND_REVIEWER": VariableSpec(
+            kind="bool", default="true", component="Knowledge coverage audit", restart="FastAPI",
+            usage="knowledge_audit/recommendation_store.py RecommendationStore.decide refuses an approval by the run owner; reviewers need coverage_recommendation_review",
+        ),
         "KNOWLEDGE_COVERAGE_PUBLIC_CONTACTS": VariableSpec(
             default="", component="Knowledge coverage audit", restart="FastAPI",
             usage="knowledge_audit/privacy.py Redactor.kb_text public-contact allow-list for KB snapshots",

@@ -13,7 +13,7 @@ from knowledge_audit.privacy import AuditError,private_directory,private_json,pr
 from knowledge_audit.store import now
 from knowledge_audit.retention import protected_method
 from knowledge_audit.export import encode_csv,ARRAY_FIELDS,MAP_FIELDS,STRUCTURED_DEFAULTS,_redact
-from knowledge_audit.recommendations import eligibility,normalized,MetadataIndex,LOOKUP_VERSION
+from knowledge_audit.recommendations import eligibility,normalized,MetadataIndex,LOOKUP_VERSION,NUMERIC_GUARD_VERSION
 from knowledge_audit.recommendation_prompts import prompt_identity
 from utils.read_only_audit import canonical_sha256
 
@@ -48,11 +48,43 @@ class RecommendationStore:
         if not path.is_dir():raise AuditError('artifact_not_found')
         return private_directory(path)
 
-    def owned(self,rid,owner):
-        try:meta=self.store.read(self.path(rid)/'meta.json')
+    def _meta(self,rid):
+        try:return self.store.read(self.path(rid)/'meta.json')
         except OSError:raise AuditError('artifact_not_found') from None
+
+    def owned(self,rid,owner):
+        meta=self._meta(rid)
         if meta['owner_id']!=owner:raise AuditError('artifact_not_found')
         return meta
+
+    def reviewable(self,rid,user_id,capabilities):
+        """The owner, or a review-capable user once the run is completed; otherwise indistinguishable from missing."""
+        meta=self._meta(rid)
+        if meta['owner_id']==user_id or ('coverage_recommendation_review' in capabilities and meta['state']=='completed'):return meta
+        raise AuditError('artifact_not_found')
+
+    def list_reviewable(self,user_id,capabilities):
+        if 'coverage_recommendation_review' not in capabilities:return []
+        values=[]
+        for p in self.root.glob('rec_*'):
+            try:meta=self._meta(p.name)
+            except (AuditError,OSError):continue
+            if meta['owner_id']!=user_id and meta['state']=='completed':values.append(public_meta(meta))
+        return sorted(values,key=lambda m:m['created_at'],reverse=True)
+
+    def reviewer_view(self,rid,user_id,capabilities):
+        """Drafts, gaps and decisions only: no queries, evidence, supports or other rows' notes."""
+        meta=self.reviewable(rid,user_id,capabilities);owner=meta['owner_id']
+        results=self.effective_results(rid,owner);review=self.review(rid,owner)
+        rows={}
+        for row_id,value in results.items():
+            drafts=value.get('recommendations',[])
+            rows[row_id]={'source_row_id':row_id,'recommendation_status':value['recommendation_status'],
+                'recommendations':[{k:r[k] for k in REVIEWER_RECOMMENDATION_FIELDS} for r in drafts],
+                'gap_specifications':[{k:g[k] for k in REVIEWER_GAP_FIELDS if k in g} for g in value.get('gap_specifications',[])],
+                'decisions':{r['recommendation_id']:review['decisions'].get(row_id+':'+r['recommendation_id'],{'status':'unreviewed'}) for r in drafts}}
+        return {'revision':public_meta(meta),'is_run_owner':owner==user_id,'review_policy':review_policy(),
+            'review_revision_id':review['review_revision_id'],'rows':rows}
 
     @contextmanager
     def lock(self,rid):
@@ -198,8 +230,8 @@ class RecommendationStore:
         return value
 
     @protected_method
-    def decide(self,rid,owner,row_id,question_id,decision,note):
-        meta=self.owned(rid,owner)
+    def decide(self,rid,actor_id,capabilities,row_id,question_id,decision,note):
+        meta=self.reviewable(rid,actor_id,capabilities);owner=meta['owner_id']
         with self.lock(rid):
             results=self.results(rid,owner);result=results.get(row_id)
             if meta['state']!='completed' or not result or result['recommendation_status']!='drafted' or question_id not in {r['recommendation_id'] for r in result['recommendations']}:raise AuditError('recommendation_not_reviewable')
@@ -207,13 +239,14 @@ class RecommendationStore:
             if decision=='approved' and meta['versions']['metadata_lookup']!=LOOKUP_VERSION:raise AuditError('recommendation_metadata_policy_changed')
             source=self.source(rid,owner);row=next(r for r in source['rows'] if r['source_row_id']==row_id)
             if decision=='approved' and not self.effective_eligibility(rid,owner,row)['eligible']:raise AuditError('recommendation_source_requires_review')
+            if decision=='approved' and actor_id==owner and review_policy()=='second-reviewer-1':raise AuditError('second_reviewer_required')
             coverage=self.store.owned('runs',meta['source_run_id'],owner);_,redactor=self.store.dataset(coverage['dataset_id'],owner)
             old=self.review(rid,owner);review_id='rvw_'+secrets.token_hex(16)
             value={'version':'recommendation-review-1','review_revision_id':review_id,'recommendation_revision_id':rid,
                 'recommendation_results_sha256':meta['results_sha256'],'previous_review_revision_id':old['review_revision_id'],
-                'created_at':now(),'reviewer_user_id':owner,'approval_scope':'question_taxonomy_proposal_only_no_answer_or_kb_write',
+                'created_at':now(),'reviewer_user_id':actor_id,'run_owner_id':owner,'approval_scope':'question_taxonomy_proposal_only_no_answer_or_kb_write',
                 'decisions':{**old['decisions'],row_id+':'+question_id:{'source_row_id':row_id,'recommendation_id':question_id,
-                    'status':decision,'note':redactor.text(note)}}}
+                    'status':decision,'note':redactor.text(note),'reviewer_user_id':actor_id,'run_owner_id':owner}}}
             value['review_sha256']=canonical_sha256(value)
             private_json(self.path(rid)/(review_id+'.json'),value)
             self.store.write(self.path(rid)/'latest-review.json',{'review_revision_id':review_id})
@@ -249,6 +282,7 @@ class RecommendationStore:
                 'recommendation_revision_id':rid,'recommendation_state':meta['state'],'recommendation_results_sha256':canonical_sha256(results),
                 'recommendation_versions':meta['versions'],'recommendation_serving_identity':meta.get('serving_identity',{}),
                 'review_revision_id':review['review_revision_id'],'review_sha256':review.get('review_sha256',''),
+                'reviewer_user_id':review.get('reviewer_user_id'),'run_owner_id':meta['owner_id'],
                 'coverage_source_manifest':source['manifest'],'source_sha256':meta['source_sha256'],
                 'evidence_visible':visible,'human_gap_review_status':'not_reviewed','calibration_status':'real_query_calibration_pending'}
             if meta.get('operational_policy'):
@@ -271,6 +305,22 @@ class RecommendationStore:
         except OSError:raise AuditError('artifact_not_found') from None
         if hashlib.sha256(body).hexdigest()!=manifest['csv_sha256'] or manifest['evidence_visible']!=visible or manifest['recommendation_revision_id']!=rid:raise AuditError('export_identity_mismatch')
         return body,manifest
+
+
+REVIEWER_RECOMMENDATION_FIELDS=('recommendation_id','recommended_question','category','subcategory','taxonomy_status')
+# partial_support_references point into evidence the reviewer may not be granted.
+REVIEWER_GAP_FIELDS=('gap_id','missing_aspect_ids','missing_information','conditions','search_scope_limitations','review_requirements')
+
+
+def public_meta(meta):
+    return {k:meta[k] for k in ('recommendation_revision_id','source_run_id','source_export_id','source_export_revision_id',
+        'snapshot_id','created_at','finished_at','state','phase','error_code','selected_row_ids','versions','serving_identity',
+        'human_gap_review_status','calibration_status','operational_settings','pause_reason') if k in meta}
+
+
+def review_policy():
+    from knowledge_audit.settings import load_coverage_settings
+    return load_coverage_settings().manifest()['recommendation_review_policy']
 
 
 def recommendation_row(original,result,selected,meta,review,visible):
@@ -314,4 +364,4 @@ def recommendation_versions():
     from knowledge_audit.runtime import code_identity
     code=code_identity()
     return {'prompts':prompt_identity(),'code':code,'code_id':canonical_sha256(code),'eligibility_policy':'recommendation-eligibility-1',
-        'metadata_lookup':LOOKUP_VERSION,'approval_scope':'question_taxonomy_only','recovery_policy':'json-invalid-stop-one-fresh-response-1'}
+        'metadata_lookup':LOOKUP_VERSION,'numeric_guard':NUMERIC_GUARD_VERSION,'approval_scope':'question_taxonomy_only','recovery_policy':'json-invalid-stop-one-fresh-response-1'}

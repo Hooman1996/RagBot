@@ -10,6 +10,7 @@ from utils.persian_normalization import normalize_persian_text
 from utils.read_only_audit import canonical_sha256
 
 LOOKUP_VERSION='snapshot-titles-taxonomy-2'
+NUMERIC_GUARD_VERSION='numeric-premise-2'
 TITLE_LIMIT=20
 
 SAFE_CODES=frozenset({'invalid_source_aspects','invalid_gap_identity','invented_missing_aspect','invented_gap_condition',
@@ -136,10 +137,37 @@ def analyst_input(row,meta):
             'source_result_sha256':canonical_sha256(row),'coverage_export_id':meta['export_id']}}
 
 
+_DIGITS=str.maketrans('۰۱۲۳۴۵۶۷۸۹٠١٢٣٤٥٦٧٨٩','01234567890123456789')
+_WORD_NUMBERS={'یک':1,'دو':2,'سه':3,'چهار':4,'پنج':5,'شش':6,'شیش':6,'هفت':7,'هشت':8,'نه':9,'ده':10,
+    'یازده':11,'دوازده':12,'پانزده':15,'بیست':20,'سی':30,'چهل':40,'پنجاه':50,
+    'صد':100,'دویست':200,'پانصد':500,'هزار':1000,'میلیون':1000000,'میلیارد':1000000000,
+    'one':1,'two':2,'three':3,'four':4,'five':5,'six':6,'seven':7,'eight':8,'nine':9,'ten':10,
+    'twenty':20,'thirty':30,'fifty':50,'hundred':100,'thousand':1000,'million':1000000,'billion':1000000000}
+# Common in everyday phrases ("یک" as "a", "نه" as "no"); counted only before a unit.
+_UNIT_ONLY_WORDS=frozenset({'یک','دو','نه','سی','one'})
+_UNITS=frozenset({'روز','ساعت','ماه','سال','هفته','دقیقه','درصد','ریال','تومان','day','days','hour','hours',
+    'month','months','year','years','week','weeks','minute','minutes','percent'})
+
+
+def _numbers(text):
+    """Number values in text: any digit script, grouping and leading zeros ignored, plus single number words."""
+    digits=re.sub(r'(?<=\d)[,،٬](?=\d)','',(text or '').translate(_DIGITS))
+    found=set()
+    for match in re.findall(r'\d+(?:[.:/]\d+)*',digits):
+        parts=re.split(r'([.:/])',match)
+        decimal=parts[1::2]==['.']
+        found.add(''.join(part if index%2 or (decimal and index==2) else part.lstrip('0') or '0'
+                          for index,part in enumerate(parts)))
+    words=re.findall(r'\w+',normalized(text))
+    for index,word in enumerate(words):
+        if word in _WORD_NUMBERS and (word not in _UNIT_ONLY_WORDS or words[index+1:index+2] and words[index+1] in _UNITS):
+            found.add(str(_WORD_NUMBERS[word]))
+    return found
+
+
 def _no_new_numbers(value,provided):
     value=re.sub(r'(?<!\w)[agq][1-9][0-9]?(?!\w)','',value)
-    numbers=set(re.findall(r'\d+(?:[.:/]\d+)*',value))
-    if not numbers<=set(re.findall(r'\d+(?:[.:/]\d+)*',provided)):raise AuditError('invented_numeric_premise')
+    if _numbers(value)-_numbers(provided):raise AuditError('invented_numeric_premise')
 
 
 def validate_gaps(value,payload,index):

@@ -125,6 +125,27 @@ class FaqTaxonomyParsingTests(unittest.TestCase):
         cleared=compose_faq(QUESTION,ANSWER,{'main_category':None},current_content=old)
         self.assertIsNone(parse_faq_content(cleared).sub_category)
 
+    def test_legacy_inline_footer_is_the_category(self):
+        parsed=parse_faq_content('question: How do I X?\nanswer: Do Y.question category : Cards.')
+        self.assertEqual((parsed.main_category,parsed.sub_category,parsed.answer),('Cards',None,'Do Y.'))
+
+    def test_inline_prose_and_unmarked_text_are_not_a_legacy_footer(self):
+        prose='The question category : field in the form is optional, see section 2: details.'
+        unmarked='question: How do I X? Do Y.question category : Cards.'
+        for content,answer in [(f'question: Q\nanswer: {prose}',prose),(unmarked,unmarked)]:
+            with self.subTest(content=content):
+                parsed=parse_faq_content(content)
+                self.assertEqual((parsed.main_category,parsed.sub_category,parsed.answer),(None,None,answer))
+
+    def test_chunker_writes_line_start_footer_in_both_branches(self):
+        from hihelp_chunker import format_chunk
+        for args,expected in [(('Cards',),('Cards',None)),(('Cards','Lost'),('Cards','Lost'))]:
+            with self.subTest(args=args):
+                chunk=format_chunk('question: How do I X?\nanswer: Do Y.',*args)
+                self.assertIn('\nquestion category : Cards',chunk)
+                parsed=parse_faq_content(chunk)
+                self.assertEqual((parsed.main_category,parsed.sub_category,parsed.answer),(*expected,'Do Y.'))
+
 
 class FaqPayloadTests(unittest.TestCase):
     def payload(self,**metadata):

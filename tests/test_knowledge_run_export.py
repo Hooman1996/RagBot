@@ -15,7 +15,7 @@ from knowledge_audit.recommendation_store import RecommendationStore, decode_cov
 from knowledge_audit.run_export import RunExportStore
 from knowledge_audit.store import BytesInput
 from tests.test_knowledge_coverage_access_jobs import seed, audit_runtime
-from tests.test_knowledge_recommendations import DraftModel, seed_gap_store
+from tests.test_knowledge_recommendations import DraftModel, REVIEWER, seed_gap_store
 from tests.test_web_auth import setup, login, csrf
 
 from tests.test_knowledge_coverage_access_jobs import coverage_staging
@@ -100,8 +100,8 @@ def parsed(body):
 def test_full_918_path_multiple_rows_proposals_reviews_and_immutable_pairs(tmp_path):
     store, exports, recs, run, source, rows, first, second = full_fixture(tmp_path)
     row1, row2 = rows[0]['source_row_id'], rows[1]['source_row_id']
-    approved = recs.decide(first['recommendation_revision_id'], 1, row1, 'q1', 'approved', 'Synthetic private review note.')
-    rejected = recs.decide(second['recommendation_revision_id'], 1, row2, 'q1', 'rejected', 'Synthetic rejection.')
+    approved = recs.decide(first['recommendation_revision_id'], 2, REVIEWER, row1, 'q1', 'approved', 'Synthetic private review note.')
+    rejected = recs.decide(second['recommendation_revision_id'], 1, REVIEWER, row2, 'q1', 'rejected', 'Synthetic rejection.')
     selected = [selection(first,row1,approved['review_revision_id']), selection(second,row2,rejected['review_revision_id'])]
     preview = exports.preview(run['run_id'],1,source['export_revision_id'],selected,True)
     assert preview['summary']['total_source_rows'] == 918
@@ -126,7 +126,7 @@ def test_full_918_path_multiple_rows_proposals_reviews_and_immutable_pairs(tmp_p
     assert set(manifest['revision_selection_map']) == {row1,row2}
     assert manifest['revision_selection_map'][row1]['review_revision_id'] == approved['review_revision_id']
     assert hashlib.sha256(body).hexdigest() == manifest['csv_sha256'] and body.startswith(b'\xef\xbb\xbf')
-    recs.decide(first['recommendation_revision_id'],1,row1,'q1','needs_changes','Later decision.')
+    recs.decide(first['recommendation_revision_id'],1,REVIEWER,row1,'q1','needs_changes','Later decision.')
     store.save_row(run['run_id'],{**rows[0],'outcome':'needs_review'},1)
     assert exports.download(run['run_id'],1,True,frozen['export_revision_id']) == (body,manifest)
     assert all(r['export_id'] == manifest['export_id'] for r in output)
@@ -184,7 +184,7 @@ def test_formula_display_prefix_map_exact_original_roundtrip(tmp_path,text):
 def test_restricted_projection_does_not_leak_drafts_notes_or_evidence(tmp_path):
     store,recs,first,row,_,_=seed_gap_store(tmp_path)
     finish_draft(recs,first,[row['source_row_id']]);rid=first['recommendation_revision_id']
-    review=recs.decide(rid,1,row['source_row_id'],'q1','rejected','PRIVATE_NOTE_SENTINEL')
+    review=recs.decide(rid,1,REVIEWER,row['source_row_id'],'q1','rejected','PRIVATE_NOTE_SENTINEL')
     exports=RunExportStore(store);selected=[selection(first,row['source_row_id'],review['review_revision_id'])]
     frozen=exports.create(first['source_run_id'],1,first['source_export_revision_id'],selected,False)
     body,manifest=exports.download(first['source_run_id'],1,False,frozen['export_revision_id'])

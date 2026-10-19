@@ -40,6 +40,9 @@
             </div>
             <p id="coverageStatus" class="coverage-status" role="status" aria-live="polite">Loading your review workspace…</p>
             <p id="coverageError" class="coverage-error" role="alert" hidden></p>
+            {% if 'coverage_recommendation_review' in permissions %}
+            <section id="coverageReviewQueue" class="coverage-card coverage-review-queue" aria-label="Question drafts waiting for my review"></section>
+            {% endif %}
             {% if 'coverage_run_start' in permissions %}
             <details class="coverage-card coverage-import" open>
                 <summary>Import questions and choose an execution scope</summary>
