@@ -32,7 +32,7 @@ async def run(args):
     import httpx
     from knowledge_audit.settings import load_coverage_settings
     from knowledge_audit.store import CoverageStore
-    from knowledge_audit.runtime import confirm_staging, code_identity
+    from knowledge_audit.runtime import confirm_live_run, code_identity
     from knowledge_audit.model import AuditModel
     from knowledge_audit.evidence import EvidenceIndex
     from knowledge_audit.privacy import AuditError, private_directory
@@ -41,7 +41,7 @@ async def run(args):
     from utils.concurrency import BoundedBlockingRunner, AdmissionLimiter
     from utils.read_only_audit import canonical_sha256
     settings = load_coverage_settings()
-    confirm_staging(confirmed=args.confirmed_staging, model=True, snapshot=True)
+    confirm_live_run(confirmed=args.confirmed, model=True, snapshot=True)
     store = CoverageStore(settings.artifact_dir)
     meta = store.owned("runs", args.run_id, 0)
     _, redactor = store.dataset(meta["dataset_id"], 0)
@@ -187,7 +187,8 @@ def main():
         return 2
     p = argparse.ArgumentParser(description=__doc__)
     p.add_argument("--run-id", required=True)
-    p.add_argument("--confirmed-staging", action="store_true")
+    p.add_argument("--confirmed", action="store_true", dest="confirmed", help="confirm live audit work against the configured services")
+    p.add_argument("--confirmed-staging", action="store_true", dest="confirmed", help=argparse.SUPPRESS)
     p.add_argument("--followup-id", help="Append six predeclared single-variable comparisons; same global 12-dispatch cap.")
     args = p.parse_args()
     try:

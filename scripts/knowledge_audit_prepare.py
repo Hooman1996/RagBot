@@ -28,7 +28,8 @@ def parser():
     p.add_argument("--source-timezone")
     p.add_argument("--authoritative-source-order", action="store_true")
     p.add_argument("--model-limit", type=int, default=0)
-    p.add_argument("--confirmed-staging", action="store_true")
+    p.add_argument("--confirmed", action="store_true", dest="confirmed", help="confirm live audit work against the configured services")
+    p.add_argument("--confirmed-staging", action="store_true", dest="confirmed", help=argparse.SUPPRESS)
     group = p.add_mutually_exclusive_group()
     group.add_argument("--capture-snapshot", action="store_true")
     group.add_argument("--snapshot", type=Path)
@@ -43,7 +44,7 @@ async def run(args):
     from knowledge_audit.privacy import AuditError, Redactor, private_directory, private_write
     from knowledge_audit.preparation import QueryPreparer, prepare_dataset
     from knowledge_audit.export import export_preparation
-    from knowledge_audit.runtime import (confirm_staging, code_identity, configuration_identity,
+    from knowledge_audit.runtime import (confirm_live_run, code_identity, configuration_identity,
                                          serving_identity, live_components)
     from knowledge_audit.snapshot import capture_snapshot, load_snapshot
     from utils.concurrency import BoundedBlockingRunner
@@ -52,7 +53,7 @@ async def run(args):
     if not 0 <= args.model_limit <= 10:
         raise AuditError("invalid_model_sample_limit")
     if args.model_limit or args.capture_snapshot:
-        confirm_staging(confirmed=args.confirmed_staging, model=bool(args.model_limit), snapshot=args.capture_snapshot)
+        confirm_live_run(confirmed=args.confirmed, model=bool(args.model_limit), snapshot=args.capture_snapshot)
     directory = private_directory(args.directory)
     if any(directory.iterdir()):
         raise AuditError("artifact_directory_not_empty")

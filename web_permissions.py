@@ -3,21 +3,6 @@
 from __future__ import annotations
 
 import re
-import os
-from functools import lru_cache
-
-
-@lru_cache(maxsize=None)
-def _coverage_grants(grants: str | None, artifact_dir: str | None):
-    from knowledge_audit.settings import load_coverage_settings
-    environ = dict(os.environ)
-    for name, value in (("KNOWLEDGE_COVERAGE_ACCESS_GRANTS", grants),
-                        ("KNOWLEDGE_COVERAGE_ARTIFACT_DIR", artifact_dir)):
-        if value is None:
-            environ.pop(name, None)
-        else:
-            environ[name] = value
-    return load_coverage_settings(environ).access_grants
 
 PERMISSIONS = frozenset({
     "chat", "sessions", "feedback", "downloads", "documents", "ocr",
@@ -37,13 +22,22 @@ ROLE_PERMISSIONS: dict[str, frozenset[str]] = {
     "dashboard_viewer": USER_PERMISSIONS | frozenset({"analytics", "kb_page", "kb_read"}),
 }
 
+# Knowledge-coverage audit capabilities by role, added while the audit is enabled.
+# Roles not listed here get none.
+COVERAGE_ROLE_CAPABILITIES: dict[str, frozenset[str]] = {
+    "admin": frozenset({"coverage_run_start", "coverage_results_view", "coverage_evidence_view",
+                        "coverage_export_download", "coverage_recommendation_review"}),
+    "dashboard_viewer": frozenset({"coverage_results_view", "coverage_evidence_view",
+                                   "coverage_export_download"}),
+}
+
 
 def permissions_for(role: str | None) -> frozenset[str]:
     return ROLE_PERMISSIONS.get(role or "", frozenset())
 
 
 def permissions_for_user(role: str | None, user_id: int) -> frozenset[str]:
-    """Explicit per-user audit grants; existing role privileges stay unchanged."""
+    """Role privileges plus the role's audit capabilities while the audit is enabled."""
     if role not in ROLE_PERMISSIONS:
         return frozenset()
     from knowledge_audit.settings import coverage_enabled
@@ -51,12 +45,9 @@ def permissions_for_user(role: str | None, user_id: int) -> frozenset[str]:
     try:
         if not coverage_enabled():
             return permissions_for(role)
-        grants = _coverage_grants(os.environ.get("KNOWLEDGE_COVERAGE_ACCESS_GRANTS"),
-                                  os.environ.get("KNOWLEDGE_COVERAGE_ARTIFACT_DIR"))
-        audit = frozenset(grants.get(str(user_id), []))
     except AuditError:
-        audit = frozenset()
-    return permissions_for(role) | audit
+        return permissions_for(role)
+    return permissions_for(role) | COVERAGE_ROLE_CAPABILITIES.get(role, frozenset())
 
 
 def landing_for(role: str | None) -> str:

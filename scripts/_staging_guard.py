@@ -31,7 +31,7 @@ def _host(key: str, value: str) -> str | None:
 
 
 def require_staging(keys) -> None:
-    """Same comparison as knowledge_audit.runtime.confirm_staging, plus ENVIRONMENT."""
+    """Each key must equal this checkout's .env value and point at loopback; ENVIRONMENT must be staging."""
     from dotenv import dotenv_values
     if os.environ.get("ENVIRONMENT") != "staging":
         _refuse("ENVIRONMENT")

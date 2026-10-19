@@ -894,14 +894,13 @@ needed for another container on the same Compose network.
 
 These optional settings affect the separate audit page/runner, not production
 answering defaults. `knowledge_audit.settings.load_coverage_settings` validates
-the complete configuration. Invalid audit settings deny new access or prevent
-audit runtime creation; they do not grant new legacy role privileges. Runtime
-manifests include effective limits and a grant-map hash, not authentication data.
+the complete configuration. Invalid audit settings prevent audit runtime
+creation; they do not grant new role privileges. Runtime manifests include
+effective limits and a role-policy hash, not authentication data.
 
 | Variable | Default | Type and validation |
 |---|---|---|
 | `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Absolute durable directory outside repository/static and `/tmp`; no symlink traversal; owner-only directories 0700/files 0600. Provision appropriate ownership before running under another service account. |
-| `KNOWLEDGE_COVERAGE_ACCESS_GRANTS` | `{}` | JSON object: canonical positive web-user-ID strings to arrays of explicitly allowed audit capabilities. Unknown capabilities/roles/invalid IDs fail closed. No automatic admin grant. |
 | `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Integer 1024–20971520; decoded CSV bytes, with an additional bounded JSON/base64 transport envelope. |
 | `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `1200` | Integer 256–4096; reserved structured-output tokens for each audit completion. Complete input plus this reserve/margin must fit the served context limit. |
 | `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
@@ -917,17 +916,17 @@ outer deadline and retains its HTTP timeout. Diagnostic read overrides are local
 experiments only, not permanent runtime values. Existing templates/private runtime
 envs require no new keys; the user-deleted staging template remains deleted.
 
-Allowed capabilities are `coverage_run_start`, `coverage_results_view`,
-`coverage_evidence_view`, `coverage_export_download`. An entirely synthetic
-example grants all four to imaginary account 123:
-
-```dotenv
-KNOWLEDGE_COVERAGE_ACCESS_GRANTS={"123":["coverage_run_start","coverage_results_view","coverage_evidence_view","coverage_export_download"]}
-```
+Audit capabilities come from roles, in `COVERAGE_ROLE_CAPABILITIES` in
+`web_permissions.py`, and are added only while the audit is enabled
+(`KNOWLEDGE_COVERAGE_ENABLED` not `false`, in every environment). `admin` gets
+`coverage_run_start`, `coverage_results_view`, `coverage_evidence_view`,
+`coverage_export_download` and `coverage_recommendation_review`;
+`dashboard_viewer` gets the three read capabilities; every other role gets none.
+No environment variable grants audit access.
 
 Existing `kb_read` is additionally required for snapshot capture/run start/source
-evidence. Evidence/export require results access too. Explicit capability grants
-do not transfer another user's dataset or run. Trusted CLI `--owner-id` assigns
+evidence. Evidence/export require results access too. Capabilities do not
+transfer another user's dataset or run. Trusted CLI `--owner-id` assigns
 ownership when importing; default 0 is the isolated operator namespace. Identical
 validated snapshots can be explicitly registered for another owner without
 sharing datasets/runs. No browser path-read or snapshot-grant endpoint exists.
@@ -972,9 +971,8 @@ No production retrieval/timeouts/output defaults or role grants change.
 
 ## A4 recommendation review access
 
-No new permanent env variable or default is introduced.
-`KNOWLEDGE_COVERAGE_ACCESS_GRANTS` additionally accepts the explicit capability
-`coverage_recommendation_review`, default denied by `{}`. It permits owned
+No new permanent env variable or default is introduced. The capability
+`coverage_recommendation_review` belongs to the `admin` role only. It permits
 question/taxonomy review only, requires results/evidence/kb_read too, and does not
 grant KB writes or confirm factual answers. Existing role permissions and real
 account grants are unchanged. All four applicable tracked templates document the

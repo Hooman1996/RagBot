@@ -1,7 +1,6 @@
 """Configurable audit retrieval depths and entry budget; synthetic fixtures only."""
 from __future__ import annotations
 import asyncio
-import json
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -10,7 +9,7 @@ from fastapi.testclient import TestClient
 
 import main
 from knowledge_audit.privacy import AuditError
-from knowledge_audit.settings import CAPABILITIES, load_coverage_settings
+from knowledge_audit.settings import load_coverage_settings
 from tests.test_answering_service import ImmediateRunner
 from tests.test_knowledge_coverage_access_jobs import audit_runtime, coverage_staging, enabled_coverage  # noqa: F401
 from tests.test_knowledge_coverage_pipeline import LabeledModel, Retrieval, input_dataset, snapshot
@@ -26,7 +25,7 @@ def test_defaults_keep_the_settings_manifest_unchanged():
     manifest = settings.manifest()
     assert manifest['initial_depths'] == [150] * 3 and manifest['expanded_depths'] == [300] * 3
     assert manifest['initial_entries'] == 50 and manifest['maximum_distinct_entries'] == 300
-    assert manifest['schema'] == 'coverage-settings-6'
+    assert manifest['schema'] == 'coverage-settings-7'
 
 
 def test_overrides_are_reflected_and_orderings_validated():
@@ -131,7 +130,6 @@ def test_api_entry_budget_defaults_to_and_is_bounded_by_configured_maximum(audit
     monkeypatch.setattr(main.app.state, 'coverage_runtime', (settings, store, jobs), raising=False)
     monkeypatch.setenv('KNOWLEDGE_COVERAGE_MAX_ENTRY_BUDGET', '120')
     setup.users[1]['role'] = 'admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS', json.dumps({'1': sorted(CAPABILITIES)}))
     body = {'dataset_id': d['dataset_id'], 'snapshot_id': s['snapshot_id'], 'row_ids': list(meta['row_ids'][:1]),
             'documents': ['Synthetic_FAQ']}
     with TestClient(main.app, raise_server_exceptions=False) as client:

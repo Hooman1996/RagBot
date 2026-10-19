@@ -33,7 +33,7 @@ EXPORT_MESSAGE = "run_export_api.MESSAGES translates it into a fixed sentence; m
 TIMESTAMP = "caught as ValueError by TimestampPolicy.parse; the row records timestamp_invalid"
 CANCEL = "the cancel routes answer with a fixed 'cannot be cancelled' sentence"
 MODEL = "model client check; failures.category maps it to a generic category and the row records audit_failed"
-STAGING = "staging-target refusal; CLIs print it and jobs record audit_failed"
+LIVE_RUN = "live-run confirmation refusal; raised only on a CLI path without --confirmed, which prints it"
 LOCK = "retention lock refusal; masked to the generic 409 or audit_failed, printed by the cleanup CLI"
 
 INTERNAL_ONLY = {
@@ -59,7 +59,7 @@ INTERNAL_ONLY = {
     "cleanup_plan_stale": CLEANUP, "cleanup_safe_delete_unavailable": CLEANUP, "invalid_cleanup_policy": CLEANUP,
     "cleanup_artifacts_busy": LOCK, "cleanup_nested_access": LOCK,
     "invalid_a4_budget": FIXTURE, "recommendation_fixture_drift": FIXTURE,
-    "invalid_coverage_access_grants": SETTINGS, "invalid_coverage_batch_max_entries": SETTINGS,
+    "invalid_coverage_batch_max_entries": SETTINGS,
     "invalid_coverage_depths": SETTINGS, "invalid_coverage_integer": SETTINGS,
     "invalid_coverage_max_run_rows": SETTINGS, "invalid_coverage_public_contacts": SETTINGS,
     "invalid_durable_artifact_directory": SETTINGS, "invalid_operational_limits": SETTINGS,
@@ -77,7 +77,7 @@ INTERNAL_ONLY = {
     "invalid_jalali_date": TIMESTAMP, "jalali_year_out_of_range": TIMESTAMP, "invalid_timestamp": TIMESTAMP,
     "recommendation_not_active": CANCEL, "run_not_active": CANCEL,
     "invalid_token_count": MODEL, "model_not_discovered": MODEL,
-    "staging_confirmation_required": STAGING, "unconfirmed_service_target": STAGING,
+    "live_run_confirmation_required": LIVE_RUN,
 }
 
 # The only places an internal-only code may appear other than as a raised code:

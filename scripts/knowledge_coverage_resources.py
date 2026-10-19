@@ -13,17 +13,14 @@ from pathlib import Path
 import statistics
 import sys
 import time
-from urllib.parse import urlsplit
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 
 
 async def run(args):
-    from dotenv import dotenv_values
-    root=Path(__file__).resolve().parents[1]
     logging.disable(logging.CRITICAL)
     import httpx
-    from knowledge_audit.runtime import confirm_staging,code_identity
+    from knowledge_audit.runtime import confirm_live_run,require_configured,code_identity
     from knowledge_audit.privacy import AuditError,Redactor,private_directory,private_json
     from knowledge_audit.model import AuditModel
     from knowledge_audit.settings import load_coverage_settings
@@ -38,9 +35,8 @@ async def run(args):
     from utils.read_only_audit import canonical_sha256
     from tests.test_knowledge_coverage_pipeline import snapshot
     from knowledge_audit.evidence import EvidenceIndex
-    confirm_staging(confirmed=args.confirmed_staging,model=True)
-    target=os.environ.get('TEI_RERANK_URL','')
-    if target!=dotenv_values(root/'.env').get('TEI_RERANK_URL') or urlsplit(target).hostname not in {'127.0.0.1','localhost','::1'}:raise AuditError('unconfirmed_service_target')
+    confirm_live_run(confirmed=args.confirmed,model=True)
+    require_configured('TEI_RERANK_URL')
     task_guard=private_directory(Path('/tmp/faq-a62-task-control'))/'task-budget-cd8989a2.json'
     if task_guard.exists():raise AuditError('resource_experiment_already_started')
     private_json(task_guard,{'version':'a62-task-guard-1','generation_limit':24,'tei_post_limit':80,'generation_posts':0,'tei_posts':0})
@@ -184,7 +180,7 @@ def main():
     except AuditError as error:
         print(str(error), file=sys.stderr)
         return 2
-    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--confirmed-staging',action='store_true')
+    parser=argparse.ArgumentParser(description=__doc__);parser.add_argument('--confirmed',action='store_true',dest='confirmed',help='confirm live audit work against the configured services');parser.add_argument('--confirmed-staging',action='store_true',dest='confirmed',help=argparse.SUPPRESS)
     parser.add_argument('--output',type=Path,required=True);args=parser.parse_args()
     try:
         asyncio.run(run(args))

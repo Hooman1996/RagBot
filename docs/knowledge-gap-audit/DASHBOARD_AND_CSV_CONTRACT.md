@@ -353,10 +353,12 @@ remain English. A2.1 includes actual synthetic Chromium visual/keyboard/RTL,
 theme, responsive and download checks. Excel application validation remains
 unperformed; automated BOM/quoting/formula tests passed.
 
-Existing roles, including admin, acquire no audit privileges by default.
-`KNOWLEDGE_COVERAGE_ACCESS_GRANTS={}` denies all new access. Explicit positive
-web-user-ID grants use the four agreed capabilities. Authentication, active
-user, CSRF, same-origin and owner checks apply; unknown routes remain denied.
+Audit access comes from roles, in `COVERAGE_ROLE_CAPABILITIES` in
+`web_permissions.py`, while the audit is enabled (`KNOWLEDGE_COVERAGE_ENABLED`
+not `false`, in every environment). `admin` has all five capabilities;
+`dashboard_viewer` has results-view, evidence-view and export-download; every
+other role has none. Authentication, active user, CSRF, same-origin and owner
+checks apply; unknown routes remain denied.
 The operator namespace 0 does not represent a web account. Identical validated
 snapshots can be explicitly registered for multiple owners by trusted operator/
 capture code; datasets and runs remain single-owner.

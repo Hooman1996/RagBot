@@ -125,9 +125,9 @@ async def build_recommendation_engine(request,store,meta):
     from knowledge_audit.recommendations import RecommendationEngine
     from knowledge_audit.recommendation_schemas import SCHEMAS
     from knowledge_audit.recommendation_prompts import messages
-    from knowledge_audit.runtime import confirm_staging
+    from knowledge_audit.runtime import confirm_live_run
     from utils.performance_config import PERFORMANCE_SETTINGS
-    confirm_staging(confirmed=True,model=True)
+    confirm_live_run(confirmed=True,model=True)
     settings,coverage_store,_=runtime(request)
     if meta.get("operational_policy") and settings.manifest()!=meta["operational_settings"]:raise AuditError("audit_runtime_identity_drift")
     old=await request.app.state.blocking_runner.run(coverage_store.owned,'runs',meta['source_run_id'],meta['owner_id'])

@@ -182,15 +182,14 @@ from types import SimpleNamespace
 
 def test_default_deny_real_auth_owner_csrf_and_restricted_export(audit_runtime,setup,monkeypatch):
     store,d,s,meta,jobs=audit_runtime
-    setup.users[1]['role']='admin'; setup.users[2]['role']='admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS','{}')
+    import web_permissions
+    setup.users[1]['role']='user'; setup.users[2]['role']='admin'
     with TestClient(main.app,raise_server_exceptions=False) as client:
         assert client.get('/api/knowledge-coverage/runs').status_code==401
         login(client,'alice')
         assert client.get('/knowledge-coverage').status_code==403
         assert client.get('/api/knowledge-coverage/runs').status_code==403
-        grants={'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps(grants))
+        setup.users[1]['role']='admin'
         page=client.get('/knowledge-coverage'); assert page.status_code==200
         assert '/knowledge-coverage' in client.get('/app').text
         assert client.post('/api/knowledge-coverage/runs',json={}).status_code==403
@@ -199,10 +198,12 @@ def test_default_deny_real_auth_owner_csrf_and_restricted_export(audit_runtime,s
         export=client.get('/api/knowledge-coverage/runs/'+meta['run_id']+'/export'); assert export.status_code==200
         manifest=client.get('/api/knowledge-coverage/runs/'+meta['run_id']+'/export-manifest').json()
         assert export.headers['x-coverage-export-id']==manifest['export_id']
-        grants['1'].remove('coverage_evidence_view'); monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps(grants))
+        # No real role lacks evidence view while keeping export, so restrict the role map for this check.
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES-{'coverage_evidence_view'}))
         assert client.get('/api/knowledge-coverage/runs/'+meta['run_id']+'/rows/'+meta['row_ids'][0]).status_code==403
         restricted=client.get('/api/knowledge-coverage/runs/'+meta['run_id']+'/export')
         assert b'restricted' in restricted.content
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES))
         login(client,'bob')
         for suffix in ('','/results','/export','/export-manifest','/rows/'+meta['row_ids'][0]):
             assert client.get('/api/knowledge-coverage/runs/'+meta['run_id']+suffix).status_code==404
@@ -212,7 +213,7 @@ def test_default_deny_real_auth_owner_csrf_and_restricted_export(audit_runtime,s
 
 def test_upload_mapping_no_arbitrary_paths_and_full_input_pilot_export(audit_runtime,setup,monkeypatch):
     store,d,s,meta,jobs=audit_runtime
-    setup.users[1]['role']='admin'; monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES)}))
+    setup.users[1]['role']='admin'
     with TestClient(main.app,raise_server_exceptions=False) as client:
         login(client,'alice')
         raw='query,session,timestamp\r\n"سؤال، یک\nخط",a,2026-01-01T12:00:00Z\r\n"=untrusted formula",a,2026-01-01T13:00:00Z\r\n, a,broken\r\n'
@@ -245,7 +246,7 @@ def test_upload_mapping_no_arbitrary_paths_and_full_input_pilot_export(audit_run
 
 
 @pytest.mark.parametrize('key,value',[('KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS','0'),('KNOWLEDGE_COVERAGE_TOKEN_MARGIN','-1'),
-    ('KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES','999999999'),('KNOWLEDGE_COVERAGE_ACCESS_GRANTS','{"1":["kb_write"]}'),
+    ('KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES','999999999'),
     ('KNOWLEDGE_COVERAGE_ARTIFACT_DIR','/tmp/ephemeral'),('KNOWLEDGE_COVERAGE_ARTIFACT_DIR',str(__import__('pathlib').Path(__file__).resolve().parents[1] / 'static' / 'private'))])
 def test_configuration_validation_and_propagation(key,value):
     with pytest.raises(ValueError): load_coverage_settings({key:value})

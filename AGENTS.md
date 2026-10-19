@@ -79,7 +79,7 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 
 #### Knowledge-coverage and recommendation routes
 
-`knowledge_audit.api.mount` includes these routes only when `KNOWLEDGE_COVERAGE_ENABLED=true` and `ENVIRONMENT=staging`; `main.py` calls `mount(app)`. The list was generated from `main.app.routes` with both values set, by an in-process import with no services. The recommendation and run-export routes come from `knowledge_audit/recommendation_api.py` and `knowledge_audit/run_export_api.py`, whose routers are included in the audit router.
+`knowledge_audit.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls `mount(app)`. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`. The list was generated from `main.app.routes` with both values set, by an in-process import with no services. The recommendation and run-export routes come from `knowledge_audit/recommendation_api.py` and `knowledge_audit/run_export_api.py`, whose routers are included in the audit router.
 
 - `GET /api/knowledge-coverage/calibrations`
 - `GET /api/knowledge-coverage/calibrations/{calibration_id}`
@@ -171,7 +171,7 @@ Verified configuration files and sources:
 - `new_architecture/alembic/versions/alembic.ini`: Alembic configuration.
 - Root `package.json`: root frontend dependency metadata.
 - `qdrant-web-ui-master/package.json` and `static_qdrant/package.json`: bundled Qdrant UI build and test scripts.
-- Knowledge-coverage audit gate: the audit routes, jobs and CLIs (except `scripts/knowledge_coverage_cleanup.py`) run only with `KNOWLEDGE_COVERAGE_ENABLED=true` together with `ENVIRONMENT=staging` (`knowledge_audit/settings.py` `coverage_enabled`). With the flag on and `ENVIRONMENT=production`, `coverage_enabled` raises `coverage_enabled_in_production`.
+- Knowledge-coverage audit gate: the audit routes, jobs and CLIs (except `scripts/knowledge_coverage_cleanup.py`) run when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says (`knowledge_audit/settings.py` `coverage_enabled`). Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py`.
 
 `pytest.ini` now exists. No `pyproject.toml`, `requirements*.txt`, `tox.ini`, or Makefile was found. The canonical Python dependency-installation command is therefore unknown.
 

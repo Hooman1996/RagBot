@@ -39,7 +39,7 @@ async def run(args):
             body=store.read(args.labels)
             print(json.dumps(import_labels(store,args.package_id,body),sort_keys=True))
         return 0
-    from knowledge_audit.runtime import confirm_staging, live_components, configuration_identity, serving_identity, code_identity
+    from knowledge_audit.runtime import confirm_live_run, live_components, configuration_identity, serving_identity, code_identity
     from knowledge_audit.inputs import TimestampPolicy
     from knowledge_audit.preparation import QueryPreparer
     from knowledge_audit.pipeline import CoverageEvaluator
@@ -47,7 +47,7 @@ async def run(args):
     from knowledge_audit.prompts import prompt_identity
     from utils.concurrency import BoundedBlockingRunner, AdmissionLimiter
     import httpx
-    confirm_staging(confirmed=args.confirmed_staging,model=True)
+    confirm_live_run(confirmed=args.confirmed,model=True)
     spec, lock = load_inputs()
     artifacts=CalibrationArtifacts(store)
     lease=store.global_lease()
@@ -187,7 +187,7 @@ def main():
         return 2
     p=argparse.ArgumentParser(description=__doc__)
     sub=p.add_subparsers(dest="command",required=True)
-    live=sub.add_parser("run");live.add_argument("--confirmed-staging",action="store_true")
+    live=sub.add_parser("run");live.add_argument("--confirmed",action="store_true",dest="confirmed",help="confirm live audit work against the configured services");live.add_argument("--confirmed-staging",action="store_true",dest="confirmed",help=argparse.SUPPRESS)
     live.add_argument("--owner-id",type=int,default=0,help="Explicit existing owner; does not grant web access. Default operator namespace 0.")
     for name in ("human-template","human-import"):
         child=sub.add_parser(name);child.add_argument("--package-id",required=True)

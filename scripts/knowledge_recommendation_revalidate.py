@@ -13,7 +13,7 @@ ROOT=Path(__file__).resolve().parents[1];sys.path.insert(0,str(ROOT))
 
 async def run(args):
     logging.disable(logging.CRITICAL)
-    from knowledge_audit.runtime import confirm_staging
+    from knowledge_audit.runtime import confirm_live_run
     from knowledge_audit.settings import load_coverage_settings
     from knowledge_audit.store import CoverageStore,now
     from knowledge_audit.privacy import AuditError,private_directory
@@ -29,7 +29,7 @@ async def run(args):
     from utils.performance_config import PERFORMANCE_SETTINGS
     from utils.RagSystem import RAGSystem
     import httpx
-    confirm_staging(confirmed=args.confirmed_staging,model=True)
+    confirm_live_run(confirmed=args.confirmed,model=True)
     settings=load_coverage_settings();store=CoverageStore(settings.artifact_dir);recs=RecommendationStore(store)
     root=private_directory(store.root/'recommendation-pilots');lease=store.global_lease();runner=BoundedBlockingRunner(1);rag=None
     started=time.perf_counter();wire=0;usage=[]
@@ -120,7 +120,7 @@ def main():
         print(str(error), file=sys.stderr)
         return 2
     import argparse
-    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--recommendation-revision-id',required=True);p.add_argument('--source-row-id',required=True);p.add_argument('--confirmed-staging',action='store_true');p.add_argument('--metadata-normalization-check',action='store_true');p.add_argument('--final-heldout-check',action='store_true')
+    p=argparse.ArgumentParser(description=__doc__);p.add_argument('--recommendation-revision-id',required=True);p.add_argument('--source-row-id',required=True);p.add_argument('--confirmed',action='store_true',dest='confirmed',help='confirm live audit work against the configured services');p.add_argument('--confirmed-staging',action='store_true',dest='confirmed',help=argparse.SUPPRESS);p.add_argument('--metadata-normalization-check',action='store_true');p.add_argument('--final-heldout-check',action='store_true')
     try:asyncio.run(run(p.parse_args()))
     except AuditError as error:
         print(str(error), file=sys.stderr)

@@ -99,8 +99,8 @@ def test_immutable_export_pair_survives_row_mutation_and_repeated_downloads(audi
     import main
     from knowledge_audit.settings import CAPABILITIES
     store,d,s,meta,jobs=audit_runtime
+    import web_permissions
     setup.users[1]['role']='admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES)}))
     url='/api/knowledge-coverage/runs/'+meta['run_id']
     with TestClient(main.app,raise_server_exceptions=False) as client:
         login(client,'alice')
@@ -122,8 +122,8 @@ def test_immutable_export_pair_survives_row_mutation_and_repeated_downloads(audi
         assert hashlib.sha256(second.content).hexdigest()==frozen['csv_sha256']
         old=client.get(url+'/export?revision_id='+manifest['export_revision_id'])
         assert old.content==first.content and manifest['state']=='queued'
-        grants={'1':sorted(CAPABILITIES-{'coverage_evidence_view'})}
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps(grants))
+        # No real role lacks evidence view while keeping export, so restrict the role map for this check.
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES-{'coverage_evidence_view'}))
         assert client.get(url+'/export?revision_id='+revision).status_code==404
 
 

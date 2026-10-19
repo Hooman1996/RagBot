@@ -246,8 +246,8 @@ def test_run_export_api_owner_csrf_explicit_review_and_permission_revocation(tmp
     finish_draft(recs,rec,[row['source_row_id']])
     _,_,_,_,jobs=audit_runtime
     monkeypatch.setattr(main.app.state,'coverage_runtime',(None,store,jobs))
+    import web_permissions
     setup.users[1]['role']='admin';setup.users[2]['role']='admin'
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':sorted(CAPABILITIES),'2':sorted(CAPABILITIES)}))
     base='/api/knowledge-coverage/runs/'+rec['source_run_id']
     payload={'coverage_export_revision_id':rec['source_export_revision_id'],
              'selections':[selection(rec,row['source_row_id'])]}
@@ -271,15 +271,16 @@ def test_run_export_api_owner_csrf_explicit_review_and_permission_revocation(tmp
         incompatible={**payload,'coverage_export_revision_id':other['export_revision_id']}
         failure=client.post(base+'/combined-export-preview',json=incompatible,headers=csrf(client))
         assert failure.status_code==409 and 'different frozen coverage sources' in failure.json()['detail']
-        restricted=sorted(CAPABILITIES-{'coverage_evidence_view'})
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':restricted,'2':sorted(CAPABILITIES)}))
+        # No real role has these partial sets, so restrict the role map for these checks.
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES-{'coverage_evidence_view'}))
         assert client.get(csv_url).status_code==404 and client.get(manifest_url).status_code==404
         new=client.post(base+'/combined-export-revisions',json=payload,headers=csrf(client));assert new.status_code==201
         restricted_body=client.get(base+'/combined-export?revision_id='+new.json()['export_revision_id'])
         assert restricted_body.status_code==200 and json.loads(parsed(restricted_body.content)[0]['recommendations'])==[]
-        monkeypatch.setenv('KNOWLEDGE_COVERAGE_ACCESS_GRANTS',json.dumps({'1':['coverage_results_view'],'2':sorted(CAPABILITIES)}))
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset({'coverage_results_view'}))
         assert client.get(base+'/combined-export?revision_id='+new.json()['export_revision_id']).status_code==403
         assert client.get(base+'/export-options').status_code==403
+        monkeypatch.setitem(web_permissions.COVERAGE_ROLE_CAPABILITIES,'admin',frozenset(CAPABILITIES))
         login(client,'bob')
         for path in (csv_url,manifest_url,base+'/export-options'):
             assert client.get(path).status_code==404

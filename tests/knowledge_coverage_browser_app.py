@@ -5,7 +5,6 @@ Runtime env overrides are process-only; no root env files or user tables change.
 """
 import asyncio
 from contextlib import asynccontextmanager
-import json
 import logging
 import os
 from pathlib import Path
@@ -17,7 +16,7 @@ from tests.test_knowledge_coverage_pipeline import LabeledModel, Retrieval
 from knowledge_audit.jobs import CoverageJobs
 from knowledge_audit.pipeline import CoverageEvaluator
 from knowledge_audit.preparation import QueryPreparer
-from knowledge_audit.settings import CAPABILITIES, load_coverage_settings
+from knowledge_audit.settings import load_coverage_settings
 from knowledge_audit.privacy import private_json
 from utils.read_only_audit import canonical_sha256, text_sha256
 
@@ -46,8 +45,7 @@ def create_app(port):
     main.blocking_runner = ImmediateRunner()
     os.environ.update(WEB_ENVIRONMENT="development", WEB_COOKIE_MODE="local-http",
         WEB_PUBLIC_ORIGIN=f"http://127.0.0.1:{port}", WEB_SESSION_SECONDS="900",
-        WEB_SESSION_SECRET="synthetic-browser-only-" + "x" * 48,
-        KNOWLEDGE_COVERAGE_ACCESS_GRANTS=json.dumps({str(SYNTHETIC_OWNER): sorted(CAPABILITIES)}))
+        WEB_SESSION_SECRET="synthetic-browser-only-" + "x" * 48)
     directory = Path(tempfile.mkdtemp(prefix="faq-a21-synthetic-browser-"))
     store, d, s, meta, data, redactor, prep = seed(directory, owner=SYNTHETIC_OWNER)
     # Second fictional source supplies the cutoff, independently of the duration.
