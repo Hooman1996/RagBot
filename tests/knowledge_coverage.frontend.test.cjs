@@ -27,7 +27,7 @@ const findAll = (element, predicate, out = []) => { if (predicate(element)) out.
 const tick = () => new Promise(resolve => setImmediate(resolve));
 
 function dom(canStart) {
-    const document = { ids: new Map(), scrolls: [], createElement(tag) { return new Element(tag, this); }, getElementById(id) { return this.ids.get(id); } };
+    const document = { ids: new Map(), scrolls: [], createElement(tag) { return new Element(tag, this); }, createTextNode(value) { return { nodeType: 3, textContent: String(value), children: [] }; }, getElementById(id) { return this.ids.get(id); } };
     const html = fs.readFileSync('templates/knowledge_coverage.html', 'utf8');
     [...html.matchAll(/id="(coverage[^"]+)"/g)].forEach(m => { document.createElement('div').id = m[1]; });
     document.body = { classList: { values: new Set(), add(v) { this.values.add(v); }, toggle(v) { if (this.values.has(v)) { this.values.delete(v); return false; } this.values.add(v); return true; } } };
@@ -84,6 +84,9 @@ async function harness(canStart, data = fixture()) {
         if (path === 'documents') value = d.documents;
         else if (path === 'checks' && options.method === 'POST') value = { run_id: RUN };
         else if (path === 'checks') value = d.checks;
+        else if (path.endsWith('/suggestions/cancel')) value = { cancelled: 1 };
+        else if (path.endsWith('/suggestions') && options.method === 'POST') { value = { queued: 1 }; if (server.onSuggest) server.onSuggest(JSON.parse(options.body)); }
+        else if (path.endsWith('/suggestions')) value = d.suggestions || { queued: 0, active_row: null, done: 0, errors: 0, eligible: 0 };
         else if (detailMatch) value = d.rowDetails[detailMatch[1]];
         else if (path.includes('/rows?')) value = d.rows;
         else if (path.endsWith('/cancel')) value = { run_id: RUN, state: 'cancelled' };
@@ -346,5 +349,171 @@ test('the Checks table shows the prompt version and a prompt change blocks resum
         await h.booted.actions.resume(RUN);
         assert.equal($('Error').hidden, false);
         assert.equal($('Error').textContent, 'The prompts changed since this check started; start a new check.');
+    } finally { h.restore(); }
+});
+
+// Suggested FAQ ---------------------------------------------------------
+const SUGGESTION = {
+    status: 'done', error_code: null, faq_question: 'چگونه سقف انتقال را ببینم؟',
+    faq_answer: 'به بخش انتقال بروید. سقف روزانه [تکمیل شود: سقف روزانه] است و کارمزد 700 ریال است.',
+    missing: ['daily transfer limit'], chunks: [{ number: 1, chunk_id: 'k1', title: 'عنوان یک' }, { number: 2, chunk_id: 'k2', title: null }],
+    used_chunk_ids: ['k1', 'k2'], unverified_numbers: ['700'], suggest_prompt_version: 'abcdefabcdef', model_calls: 1
+};
+const detailView = (result, extra = {}) => ({ row: 2, id: 'q2', question: 'سوال', result, answer_batch: null, model_calls: 1, duration_ms: 10,
+    error_code: null, batches: [{ number: 1, phase: 'initial', verdict: 'none', note: '', chunks: [] }], combines: [], suggestion: null, suggestion_status: null, ...extra });
+const buttons = element => findAll(element, e => e.tagName === 'BUTTON').map(b => b.textContent);
+
+test('the Suggest button shows only on eligible rows, and only with coverage_run_start', () => {
+    const document = dom(true);
+    for (const result of ['not_answered', 'partial']) {
+        const detail = ui.renderDetail(document, detailView(result), { canStart: true });
+        assert.deepEqual(buttons(detail), ['Suggest FAQ'], result);
+        assert.equal(ui.renderSuggestion(document, detailView(result), { canStart: false }), null, 'nothing for a viewer');
+    }
+    for (const result of ['answered', 'answered_combined', 'chitchat', 'error', null]) {
+        const detail = ui.renderDetail(document, detailView(result), { canStart: true });
+        assert.deepEqual(buttons(detail), [], String(result));
+        assert.equal(findAll(detail, e => e.className === 'coverage-suggest').length, 0);
+    }
+    const busy = ui.renderSuggestion(document, detailView('partial'), { canStart: true, status: 'queued' });
+    const button = find(busy, e => e.tagName === 'BUTTON');
+    assert.equal(button.textContent, 'Suggesting…'); assert.equal(button.disabled, true);
+    const again = ui.renderSuggestion(document, detailView('partial', { suggestion: SUGGESTION, suggestion_status: 'done' }), { canStart: true });
+    assert.deepEqual(buttons(again), ['Copy', 'Suggest again']);
+    const viewer = ui.renderSuggestion(document, detailView('partial', { suggestion: SUGGESTION }), { canStart: false });
+    assert.deepEqual(buttons(viewer), ['Copy'], 'a viewer can read and copy a suggestion');
+});
+
+test('placeholders render as <mark>, missing facts, chunks used and the unverified-numbers warning', async () => {
+    const document = dom(false);
+    const box = ui.renderSuggestion(document, detailView('not_answered', { suggestion: SUGGESTION, suggestion_status: 'done' }), {});
+    assert.match(text(box), /^Suggested FAQ/);
+    const marks = findAll(box, e => e.tagName === 'MARK');
+    assert.equal(marks.length, 1); assert.equal(marks[0].textContent, '[تکمیل شود: سقف روزانه]');
+    const answer = marks[0] && findAll(box, e => e.className === 'coverage-suggest-text')[1];
+    assert.equal(answer.dir, 'auto');
+    assert.deepEqual(answer.children.map(c => c.nodeType === 3 ? 'text' : c.tagName), ['text', 'MARK', 'text'], 'text nodes around the mark');
+    assert.equal(text(answer), SUGGESTION.faq_answer);
+    assert.match(text(box), /Missing factsdaily transfer limit/);
+    assert.match(text(box), /Chunks used: عنوان یک · k2/);
+    const warning = find(box, e => e.className === 'coverage-suggest-warning');
+    assert.equal(warning.textContent, 'Check these numbers; they are not in the chunks: 700');
+    const clean = ui.renderSuggestion(document, detailView('not_answered', { suggestion: { ...SUGGESTION, unverified_numbers: [] } }), {});
+    assert.equal(find(clean, e => e.className === 'coverage-suggest-warning'), undefined);
+
+    const copied = [];
+    const saved = Object.getOwnPropertyDescriptor(globalThis, 'navigator');
+    Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { clipboard: { writeText: async value => { copied.push(value); } } } });
+    try {
+        const copy = find(box, e => e.tagName === 'BUTTON' && e.textContent === 'Copy');
+        await copy.dispatch('click');
+        assert.deepEqual(copied, [SUGGESTION.faq_question + '\n\n' + SUGGESTION.faq_answer]);
+        assert.equal(copy.textContent, 'Copied');
+    } finally { Object.defineProperty(globalThis, 'navigator', saved); }
+
+    for (const [code, reason] of [['no_saved_chunks', /No chunk text was saved/], ['not_eligible', /Only Not answered or Partly answered/],
+        ['empty_suggestion', /empty question or answer/], ['model_output_cut', /Model reply was cut off/]]) {
+        const failed = ui.renderSuggestion(document, detailView('partial', { suggestion: { status: 'error', error_code: code } }), { canStart: true });
+        assert.match(text(failed), reason, code);
+        assert.deepEqual(buttons(failed), ['Suggest again']);
+    }
+});
+
+test('"Suggest for all unanswered (N)" is disabled at N = 0 and hidden without coverage_run_start', async () => {
+    const h = await harness(true), { $ } = h;
+    try {
+        await h.booted.actions.open(RUN);
+        assert.equal($('SuggestAll').hidden, false);
+        assert.equal($('SuggestAll').textContent, 'Suggest for all unanswered (0)');
+        assert.equal($('SuggestAll').disabled, true);
+        assert.equal($('SuggestProgress').hidden, true); assert.equal($('SuggestStop').hidden, true);
+        const data = clone(h.server.data); data.suggestions = { queued: 0, active_row: null, done: 1, errors: 0, eligible: 3 };
+        h.server.data = data;
+        await h.timers[0](); await tick();
+        assert.equal($('SuggestAll').textContent, 'Suggest for all unanswered (3)');
+        assert.equal($('SuggestAll').disabled, false);
+        const sent = []; h.server.onSuggest = body => sent.push(body);
+        await $('SuggestAll').dispatch('click');
+        assert.deepEqual(sent, [{ all: true }]);
+    } finally { h.restore(); }
+
+    const viewer = await harness(false);
+    try {
+        await viewer.booted.actions.open(RUN);
+        assert.equal(viewer.$('SuggestAll').hidden, true);
+    } finally { viewer.restore(); }
+});
+
+test('an open detail stays open while its suggestion moves from queued to done', async () => {
+    const data = fixture();
+    data.checks[0].state = 'completed'; data.detail.meta.state = 'completed'; data.detail.active_row = null; data.detail.meta.active_row = null;
+    data.rows.rows[1] = { ...data.rows.rows[1], result: 'not_answered', suggestion_status: null };
+    data.rows.rows[2] = { ...data.rows.rows[2], result: 'answered', active: false };
+    data.rowDetails[2] = detailView('not_answered');
+    data.suggestions = { queued: 0, active_row: null, done: 0, errors: 0, eligible: 1 };
+    const h = await harness(true, data), { $ } = h;
+    const step = (status, summary, detail) => {
+        const next = clone(h.server.data);
+        next.rows.rows[1].suggestion_status = status; next.suggestions = summary;
+        if (detail) next.rowDetails[2] = detail;
+        h.server.data = next;
+    };
+    try {
+        assert.equal(h.timers.length, 0, 'no polling for a finished check');
+        await h.booted.actions.open(RUN);
+        toggleOf($, 2).dispatch('click'); await tick();
+        const holder = detailTr($, 2).children[0].children[0];
+        const batch = holder.children[2];
+        assert.match(text(batch), /Batch 1/);
+        const fetches = () => h.requests.filter(r => /\/rows\/2$/.test(r.url)).length;
+        assert.equal(fetches(), 1);
+        const suggestButton = find(holder, e => e.tagName === 'BUTTON' && e.textContent === 'Suggest FAQ');
+        assert.ok(suggestButton, 'Suggest FAQ button in the open detail');
+
+        const sent = []; h.server.onSuggest = body => { sent.push(body); step('queued', { queued: 1, active_row: null, done: 0, errors: 0, eligible: 1 }); };
+        await suggestButton.dispatch('click'); await tick();
+        assert.deepEqual(sent, [{ rows: [2] }]);
+        assert.equal(h.timers.length, 1, 'polls while a suggestion is queued');
+        assert.equal(detailTr($, 2).hidden, false, 'still open while queued');
+        assert.equal(detailTr($, 2).children[0].children[0], holder);
+        const queuedButton = find(holder, e => e.className === 'coverage-secondary coverage-suggest-button');
+        assert.equal(queuedButton.textContent, 'Suggesting…'); assert.equal(queuedButton.disabled, true);
+        assert.match(text(rowTr($, 2)), /Suggestion queued/);
+        assert.equal($('SuggestProgress').hidden, false); assert.equal($('SuggestProgress').textContent, 'Suggestions: 0/1');
+        assert.equal($('SuggestStop').hidden, false);
+
+        step('active', { queued: 0, active_row: 2, done: 0, errors: 0, eligible: 1 });
+        await h.timers[0](); await tick();
+        assert.match(text(rowTr($, 2)), /Suggesting…/);
+        assert.equal(fetches(), 1, 'queued and active need no refetch');
+
+        step('done', { queued: 0, active_row: null, done: 1, errors: 0, eligible: 0 },
+            detailView('not_answered', { suggestion: SUGGESTION, suggestion_status: 'done' }));
+        await h.timers[0](); await tick();
+        assert.equal(detailTr($, 2).hidden, false, 'still open when done');
+        assert.equal(toggleOf($, 2).getAttribute('aria-expanded'), 'true');
+        assert.equal(detailTr($, 2).children[0].children[0], holder, 'same detail element');
+        assert.equal(holder.children[2], batch, 'only the suggestion box was redrawn');
+        assert.match(text(holder), /Suggested FAQ/);
+        assert.equal(findAll(holder, e => e.tagName === 'MARK').length, 1);
+        assert.doesNotMatch(text(rowTr($, 2)), /Suggesting…|Suggestion queued/);
+        assert.equal(fetches(), 2);
+        assert.equal($('SuggestProgress').hidden, true); assert.equal($('SuggestStop').hidden, true);
+        assert.equal($('SuggestAll').disabled, true);
+    } finally { h.restore(); }
+});
+
+test('Has suggestion filters with suggested=1 and Stop suggestions posts cancel', async () => {
+    const data = fixture(); data.suggestions = { queued: 2, active_row: 1, done: 0, errors: 0, eligible: 3 };
+    const h = await harness(true, data), { $ } = h;
+    try {
+        assert.match(fs.readFileSync('templates/knowledge_coverage.html', 'utf8'), /<option value="suggested">Has suggestion<\/option>/);
+        await h.booted.actions.open(RUN);
+        $('Filter').value = 'suggested'; $('Filter').dispatch('change'); await tick();
+        const rowsCall = h.requests.filter(r => r.url.includes('/rows?')).pop().url;
+        assert.match(rowsCall, /&suggested=1$/); assert.doesNotMatch(rowsCall, /result=/);
+        assert.equal($('SuggestStop').hidden, false);
+        await $('SuggestStop').dispatch('click');
+        assert.ok(h.requests.some(r => r.url.endsWith('/checks/' + RUN + '/suggestions/cancel') && r.options.method === 'POST'));
     } finally { h.restore(); }
 });

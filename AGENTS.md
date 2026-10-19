@@ -79,7 +79,7 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 
 #### Knowledge-coverage check routes
 
-`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit in `knowledge_audit/` stays on disk but is no longer mounted; step 25 deletes it.
+`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit in `knowledge_audit/` stays on disk but is no longer mounted; step 25 deletes it. Suggestions draft FAQ text only, into the run's private folder, and never change the knowledge base.
 
 - `GET /knowledge-coverage`
 - `GET /api/knowledge-coverage/documents`
@@ -91,6 +91,9 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 - `POST /api/knowledge-coverage/checks/{run_id}/cancel`
 - `POST /api/knowledge-coverage/checks/{run_id}/resume`
 - `GET /api/knowledge-coverage/checks/{run_id}/export`
+- `POST /api/knowledge-coverage/checks/{run_id}/suggestions`
+- `GET /api/knowledge-coverage/checks/{run_id}/suggestions`
+- `POST /api/knowledge-coverage/checks/{run_id}/suggestions/cancel`
 
 #### Routes from `internal_evaluation_api.py`
 

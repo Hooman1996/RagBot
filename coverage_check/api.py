@@ -19,6 +19,8 @@ from coverage_check.checker import RESULTS, CoverageChecker
 from coverage_check.jobs import CheckJobs
 from coverage_check.settings import CoverageSettings, RunSettings, SettingsError, coverage_enabled, load_settings
 from coverage_check.store import CheckStore, StoreError, parse_csv
+from coverage_check.suggest_jobs import SuggestJobs
+from coverage_check.suggester import ELIGIBLE, Suggester
 from document_category import get_document_category
 from frontend_paths import TEMPLATE_DIR
 from new_architecture.knowledge_sources import build_datasource_listing
@@ -35,7 +37,10 @@ PAGE_PATH = "/knowledge-coverage"
 API_PREFIX = "/api/knowledge-coverage/"
 EXPORT_COLUMNS = ("row", "id", "question", "result", "answer_batch", "answer_phase", "answer_chunk_ids",
                   "answer_faq_titles", "batches_checked", "broader_used", "model_calls", "duration_ms",
-                  "error_code", "note")
+                  "error_code", "note", "suggested_question", "suggested_answer", "missing_facts",
+                  "suggestion_unverified_numbers", "suggestion_status")
+SUGGEST_MAX_ROWS = 1000
+SUGGEST_BODY_MAX_BYTES = 65536
 NO_STORE = {"Cache-Control": "no-store"}
 
 
@@ -72,7 +77,17 @@ class CoverageRuntime:
                                    meta["documents"], meta["settings"])
         self.jobs = CheckJobs(self.store, factory)
 
+        def suggester_factory():
+            return Suggester(app.state.answering_service.agent_service.rag_system, app.state.request_limiter,
+                             self.store, settings)
+        self.suggest_jobs = SuggestJobs(self.store, suggester_factory)
+
+    def suggestion_status(self, run_id: str, row: int, stored: dict[int, str]) -> str | None:
+        """``active`` or ``queued`` while in the queue, else the stored ``done`` or ``error``, else None."""
+        return self.suggest_jobs.status(run_id, row) or stored.get(row)
+
     async def aclose(self) -> None:
+        await self.suggest_jobs.aclose()
         await self.jobs.aclose()
 
 
@@ -103,6 +118,14 @@ async def store_call(fn, *args, **kwargs):
         raise HTTPException(404 if exc.code == "not_found" else 422, detail=exc.code) from None
     except (OSError, ValueError, KeyError):
         raise HTTPException(500, detail="storage_failed") from None
+
+
+class SuggestPayload(BaseModel):
+    """Exactly one of ``rows`` or ``all``."""
+    model_config = ConfigDict(extra="forbid", strict=True)
+
+    rows: list[int] | None = Field(default=None, min_length=1, max_length=SUGGEST_MAX_ROWS)
+    all: bool | None = None
 
 
 class StartPayload(BaseModel):
@@ -186,9 +209,11 @@ def formula_safe(value) -> str:
     return "'" + text if text[:1] in ("=", "+", "-", "@") else text
 
 
-def export_line(item: dict, result: dict | None) -> list[str]:
+def export_line(item: dict, result: dict | None, suggestion: dict | None = None,
+                suggestion_status: str | None = None) -> list[str]:
     view = row_view(item, result)
     result = result or {}
+    done = (suggestion or {}).get("status") == "done"
     values = {
         **{key: view[key] for key in ("row", "id", "question", "answer_batch", "answer_phase",
                                       "model_calls", "duration_ms", "error_code", "note")},
@@ -197,6 +222,11 @@ def export_line(item: dict, result: dict | None) -> list[str]:
         "answer_faq_titles": " | ".join(c["title"] or "" for c in view["answer_chunks"]),
         "batches_checked": len(result.get("batches") or []) if result else "",
         "broader_used": ("true" if view["broader_used"] else "false") if result else "",
+        "suggested_question": suggestion["faq_question"] if done else "",
+        "suggested_answer": suggestion["faq_answer"] if done else "",
+        "missing_facts": " | ".join(suggestion.get("missing") or []) if done else "",
+        "suggestion_unverified_numbers": " ".join(suggestion.get("unverified_numbers") or []) if done else "",
+        "suggestion_status": suggestion_status or "",
     }
     return [formula_safe(values[column]) for column in EXPORT_COLUMNS]
 
@@ -291,7 +321,8 @@ async def get_check(run_id: str, request: Request, user: WebUser):
 async def check_rows(run_id: str, request: Request, user: WebUser,
                      offset: Annotated[int, Query(ge=0)] = 0,
                      limit: Annotated[int, Query(ge=1, le=100)] = 50,
-                     result: Annotated[str | None, Query(max_length=32)] = None):
+                     result: Annotated[str | None, Query(max_length=32)] = None,
+                     suggested: bool = False):
     require(user, "coverage_results_view")
     if result is not None and result not in (*RESULTS, "waiting"):
         raise HTTPException(422, detail="invalid_result_filter")
@@ -299,29 +330,39 @@ async def check_rows(run_id: str, request: Request, user: WebUser,
     store = runtime.store
     items = await store_call(store.inputs, run_id)
     codes = await store_call(store.result_codes, run_id)
+    statuses = await store_call(store.suggestion_statuses, run_id)
     active_row = runtime.jobs.active_row(run_id)
     if result == "waiting":
         items = [item for item in items if item["row"] not in codes]
     elif result is not None:
         items = [item for item in items if codes.get(item["row"]) == result]
+    if suggested:
+        items = [item for item in items if statuses.get(item["row"]) == "done"]
     page_items = items[offset:offset + limit]
     rows = []
     for item in page_items:
         found = await store_call(store.result, run_id, item["row"]) if item["row"] in codes else None
-        rows.append({**row_view(item, found), "active": item["row"] == active_row})
+        rows.append({**row_view(item, found), "active": item["row"] == active_row,
+                     "suggestion_status": runtime.suggestion_status(run_id, item["row"], statuses)})
     return JSONResponse({"total": len(items), "offset": offset, "rows": rows}, headers=NO_STORE)
 
 
 @router.get("/api/knowledge-coverage/checks/{run_id}/rows/{row}")
 async def check_row(run_id: str, row: int, request: Request, user: WebUser):
     require(user, "coverage_results_view")
-    store = runtime_of(request).store
+    runtime = runtime_of(request)
+    store = runtime.store
     items = await store_call(store.inputs, run_id)
     item = next((item for item in items if item["row"] == row), None)
     if item is None:
         raise HTTPException(404, detail="not_found")
     found = await store_call(store.result, run_id, row)
-    return JSONResponse(await store_call(row_detail, store, run_id, item, found), headers=NO_STORE)
+    view = await store_call(row_detail, store, run_id, item, found)
+    suggestion = await store_call(store.suggestion, run_id, row)
+    statuses = {row: suggestion["status"]} if suggestion else {}
+    view["suggestion"] = suggestion
+    view["suggestion_status"] = runtime.suggestion_status(run_id, row, statuses)
+    return JSONResponse(view, headers=NO_STORE)
 
 
 @router.post("/api/knowledge-coverage/checks/{run_id}/cancel")
@@ -353,9 +394,11 @@ async def resume_check(run_id: str, request: Request, user: WebUser):
 @router.get("/api/knowledge-coverage/checks/{run_id}/export")
 async def export_check(run_id: str, request: Request, user: WebUser):
     require(user, "coverage_results_view")
-    store = runtime_of(request).store
+    runtime = runtime_of(request)
+    store = runtime.store
     items = await store_call(store.inputs, run_id)
     codes = await store_call(store.result_codes, run_id)
+    statuses = await store_call(store.suggestion_statuses, run_id)
 
     async def lines():
         buffer = io.StringIO()
@@ -365,9 +408,69 @@ async def export_check(run_id: str, request: Request, user: WebUser):
         for item in items:
             buffer.seek(0)
             buffer.truncate()
-            found = await run_in_threadpool(store.result, run_id, item["row"]) if item["row"] in codes else None
-            writer.writerow(export_line(item, found))
+            row = item["row"]
+            found = await run_in_threadpool(store.result, run_id, row) if row in codes else None
+            suggestion = await run_in_threadpool(store.suggestion, run_id, row) if row in statuses else None
+            writer.writerow(export_line(item, found, suggestion, runtime.suggestion_status(run_id, row, statuses)))
             yield buffer.getvalue()
 
     return StreamingResponse(lines(), media_type="text/csv; charset=utf-8", headers={
         **NO_STORE, "Content-Disposition": f'attachment; filename="coverage-{run_id}.csv"'})
+
+
+# Suggestions -----------------------------------------------------------
+
+def eligible_rows(codes: dict[int, str]) -> list[int]:
+    return sorted(row for row, code in codes.items() if code in ELIGIBLE)
+
+
+@router.post("/api/knowledge-coverage/checks/{run_id}/suggestions")
+async def queue_suggestions(run_id: str, request: Request, user: WebUser):
+    require(user, "coverage_run_start")
+    runtime = runtime_of(request)
+    body = bytearray()
+    async for part in request.stream():
+        if len(body) + len(part) > SUGGEST_BODY_MAX_BYTES:
+            raise HTTPException(413, detail="request_too_large")
+        body.extend(part)
+    try:
+        payload = SuggestPayload.model_validate_json(bytes(body))
+    except ValidationError:
+        raise HTTPException(422, detail="invalid_request") from None
+    if (payload.rows is None) == (payload.all is None) or payload.all is False:
+        raise HTTPException(422, detail="invalid_request")
+    store = runtime.store
+    await store_call(store.meta, run_id)
+    codes = await store_call(store.result_codes, run_id)
+    if payload.all:
+        done = await store_call(store.suggested_rows, run_id)
+        rows = [row for row in eligible_rows(codes) if row not in done]
+    else:
+        rows = list(dict.fromkeys(payload.rows))
+        if any(codes.get(row) not in ELIGIBLE for row in rows):
+            raise HTTPException(409, detail="not_eligible")
+    return {"queued": runtime.suggest_jobs.enqueue(run_id, rows)}
+
+
+@router.get("/api/knowledge-coverage/checks/{run_id}/suggestions")
+async def suggestion_summary(run_id: str, request: Request, user: WebUser):
+    require(user, "coverage_results_view")
+    runtime = runtime_of(request)
+    store = runtime.store
+    await store_call(store.meta, run_id)
+    codes = await store_call(store.result_codes, run_id)
+    statuses = await store_call(store.suggestion_statuses, run_id)
+    jobs = runtime.suggest_jobs
+    done = {row for row, status in statuses.items() if status == "done"}
+    return JSONResponse({
+        "queued": len(jobs.queued_rows(run_id)), "active_row": jobs.active_row(run_id), "done": len(done),
+        "errors": sum(1 for status in statuses.values() if status == "error"),
+        "eligible": sum(1 for row in eligible_rows(codes) if row not in done)}, headers=NO_STORE)
+
+
+@router.post("/api/knowledge-coverage/checks/{run_id}/suggestions/cancel")
+async def cancel_suggestions(run_id: str, request: Request, user: WebUser):
+    require(user, "coverage_run_start")
+    runtime = runtime_of(request)
+    await store_call(runtime.store.meta, run_id)
+    return {"cancelled": await runtime.suggest_jobs.cancel(run_id)}

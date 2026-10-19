@@ -80,6 +80,9 @@ class CoverageSettings:
     combine_max: int
     chunk_max_chars: int
     model_max_tokens: int
+    # Suggestions only; not part of a run's stored settings.
+    suggest_context: int = 5
+    suggest_max_tokens: int = 700
 
     def run_values(self, run: RunSettings) -> dict:
         """Everything a run used, stored in its meta."""
@@ -124,4 +127,6 @@ def load_settings(environ=None) -> CoverageSettings:
         combine_max=_int(env, "KNOWLEDGE_COVERAGE_COMBINE_MAX", 10, 2, 20),
         chunk_max_chars=_int(env, "KNOWLEDGE_COVERAGE_CHUNK_MAX_CHARS", 4000, 500, 20000),
         model_max_tokens=_int(env, "KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS", 300, 64, 2048),
+        suggest_context=_int(env, "KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT", 5, 1, 20),
+        suggest_max_tokens=_int(env, "KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS", 700, 128, 2048),
     )

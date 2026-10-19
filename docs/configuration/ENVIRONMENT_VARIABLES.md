@@ -903,6 +903,8 @@ effective limits and a role-policy hash, not authentication data.
 | `KNOWLEDGE_COVERAGE_ARTIFACT_DIR` | `/root/projects/faq-private/knowledge-coverage` | Absolute durable directory; neither the repository nor `/tmp`, nor inside either (`coverage_check/settings.py`); owner-only directories 0700/files 0600. Provision appropriate ownership before running under another service account. |
 | `KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES` | `5242880` | Integer 1024–20971520; decoded CSV bytes, with an additional bounded JSON/base64 transport envelope. |
 | `KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS` | `300` | Integer 64–2048; output tokens per model call of the coverage check (`coverage_check/settings.py`). A reply cut off at this limit is recorded as `model_output_cut`. |
+| `KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT` | `5` | Integer 1–20; saved chunks of a row given to the model when it drafts a suggested FAQ entry (`coverage_check/settings.py`). |
+| `KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS` | `700` | Integer 128–2048; output tokens per suggestion. A reply cut off at this limit is recorded as `model_output_cut`. |
 | `KNOWLEDGE_COVERAGE_TOKEN_MARGIN` | `128` | Integer 32–1024; token safety margin, not a character-count approximation. |
 | `KNOWLEDGE_COVERAGE_BATCH_MAX_ENTRIES` | `2` | Audit-local integer 1–5; whole Q/A entries per batch, with fewer when required by served-token budgeting. Pinned in run/configuration/export identity; changed cap rejects resume. |
 

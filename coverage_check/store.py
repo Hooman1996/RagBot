@@ -1,4 +1,5 @@
-"""Private per-run folders: meta.json, input.json, results/<row>.json and chunks/<sha256>.json."""
+"""Private per-run folders: meta.json, input.json, results/<row>.json, chunks/<sha256>.json and
+suggestions/<row>.json."""
 from __future__ import annotations
 
 import csv
@@ -76,6 +77,7 @@ class CheckStore:
         self.root = Path(artifact_dir) / "checks"
         self._lock = threading.Lock()
         self._results: dict[str, dict[int, str]] = {}
+        self._suggestions: dict[str, dict[int, str]] = {}
 
     # Private files -------------------------------------------------
     def _mkdir(self, path: Path) -> None:
@@ -201,3 +203,38 @@ class CheckStore:
             return None
         path = self._run(run_id) / "chunks" / f"{key}.json"
         return self._read(path)["text"] if path.is_file() else None
+
+    # Suggestions -------------------------------------------------------
+    def suggestion_statuses(self, run_id: str) -> dict[int, str]:
+        """Row number -> stored suggestion status, cached after the first read."""
+        with self._lock:
+            cached = self._suggestions.get(run_id)
+            if cached is not None:
+                return dict(cached)
+        folder = self._run(run_id) / "suggestions"
+        statuses = {}
+        if folder.is_dir():
+            for path in folder.glob("*.json"):
+                if path.stem.isdigit():
+                    statuses[int(path.stem)] = self._read(path)["status"]
+        with self._lock:
+            self._suggestions.setdefault(run_id, statuses)
+            return dict(self._suggestions[run_id])
+
+    def suggested_rows(self, run_id: str) -> set[int]:
+        """Rows with a done suggestion."""
+        return {row for row, status in self.suggestion_statuses(run_id).items() if status == "done"}
+
+    def suggestion(self, run_id: str, row: int) -> dict | None:
+        path = self._run(run_id) / "suggestions" / f"{int(row)}.json"
+        return self._read(path) if path.is_file() else None
+
+    def write_suggestion(self, run_id: str, row: int, data: dict) -> None:
+        """A new suggestion for a row replaces the old one."""
+        self.suggestion_statuses(run_id)
+        folder = self._run(run_id) / "suggestions"
+        if not folder.is_dir():
+            self._mkdir(folder)
+        self._write(folder / f"{int(row)}.json", data)
+        with self._lock:
+            self._suggestions.setdefault(run_id, {})[int(row)] = data["status"]

@@ -25,9 +25,18 @@
         model_output_cut: 'Model reply was cut off',
         invalid_chunk_numbers: 'Model cited chunks that are not in the batch'
     };
+    const SUGGEST_ERRORS = Object.assign({}, ERROR_REASONS, {
+        not_eligible: 'Only Not answered or Partly answered rows can get a suggestion',
+        no_saved_chunks: 'No chunk text was saved for this row (checked before chunk text was kept)',
+        empty_suggestion: 'The model returned an empty question or answer'
+    });
     const API_ERRORS = {
-        prompt_changed: 'The prompts changed since this check started; start a new check.'
+        prompt_changed: 'The prompts changed since this check started; start a new check.',
+        not_eligible: 'Only Not answered or Partly answered rows can get a suggestion.'
     };
+    const ELIGIBLE = ['not_answered', 'partial'];
+    const SUGGEST_MARKS = { queued: 'Suggestion queued', active: 'Suggesting…' };
+    const PLACEHOLDER = /\[تکمیل شود:[^\]]*\]/g;
     const PHASES = { initial: 'initial', broader: 'wider' };
     const NOT_SAVED = 'Text not saved for this row (checked before this update)';
     const PAGE_SIZE = 50;
@@ -151,9 +160,86 @@
         }
         return parts;
     }
-    function renderDetail(document, view) {
+    function renderDetail(document, view, options) {
         const box = node(document, 'div', undefined, 'coverage-detail-body');
-        box.append(...detailParts(document, view));
+        const parts = detailParts(document, view), slot = node(document, 'div', undefined, 'coverage-suggest-slot');
+        const suggestion = renderSuggestion(document, view, options);
+        if (suggestion) slot.append(suggestion);
+        parts.splice(1, 0, slot);
+        box.append(...parts);
+        return box;
+    }
+
+    // Suggested FAQ ----------------------------------------------------
+    function suggestReason(code) { return SUGGEST_ERRORS[code] || String(code || ''); }
+    /* Text nodes for plain parts, <mark> for each [تکمیل شود: ...] placeholder. */
+    function withPlaceholders(document, element, value) {
+        const text = String(value || '');
+        let last = 0;
+        for (const match of text.matchAll(PLACEHOLDER)) {
+            if (match.index > last) element.append(document.createTextNode(text.slice(last, match.index)));
+            element.append(node(document, 'mark', match[0], 'coverage-placeholder'));
+            last = match.index + match[0].length;
+        }
+        if (last < text.length) element.append(document.createTextNode(text.slice(last)));
+        return element;
+    }
+    function suggestField(document, labelText, value) {
+        const field = node(document, 'div', undefined, 'coverage-suggest-field');
+        const body = withPlaceholders(document, node(document, 'p', undefined, 'coverage-suggest-text'), value);
+        body.dir = 'auto';
+        field.append(node(document, 'span', labelText, 'coverage-suggest-label'), body);
+        return field;
+    }
+    /* options: canStart, status (live suggestion_status), onSuggest(button). Null when nothing to show. */
+    function renderSuggestion(document, view, options) {
+        options = options || {};
+        const suggestion = view.suggestion || null;
+        const status = options.status !== undefined ? options.status : (view.suggestion_status || null);
+        const eligible = ELIGIBLE.includes(view.result), busy = status === 'queued' || status === 'active';
+        const done = suggestion && suggestion.status === 'done';
+        const canSuggest = options.canStart && eligible;
+        if (!suggestion && !busy && !canSuggest) return null;
+        const box = node(document, 'section', undefined, 'coverage-suggest');
+        box.append(node(document, 'h3', done ? 'Suggested FAQ' : 'FAQ suggestion', 'coverage-step-head'));
+        if (done) {
+            box.append(suggestField(document, 'Question', suggestion.faq_question), suggestField(document, 'Answer', suggestion.faq_answer));
+            const missing = suggestion.missing || [];
+            if (missing.length) {
+                const list = node(document, 'ul', undefined, 'coverage-suggest-missing');
+                missing.forEach(item => { const li = node(document, 'li', item); li.dir = 'auto'; list.append(li); });
+                box.append(node(document, 'span', 'Missing facts', 'coverage-suggest-label'), list);
+            }
+            const titlesById = new Map((suggestion.chunks || []).map(c => [c.chunk_id, c.title || c.chunk_id]));
+            const used = (suggestion.used_chunk_ids || []).map(id => titlesById.get(id) || id);
+            const usedLine = node(document, 'p', undefined, 'coverage-suggest-used');
+            const usedTitles = node(document, 'span', used.length ? used.join(' · ') : 'none'); usedTitles.dir = 'auto';
+            usedLine.append(node(document, 'span', 'Chunks used: '), usedTitles);
+            box.append(usedLine);
+            const numbers = suggestion.unverified_numbers || [];
+            if (numbers.length) box.append(node(document, 'p', 'Check these numbers; they are not in the chunks: ' + numbers.join(', '), 'coverage-suggest-warning'));
+        } else if (suggestion && suggestion.status === 'error') {
+            box.append(node(document, 'p', 'Suggestion failed: ' + suggestReason(suggestion.error_code), 'coverage-suggest-error'));
+        } else if (!busy) {
+            box.append(node(document, 'p', 'Draft a FAQ entry from the closest chunks this check saved. It is a draft to read and copy; the knowledge base is not changed.', 'coverage-hint'));
+        }
+        if (busy && !canSuggest) box.append(node(document, 'p', SUGGEST_MARKS[status], 'coverage-hint'));
+        const actions = node(document, 'div', undefined, 'coverage-actions');
+        if (done) {
+            const copy = node(document, 'button', 'Copy', 'coverage-secondary'); copy.type = 'button';
+            copy.addEventListener('click', async () => {
+                try { await global.navigator.clipboard.writeText(suggestion.faq_question + '\n\n' + suggestion.faq_answer); copy.textContent = 'Copied'; }
+                catch (e) { copy.textContent = 'Copy failed'; }
+            });
+            actions.append(copy);
+        }
+        if (canSuggest) {
+            const button = node(document, 'button', busy ? 'Suggesting…' : (suggestion ? 'Suggest again' : 'Suggest FAQ'), 'coverage-secondary coverage-suggest-button');
+            button.type = 'button'; button.disabled = busy;
+            button.addEventListener('click', () => { if (options.onSuggest) options.onSuggest(button); });
+            actions.append(button);
+        }
+        if (actions.children.length) box.append(actions);
         return box;
     }
 
@@ -180,6 +266,7 @@
             const r = node(document, 'td', undefined, 'coverage-result');
             r.append(active ? checkingBadge(document) : badge(document, row.result));
             if (!active && row.result === 'error') r.append(node(document, 'span', reason(row.error_code), 'coverage-reason'));
+            if (SUGGEST_MARKS[row.suggestion_status]) r.append(node(document, 'span', SUGGEST_MARKS[row.suggestion_status], 'coverage-suggest-mark'));
             tr.append(r);
             tr.append(node(document, 'td', row.answer_batch ? row.answer_batch + (row.answer_phase === 'broader' ? ' (wider)' : '') : ''));
             const t = node(document, 'td', titles(row.answer_chunks)); t.dir = 'auto'; tr.append(t);
@@ -226,7 +313,7 @@
         const root = $('Root'), canStart = root.dataset.canStart === 'true', follow = $('Follow');
         const state = {
             checks: [], open: null, openState: null, offset: 0, total: 0, timer: null,
-            expanded: new Set(), details: new Map(), lastKey: null, lastActive: null, activeTr: null
+            expanded: new Set(), details: new Map(), lastKey: null, lastActive: null, activeTr: null, suggest: null
         };
         if (follow) follow.checked = true;
         function showError(code) { $('Error').textContent = code ? API_ERRORS[code] || 'Error: ' + code : ''; $('Error').hidden = !code; }
@@ -245,23 +332,61 @@
         function updateStop() {
             if ($('Stop')) $('Stop').hidden = !(canStart && ['queued', 'running'].includes(state.openState));
         }
-        // One cached element per opened row: fetched once, again only when the row's result changes.
+        function suggestBusy() { const s = state.suggest; return !!(s && (s.queued > 0 || s.active_row)); }
+        function renderSuggestHeader() {
+            const s = state.suggest || { queued: 0, active_row: null, done: 0, errors: 0, eligible: 0 }, busy = suggestBusy();
+            if ($('SuggestAll')) {
+                $('SuggestAll').hidden = !canStart;
+                $('SuggestAll').textContent = 'Suggest for all unanswered (' + s.eligible + ')';
+                $('SuggestAll').disabled = !s.eligible;
+            }
+            if ($('SuggestProgress')) { $('SuggestProgress').hidden = !busy; $('SuggestProgress').textContent = 'Suggestions: ' + s.done + '/' + (s.done + s.eligible); }
+            if ($('SuggestStop')) $('SuggestStop').hidden = !(canStart && busy);
+        }
+        async function suggestRows(payload, button) {
+            const text = button && button.textContent;
+            if (button) { button.disabled = true; button.textContent = 'Suggesting…'; }
+            try { await post('checks/' + state.open + '/suggestions', payload); await refresh(); }
+            catch (e) { showError(e.message); if (button) { button.disabled = false; button.textContent = text; } }
+        }
+        // The suggestion box of an open row; redrawn alone when the row's suggestion status changes.
+        function placeBox(entry, rowNumber) {
+            if (!entry.view || !entry.slot) return;
+            const box = renderSuggestion(document, entry.view, {
+                canStart, status: entry.status, onSuggest: button => suggestRows({ rows: [rowNumber] }, button) });
+            entry.slot.replaceChildren(...(box ? [box] : []));
+        }
+        function loadDetail(id, rowNumber, entry, full) {
+            call('checks/' + id + '/rows/' + rowNumber).then(view => {
+                if (state.open !== id || state.details.get(rowNumber) !== entry) return;
+                entry.view = view;
+                if (full || !entry.slot) {
+                    const parts = detailParts(document, view);
+                    entry.slot = node(document, 'div', undefined, 'coverage-suggest-slot');
+                    parts.splice(1, 0, entry.slot);
+                    entry.element.textContent = '';
+                    entry.element.replaceChildren(...parts);
+                }
+                placeBox(entry, rowNumber);
+            }, e => {
+                if (!full) { showError(e.message); return; }
+                if (state.details.get(rowNumber) === entry) state.details.delete(rowNumber);
+                entry.element.textContent = 'Could not load details: ' + e.message;
+            });
+        }
+        // One cached element per opened row: fetched once, again when the row's result changes; a changed
+        // suggestion status redraws only the suggestion box.
         function detailFor(row, cell) {
-            const id = state.open, result = row.result || null;
+            const id = state.open, result = row.result || null, status = row.suggestion_status || null;
             let entry = state.details.get(row.row);
             if (!entry || entry.result !== result) {
-                const holder = node(document, 'div', 'Loading details…', 'coverage-detail-body');
-                entry = { result, element: holder };
+                entry = { result, status, element: node(document, 'div', 'Loading details…', 'coverage-detail-body'), view: null, slot: null };
                 state.details.set(row.row, entry);
-                const current = entry;
-                call('checks/' + id + '/rows/' + row.row).then(view => {
-                    if (state.open !== id || state.details.get(row.row) !== current) return;
-                    holder.textContent = '';
-                    holder.replaceChildren(...detailParts(document, view));
-                }, e => {
-                    if (state.details.get(row.row) === current) state.details.delete(row.row);
-                    holder.textContent = 'Could not load details: ' + e.message;
-                });
+                loadDetail(id, row.row, entry, true);
+            } else if (entry.status !== status) {
+                entry.status = status;
+                if (status === 'queued' || status === 'active') placeBox(entry, row.row);
+                else loadDetail(id, row.row, entry, false);
             }
             cell.replaceChildren(entry.element);
         }
@@ -277,12 +402,17 @@
             const filter = $('Filter').value, active = detail.active_row || null;
             if (follow && follow.checked && !filter && active) state.offset = Math.floor((active - 1) / PAGE_SIZE) * PAGE_SIZE;
             const offset = state.offset;
-            const page = await call('checks/' + id + '/rows?offset=' + offset + '&limit=' + PAGE_SIZE + (filter ? '&result=' + encodeURIComponent(filter) : ''));
+            const query = filter === 'suggested' ? '&suggested=1' : (filter ? '&result=' + encodeURIComponent(filter) : '');
+            const [page, summary] = await Promise.all([
+                call('checks/' + id + '/rows?offset=' + offset + '&limit=' + PAGE_SIZE + query),
+                call('checks/' + id + '/suggestions')]);
             if (state.open !== id) return;
             state.openState = detail.meta && detail.meta.state;
+            state.suggest = summary;
             $('Results').hidden = false;
             renderCounts(document, $('Counts'), detail.counts);
             updateStop();
+            renderSuggestHeader();
             const key = JSON.stringify([filter, offset, active, page.rows]);
             if (key !== state.lastKey) {
                 state.lastKey = key;
@@ -301,12 +431,16 @@
         async function loadChecks() {
             state.checks = await call('checks');
             renderChecks(document, $('Checks'), state.checks, canStart, actions);
-            const active = state.checks.some(c => c.state === 'queued' || c.state === 'running');
+        }
+        // Polls every 3 seconds while a check runs or the open check has suggestions queued or active.
+        function updateTimer() {
+            const active = state.checks.some(c => c.state === 'queued' || c.state === 'running') || suggestBusy();
             if (active && !state.timer) state.timer = global.setInterval(() => refresh(), 3000);
             if (!active && state.timer) { global.clearInterval(state.timer); state.timer = null; }
         }
         async function refresh() {
             try { await loadChecks(); await loadResults(); } catch (e) { showError(e.message); }
+            updateTimer();
         }
         async function stopRun(id) {
             try { await post('checks/' + id + '/cancel'); await refresh(); } catch (e) { showError(e.message); }
@@ -314,7 +448,7 @@
         const actions = {
             open: async id => {
                 if (state.open !== id) {
-                    state.expanded = new Set(); state.details = new Map(); state.lastActive = null; state.openState = null;
+                    state.expanded = new Set(); state.details = new Map(); state.lastActive = null; state.openState = null; state.suggest = null;
                     if (follow) follow.checked = true;
                 }
                 state.open = id; state.offset = 0; state.lastKey = null; showError(''); await refresh();
@@ -363,6 +497,11 @@
         $('Next').addEventListener('click', () => { stopFollowing(); state.offset += PAGE_SIZE; loadResults().catch(e => showError(e.message)); });
         if (follow) follow.addEventListener('change', () => { if (follow.checked) { state.lastActive = null; loadResults().catch(e => showError(e.message)); } });
         if (canStart && $('Stop')) $('Stop').addEventListener('click', stopOpen);
+        if (canStart && $('SuggestAll')) $('SuggestAll').addEventListener('click', () => suggestRows({ all: true }, $('SuggestAll')));
+        if (canStart && $('SuggestStop')) $('SuggestStop').addEventListener('click', async () => {
+            try { await post('checks/' + state.open + '/suggestions/cancel'); await refresh(); } catch (e) { showError(e.message); }
+        });
+        renderSuggestHeader();
         if (canStart && $('Form')) {
             ['Keep', 'BatchSize'].forEach(name => $(name).addEventListener('input', updateBatchLine));
             $('Broader').addEventListener('change', updateBroader);
@@ -374,8 +513,8 @@
     }
 
     const api = {
-        boot, batchLine, renderCounts, renderLegend, renderRows, renderChecks, renderDetail, label, reason,
-        RESULT_LABELS, ERROR_REASONS, API_ERRORS, LEGEND, PAGE_SIZE
+        boot, batchLine, renderCounts, renderLegend, renderRows, renderChecks, renderDetail, renderSuggestion, label, reason,
+        RESULT_LABELS, ERROR_REASONS, SUGGEST_ERRORS, API_ERRORS, LEGEND, PAGE_SIZE
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else if (global.document) boot(global.document);

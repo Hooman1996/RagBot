@@ -461,7 +461,10 @@ ROUTES = [("GET", "/knowledge-coverage"), ("GET", "/api/knowledge-coverage/docum
           ("GET", "/api/knowledge-coverage/checks/{id}/rows/1"),
           ("POST", "/api/knowledge-coverage/checks/{id}/cancel"),
           ("POST", "/api/knowledge-coverage/checks/{id}/resume"),
-          ("GET", "/api/knowledge-coverage/checks/{id}/export")]
+          ("GET", "/api/knowledge-coverage/checks/{id}/export"),
+          ("POST", "/api/knowledge-coverage/checks/{id}/suggestions"),
+          ("GET", "/api/knowledge-coverage/checks/{id}/suggestions"),
+          ("POST", "/api/knowledge-coverage/checks/{id}/suggestions/cancel")]
 
 
 def test_admin_starts_and_viewer_reads_another_users_run(api):
@@ -604,9 +607,10 @@ def test_export_columns_and_formula_prefix(api):
     lines = list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))
     assert lines[0] == ["row", "id", "question", "result", "answer_batch", "answer_phase", "answer_chunk_ids",
                         "answer_faq_titles", "batches_checked", "broader_used", "model_calls", "duration_ms",
-                        "error_code", "note"]
+                        "error_code", "note", "suggested_question", "suggested_answer", "missing_facts",
+                        "suggestion_unverified_numbers", "suggestion_status"]
     assert lines[1] == ["1", "'-5", "'=cmd", "answered", "2", "initial", "k7", "'=title", "2", "false", "2", "12",
-                        "", "'-note"]
+                        "", "'-note", "", "", "", "", ""]
     assert lines[2][:4] == ["2", "'@x", "'+1", "waiting"]
 
 

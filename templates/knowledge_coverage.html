@@ -61,14 +61,17 @@
             </section>
             <section id="coverageResults" class="coverage-card" aria-labelledby="coverageResultsTitle" hidden>
                 <div class="coverage-heading"><h2 id="coverageResultsTitle">Results</h2><div class="coverage-actions">
-                    {% if 'coverage_run_start' in permissions %}<button id="coverageStop" class="coverage-secondary coverage-stop" type="button" hidden>Stop</button>{% endif %}
+                    <span id="coverageSuggestProgress" class="coverage-suggest-progress" role="status" hidden></span>
+                    {% if 'coverage_run_start' in permissions %}<button id="coverageSuggestAll" class="coverage-secondary" type="button" disabled>Suggest for all unanswered (0)</button>
+                    <button id="coverageSuggestStop" class="coverage-secondary coverage-stop" type="button" hidden>Stop suggestions</button>
+                    <button id="coverageStop" class="coverage-secondary coverage-stop" type="button" hidden>Stop</button>{% endif %}
                     <a id="coverageDownload" class="coverage-secondary" href="#">Download CSV</a></div></div>
                 <div id="coverageCounts" class="coverage-counts"></div>
                 <ul id="coverageLegend" class="coverage-legend" aria-label="What each result means"></ul>
                 <div class="coverage-toolbar"><label class="coverage-filter">Result<select id="coverageFilter">
                     <option value="">All</option><option value="answered">Answered</option><option value="answered_combined">Answered by combining</option>
                     <option value="partial">Partly answered</option><option value="not_answered">Not answered</option><option value="chitchat">Chit-chat</option>
-                    <option value="error">Error</option><option value="waiting">Waiting</option></select></label>
+                    <option value="error">Error</option><option value="waiting">Waiting</option><option value="suggested">Has suggestion</option></select></label>
                     <label class="coverage-check coverage-follow"><input id="coverageFollow" type="checkbox" checked> Follow the row being checked</label></div>
                 <div class="coverage-table-scroll"><table>
                     <thead><tr><th scope="col">#</th><th scope="col">id</th><th scope="col">Question</th><th scope="col">Result</th><th scope="col">Answer batch</th><th scope="col">Answering FAQ titles</th></tr></thead>
