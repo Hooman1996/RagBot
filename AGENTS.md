@@ -157,5 +157,6 @@ No Dockerfile, Compose file, or other repository-owned Docker definition was fou
   - `scripts/benchmark_coverage_budgets.py`: checkpoint and budget-allowance file-I/O overhead on a mocked 918-row input.
   - `scripts/benchmark_coverage_progress.py`: progress-index versus full-row reads for checkpoints and polling on a synthetic 918-row run.
   - `scripts/benchmark_coverage_dedupe.py`: model calls, retrieval fetches and wall time of a mocked 50-row run with repeated-question copying off and on, plus the 918-row source-map rebuild.
+- `scripts/coverage_compare.py` compares two coverage checks and, with `--expected`, a labelled CSV. It prints counts and row numbers only and contacts no service.
 
 Do not claim a test or benchmark passed unless its command was actually run and its result recorded. Do not run connectivity tests against production.

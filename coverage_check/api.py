@@ -14,6 +14,7 @@ from fastapi.templating import Jinja2Templates
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from starlette.concurrency import run_in_threadpool
 
+from coverage_check import prompts
 from coverage_check.checker import RESULTS, CoverageChecker
 from coverage_check.jobs import CheckJobs
 from coverage_check.settings import CoverageSettings, RunSettings, SettingsError, coverage_enabled, load_settings
@@ -127,7 +128,9 @@ def counts_for(meta: dict, codes: dict[int, str]) -> dict:
 
 def run_view(meta: dict, codes: dict[int, str], active_row: int | None = None) -> dict:
     keys = ("run_id", "created_at", "owner_id", "file_name", "documents", "settings", "state", "row_count")
-    return {**{key: meta[key] for key in keys}, "done": len(codes), "active_row": active_row}
+    # Runs created before step 23 have no recorded version.
+    return {**{key: meta[key] for key in keys}, "prompt_version": meta.get("prompt_version"),
+            "done": len(codes), "active_row": active_row}
 
 
 def chunk_view(chunk_ids, titles) -> list[dict]:
@@ -253,7 +256,8 @@ async def start_check(request: Request, user: WebUser):
     if not chosen:
         raise HTTPException(422, detail="no_documents")
     meta = await store_call(runtime.store.create, owner_id=user.id, file_name=payload.file_name,
-                            documents=list(chosen), settings=settings.run_values(run), rows=rows)
+                            documents=list(chosen), settings=settings.run_values(run), rows=rows,
+                            prompt_version=prompts.PROMPT_VERSION)
     runtime.jobs.enqueue(meta["run_id"])
     return {"run_id": meta["run_id"]}
 
@@ -338,6 +342,9 @@ async def resume_check(run_id: str, request: Request, user: WebUser):
     meta = await store_call(runtime.store.meta, run_id)
     if meta["state"] not in {"cancelled", "interrupted"}:
         raise HTTPException(409, detail="invalid_state")
+    # A run keeps the prompts it was created with; results from two prompt versions never mix.
+    if meta.get("prompt_version") != prompts.PROMPT_VERSION:
+        raise HTTPException(409, detail="prompt_changed")
     await store_call(runtime.store.set_state, run_id, "queued")
     runtime.jobs.enqueue(run_id)
     return {"run_id": run_id, "state": "queued"}

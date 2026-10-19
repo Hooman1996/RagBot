@@ -26,8 +26,8 @@ class StoreError(Exception):
         self.code = code
 
 
-def parse_csv(raw: bytes, max_rows: int) -> list[dict]:
-    """Rows of {row, id, question}; every other column is dropped here."""
+def parse_csv(raw: bytes, max_rows: int, extra: str | None = None) -> list[dict]:
+    """Rows of {row, id, question}, plus ``extra`` when named; every other column is dropped here."""
     try:
         text = raw.decode("utf-8-sig")
     except UnicodeDecodeError:
@@ -40,6 +40,9 @@ def parse_csv(raw: bytes, max_rows: int) -> list[dict]:
             raise StoreError("missing_query_column")
         query_index = names.index("query")
         id_index = names.index("id") if "id" in names else None
+        if extra is not None and extra not in names:
+            raise StoreError(f"missing_{extra}_column")
+        extra_index = names.index(extra) if extra is not None else None
         rows = []
         for record in reader:
             if not record or all(not cell.strip() for cell in record):
@@ -48,7 +51,10 @@ def parse_csv(raw: bytes, max_rows: int) -> list[dict]:
                 raise StoreError("too_many_rows")
             question = record[query_index] if query_index < len(record) else ""
             row_id = record[id_index] if id_index is not None and id_index < len(record) else ""
-            rows.append({"row": len(rows) + 1, "id": row_id, "question": question})
+            row = {"row": len(rows) + 1, "id": row_id, "question": question}
+            if extra_index is not None:
+                row[extra] = record[extra_index] if extra_index < len(record) else ""
+            rows.append(row)
     except csv.Error:
         raise StoreError("invalid_csv") from None
     if not rows:
@@ -107,7 +113,7 @@ class CheckStore:
 
     # Runs ----------------------------------------------------------
     def create(self, *, owner_id: int, file_name: str, documents: list[str],
-               settings: dict, rows: list[dict]) -> dict:
+               settings: dict, rows: list[dict], prompt_version: str) -> dict:
         self._mkdir(self.root.parent)
         self._mkdir(self.root)
         run_id = "c_" + secrets.token_hex(16)
@@ -117,7 +123,8 @@ class CheckStore:
         self._mkdir(path / "chunks")
         meta = {"run_id": run_id, "created_at": now(), "owner_id": owner_id,
                 "file_name": safe_file_name(file_name), "documents": list(documents),
-                "settings": dict(settings), "state": "queued", "row_count": len(rows)}
+                "settings": dict(settings), "prompt_version": str(prompt_version),
+                "state": "queued", "row_count": len(rows)}
         self._write(path / "input.json", rows)
         self._write(path / "meta.json", meta)
         with self._lock:

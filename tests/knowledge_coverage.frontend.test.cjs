@@ -297,7 +297,7 @@ test('error rows show their reason and the legend has six lines', async () => {
     ui.renderRows(document, tbody, rows, {});
     assert.match(text(tbody.children[0]), /ErrorSearch or rerank failed/);
     assert.match(text(tbody.children[2]), /Errorsynthetic_unknown_code/);
-    assert.deepEqual(Object.keys(ui.ERROR_REASONS), ['empty_query', 'normalization_failed', 'intent_failed', 'retrieval_failed', 'model_failed', 'invalid_model_output']);
+    assert.deepEqual(Object.keys(ui.ERROR_REASONS), ['empty_query', 'normalization_failed', 'intent_failed', 'retrieval_failed', 'model_failed', 'invalid_model_output', 'model_output_cut', 'invalid_chunk_numbers']);
     const detail = ui.renderDetail(document, { result: 'error', error_code: 'model_failed', model_calls: 2, duration_ms: 50, batches: [], combines: [] });
     assert.match(text(detail), /Model call failed/);
 
@@ -308,5 +308,43 @@ test('error rows show their reason and the legend has six lines', async () => {
         ['Answered', 'Answered by combining', 'Partly answered', 'Not answered', 'Chit-chat', 'Error'].forEach((name, i) => assert.ok(text(legend[i]).startsWith(name), name));
         assert.match(text(legend[0]), /the batch number is shown/);
         assert.match(text(legend[4]), /intent classifier/);
+    } finally { h.restore(); }
+});
+
+test('the two new error reasons render in rows and details', () => {
+    const document = dom(false);
+    const rows = [
+        { row: 1, id: '', question: 'q', result: 'error', error_code: 'model_output_cut', answer_chunks: [] },
+        { row: 2, id: '', question: 'q', result: 'error', error_code: 'invalid_chunk_numbers', answer_chunks: [] }];
+    const tbody = document.createElement('tbody');
+    ui.renderRows(document, tbody, rows, {});
+    assert.match(text(tbody.children[0]), /ErrorModel reply was cut off/);
+    assert.match(text(tbody.children[2]), /ErrorModel cited chunks that are not in the batch/);
+    const cut = ui.renderDetail(document, { result: 'error', error_code: 'model_output_cut', model_calls: 2, duration_ms: 50, batches: [], combines: [] });
+    assert.match(text(cut), /Model reply was cut off/);
+    const cited = ui.renderDetail(document, { result: 'error', error_code: 'invalid_chunk_numbers', model_calls: 4, duration_ms: 50,
+        batches: [{ number: 1, phase: 'initial', verdict: 'none', note: '', chunks: [] }], combines: [] });
+    assert.match(text(cited), /Model cited chunks that are not in the batch/);
+});
+
+test('the Checks table shows the prompt version and a prompt change blocks resume', async () => {
+    const data = fixture();
+    data.checks = [
+        { ...data.checks[0], state: 'cancelled', active_row: null, prompt_version: '0123456789ab' },
+        { ...data.checks[0], run_id: 'c_' + 'b'.repeat(32), state: 'completed', active_row: null, prompt_version: null }];
+    const h = await harness(true, data), { $ } = h;
+    try {
+        const header = fs.readFileSync('templates/knowledge_coverage.html', 'utf8');
+        assert.match(header, /<th scope="col">State<\/th><th scope="col">Prompt<\/th>/);
+        const [first, second] = $('Checks').children;
+        assert.equal(first.children.length, 7);
+        assert.equal(first.children[5].textContent, '0123456789ab');
+        assert.equal(second.children[5].textContent, '—');
+        const ok = global.fetch;
+        global.fetch = async (url, options = {}) => url.endsWith('/resume')
+            ? { ok: false, json: async () => ({ detail: 'prompt_changed' }) } : ok(url, options);
+        await h.booted.actions.resume(RUN);
+        assert.equal($('Error').hidden, false);
+        assert.equal($('Error').textContent, 'The prompts changed since this check started; start a new check.');
     } finally { h.restore(); }
 });

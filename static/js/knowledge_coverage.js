@@ -21,7 +21,12 @@
         intent_failed: 'Intent classifier failed',
         retrieval_failed: 'Search or rerank failed',
         model_failed: 'Model call failed',
-        invalid_model_output: 'Model reply did not match the format'
+        invalid_model_output: 'Model reply did not match the format',
+        model_output_cut: 'Model reply was cut off',
+        invalid_chunk_numbers: 'Model cited chunks that are not in the batch'
+    };
+    const API_ERRORS = {
+        prompt_changed: 'The prompts changed since this check started; start a new check.'
     };
     const PHASES = { initial: 'initial', broader: 'wider' };
     const NOT_SAVED = 'Text not saved for this row (checked before this update)';
@@ -193,13 +198,14 @@
         return activeTr;
     }
     function renderChecks(document, tbody, checks, canStart, actions) {
-        if (!checks.length) { const tr = node(document, 'tr'); const td = node(document, 'td', 'No checks yet.', 'coverage-empty'); td.setAttribute('colspan', '6'); tr.append(td); tbody.replaceChildren(tr); return; }
+        if (!checks.length) { const tr = node(document, 'tr'); const td = node(document, 'td', 'No checks yet.', 'coverage-empty'); td.setAttribute('colspan', '7'); tr.append(td); tbody.replaceChildren(tr); return; }
         tbody.replaceChildren(...checks.map(check => {
             const tr = node(document, 'tr');
             tr.append(node(document, 'td', String(check.created_at || '').replace('T', ' ').slice(0, 19)));
             const f = node(document, 'td', check.file_name); f.dir = 'auto'; tr.append(f);
             const progress = check.done + '/' + check.row_count + (check.state === 'running' && check.active_row ? ' · row ' + check.active_row : '');
             tr.append(node(document, 'td', check.row_count), node(document, 'td', progress), node(document, 'td', check.state));
+            tr.append(node(document, 'td', check.prompt_version || '—'));
             const cell = node(document, 'td', undefined, 'coverage-actions');
             const add = (text, fn) => { const b = node(document, 'button', text, 'coverage-secondary'); b.type = 'button'; b.addEventListener('click', () => fn(check.run_id)); cell.append(b); };
             add('Open', actions.open);
@@ -223,7 +229,7 @@
             expanded: new Set(), details: new Map(), lastKey: null, lastActive: null, activeTr: null
         };
         if (follow) follow.checked = true;
-        function showError(code) { $('Error').textContent = code ? 'Error: ' + code : ''; $('Error').hidden = !code; }
+        function showError(code) { $('Error').textContent = code ? API_ERRORS[code] || 'Error: ' + code : ''; $('Error').hidden = !code; }
         function stopFollowing() { if (follow) follow.checked = false; }
         async function call(path, options) {
             const response = await global.fetch(API + path, options);
@@ -369,7 +375,7 @@
 
     const api = {
         boot, batchLine, renderCounts, renderLegend, renderRows, renderChecks, renderDetail, label, reason,
-        RESULT_LABELS, ERROR_REASONS, LEGEND, PAGE_SIZE
+        RESULT_LABELS, ERROR_REASONS, API_ERRORS, LEGEND, PAGE_SIZE
     };
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
     else if (global.document) boot(global.document);

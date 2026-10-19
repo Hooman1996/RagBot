@@ -167,7 +167,7 @@ class CoverageChecker:
                 row.note = verdict.note
                 if verdict.verdict == "complete":
                     row.result, row.answer_batch, row.answer_phase = "answered", number, phase
-                    row.answer_chunk_ids = [c.chunk_id for c in relied] or [c.chunk_id for c in batch]
+                    row.answer_chunk_ids = [c.chunk_id for c in relied]
                     return
                 if verdict.verdict == "partial":
                     any_partial = True
@@ -187,7 +187,7 @@ class CoverageChecker:
                     row.note = verdict.note
                     if verdict.verdict == "complete":
                         row.result, row.answer_phase = "answered_combined", phase
-                        row.answer_chunk_ids = [c.chunk_id for c in relied] or ids
+                        row.answer_chunk_ids = [c.chunk_id for c in relied]
                         return
         row.result = "partial" if any_partial else "not_answered"
 
@@ -210,7 +210,7 @@ class CoverageChecker:
                     raise CheckError("retrieval_failed") from None
 
     async def _judge(self, kind: str, query: str, chunks: list[_Chunk], row: _Row) -> prompts.Verdict:
-        """One model call, retried once on failure or an invalid reply."""
+        """One model call, retried once on failure, a cut-off reply or an invalid reply."""
         settings = self.settings
         msgs = prompts.messages(kind, query, [c.content for c in chunks], settings["chunk_max_chars"])
         # Exactly the text the model sees; the job stores it in the run's private folder.
@@ -226,12 +226,16 @@ class CoverageChecker:
             row.model_calls += 1
             try:
                 response = await self._limited(operation)
-                content = response.choices[0].message.content
+                choice = response.choices[0]
+                finish_reason, content = choice.finish_reason, choice.message.content
             except Exception:
                 code = "model_failed"
                 continue
-            verdict = prompts.parse_verdict(content, len(chunks))
+            if finish_reason == "length":
+                # Hit KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS; a cut reply is not parsed.
+                code = "model_output_cut"
+                continue
+            verdict, code = prompts.parse_verdict(content, len(chunks))
             if verdict is not None:
                 return verdict
-            code = "invalid_model_output"
         raise CheckError(code)

@@ -29,6 +29,7 @@ from tests.test_web_auth import csrf, login, setup  # noqa: F401  (fixture)
 from utils.concurrency import AdmissionLimiter
 
 DOCUMENTS = ["Synthetic_FAQ"]
+VERSION = prompts.PROMPT_VERSION
 QUESTION = "  مي‌خوام مساعده بگيرم  "
 
 
@@ -93,14 +94,17 @@ class Rag:
 
     async def _completion(self, **kwargs):
         system, user = kwargs["messages"]
-        kind = "combine" if "each judged a partial answer" in system["content"] else "batch"
+        kind = "combine" if system["content"] == prompts.SYSTEM["combine"] else "batch"
         payload = json.loads(user["content"])
         ids = ["k" + item["text"].split("synthetic question ")[1].split("\n")[0] for item in payload["chunks"]]
         call = {"kind": kind, "ids": ids, "kwargs": kwargs, "question": payload["question"]}
         self.completions.append(call)
         reply = self.judge(kind, ids, call)
+        # A ("length", reply) tuple scripts a reply cut off at max_tokens.
+        finish_reason, reply = reply if isinstance(reply, tuple) else ("stop", reply)
         content = reply if isinstance(reply, str) else json.dumps(reply)
-        return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=content))])
+        return SimpleNamespace(choices=[SimpleNamespace(finish_reason=finish_reason,
+                                                        message=SimpleNamespace(content=content))])
 
 
 def answering(rag, intent="general"):
@@ -187,10 +191,10 @@ def test_early_stop_at_batch_two():
     assert (kwargs["model"], kwargs["temperature"], kwargs["top_p"], kwargs["seed"], kwargs["max_tokens"]) == \
         ("synthetic-model", 0, 1, 42, 300)
     schema = kwargs["response_format"]["json_schema"]
-    assert schema["name"] == "coverage_batch_1" and schema["strict"] is True
+    assert schema["name"] == "coverage_batch_2" and schema["strict"] is True
     assert schema["schema"]["additionalProperties"] is False
-    assert kwargs["messages"][0]["content"].startswith(
-        "You check whether a bank's FAQ chunks answer a customer's question.")
+    assert kwargs["messages"][0]["content"] == prompts.SYSTEM["batch"]
+    assert kwargs["messages"][0]["content"].startswith("You are a strict grader for a bank's FAQ knowledge base.")
 
 
 def test_batch_size_ten_gives_at_most_five_batch_calls():
@@ -258,10 +262,61 @@ def test_invalid_output_retries_once_then_errors():
     assert result["result"] == "error" and result["error_code"] == "invalid_model_output"
     assert len(rag.completions) == 2
 
-    out_of_batch = Rag(judge=lambda kind, ids, call: {"verdict": "complete", "chunk_numbers": [6], "note": ""})
-    assert check(out_of_batch)[0]["error_code"] == "invalid_model_output"
-    repeated = Rag(judge=lambda kind, ids, call: {"verdict": "partial", "chunk_numbers": [1, 1], "note": ""})
-    assert check(repeated)[0]["error_code"] == "invalid_model_output"
+    extra_field = Rag(judge=lambda kind, ids, call: {"note": "", "chunk_numbers": [], "verdict": "none", "x": 1})
+    assert check(extra_field)[0]["error_code"] == "invalid_model_output"
+
+
+@pytest.mark.parametrize("verdict,chunk_numbers", [
+    ("complete", []), ("partial", []), ("complete", [1, 1]), ("partial", [2, 2]),
+    ("complete", [6]), ("partial", [0]), ("complete", [-1])])
+def test_bad_chunk_numbers_give_invalid_chunk_numbers_after_two_attempts(verdict, chunk_numbers):
+    rag = Rag(judge=lambda kind, ids, call: {"note": "", "chunk_numbers": chunk_numbers, "verdict": verdict})
+    result, _ = check(rag)
+    assert result["result"] == "error" and result["error_code"] == "invalid_chunk_numbers"
+    assert len(rag.completions) == 2 and result["model_calls"] == 2
+
+
+def test_none_with_numbers_is_stored_with_no_relied_chunks():
+    rag = Rag(judge=lambda kind, ids, call: {"note": "", "chunk_numbers": [2], "verdict": "none"})
+    result, _ = check(rag)
+    assert result["result"] == "not_answered" and result["batches"]
+    assert all(b["verdict"] == "none" and b["relied_chunk_ids"] == [] for b in result["batches"])
+
+
+def test_long_note_is_stored_as_200_characters():
+    rag = Rag(judge=lambda kind, ids, call: {"note": "n" * 600, "chunk_numbers": [1], "verdict": "complete"})
+    result, _ = check(rag)
+    assert result["result"] == "answered" and result["answer_chunk_ids"] == ["k0"]
+    assert result["note"] == "n" * 200 and result["batches"][0]["note"] == "n" * 200
+
+
+def test_reply_cut_at_max_tokens_twice_gives_model_output_cut():
+    full = {"note": "", "chunk_numbers": [1], "verdict": "complete"}
+    rag = Rag(judge=lambda kind, ids, call: ("length", full))
+    result, _ = check(rag)
+    assert result["result"] == "error" and result["error_code"] == "model_output_cut"
+    assert result["model_calls"] == 2 and len(rag.completions) == 2
+
+
+def test_cut_reply_then_valid_reply_is_used():
+    replies = iter([("length", '{"note": "'), {"note": "", "chunk_numbers": [1], "verdict": "complete"}])
+    rag = Rag(judge=lambda kind, ids, call: next(replies))
+    result, _ = check(rag)
+    assert result["result"] == "answered" and result["model_calls"] == 2
+
+
+def test_error_after_two_judged_batches_keeps_both_batches():
+    def judge(kind, ids, call):
+        if "k10" in ids:
+            return "not json"
+        return {"note": "synthetic", "chunk_numbers": [], "verdict": "none"}
+    rag = Rag(judge)
+    result, _ = check(rag)
+    assert result["result"] == "error" and result["error_code"] == "invalid_model_output"
+    assert [b["number"] for b in result["batches"]] == [1, 2]
+    assert [b["chunk_ids"] for b in result["batches"]] == [
+        ["k0", "k1", "k2", "k3", "k4"], ["k5", "k6", "k7", "k8", "k9"]]
+    assert result["model_calls"] == 4
 
 
 def test_failed_calls_record_fixed_codes_only():
@@ -276,10 +331,47 @@ def test_failed_calls_record_fixed_codes_only():
 
 
 def test_parse_verdict_rules():
-    assert prompts.parse_verdict('{"verdict":"none","chunk_numbers":[],"note":""}', 5).verdict == "none"
-    assert prompts.parse_verdict('{"verdict":"none","chunk_numbers":[],"note":"","x":1}', 5) is None
-    assert prompts.parse_verdict('{"verdict":"none","chunk_numbers":[],"note":"' + "a" * 201 + '"}', 5) is None
-    assert prompts.parse_verdict(None, 5) is None
+    verdict, code = prompts.parse_verdict('{"note":"","chunk_numbers":[],"verdict":"none"}', 5)
+    assert verdict.verdict == "none" and code is None
+    assert prompts.parse_verdict('{"note":"","chunk_numbers":[],"verdict":"none","x":1}', 5) == \
+        (None, "invalid_model_output")
+    assert prompts.parse_verdict('{"note":"","chunk_numbers":[],"verdict":"maybe"}', 5) == \
+        (None, "invalid_model_output")
+    assert prompts.parse_verdict(None, 5) == (None, "invalid_model_output")
+    verdict, code = prompts.parse_verdict('{"note":"' + "a" * 600 + '","chunk_numbers":[3],"verdict":"partial"}', 5)
+    assert code is None and verdict.note == "a" * 200 and verdict.chunk_numbers == [3]
+    verdict, _ = prompts.parse_verdict('{"note":"","chunk_numbers":[2, 9],"verdict":"none"}', 5)
+    assert verdict.chunk_numbers == []
+    for numbers_ in ("[]", "[1,1]", "[0]", "[6]"):
+        reply = '{"note":"","chunk_numbers":' + numbers_ + ',"verdict":"complete"}'
+        assert prompts.parse_verdict(reply, 5) == (None, "invalid_chunk_numbers")
+
+
+def test_verdict_schema_lists_note_then_chunk_numbers_then_verdict():
+    schema = prompts.Verdict.model_json_schema()
+    assert list(schema["properties"]) == ["note", "chunk_numbers", "verdict"]
+    assert schema["required"] == ["note", "chunk_numbers", "verdict"]
+    assert schema["additionalProperties"] is False and "maxLength" not in schema["properties"]["note"]
+    assert prompts.response_format()["json_schema"]["name"] == prompts.SCHEMA_NAME == "coverage_batch_2"
+
+
+def test_prompt_version_changes_when_any_prompt_string_changes():
+    schema = prompts.Verdict.model_json_schema()
+    version = prompts.prompt_version(prompts.SYSTEM, schema, prompts.SCHEMA_NAME)
+    assert version == prompts.PROMPT_VERSION and len(version) == 12
+    assert all(ch in "0123456789abcdef" for ch in version)
+    for kind in ("batch", "combine"):
+        changed = {**prompts.SYSTEM, kind: prompts.SYSTEM[kind] + " "}
+        assert prompts.prompt_version(changed, schema, prompts.SCHEMA_NAME) != version
+    for part in ("RULES", "FIELDS", "BATCH", "COMBINE"):
+        pieces = {name: getattr(prompts, name) for name in ("RULES", "FIELDS", "BATCH", "COMBINE")}
+        pieces[part] += "x"
+        system = {"batch": pieces["RULES"] + pieces["BATCH"] + pieces["FIELDS"],
+                  "combine": pieces["RULES"] + pieces["COMBINE"] + pieces["FIELDS"]}
+        assert prompts.prompt_version(system, schema, prompts.SCHEMA_NAME) != version, part
+    assert prompts.prompt_version(prompts.SYSTEM, schema, "coverage_batch_3") != version
+    assert prompts.SYSTEM == {"batch": prompts.RULES + prompts.BATCH + prompts.FIELDS,
+                              "combine": prompts.RULES + prompts.COMBINE + prompts.FIELDS}
 
 
 # CSV and settings ---------------------------------------------------
@@ -390,6 +482,7 @@ def test_admin_starts_and_viewer_reads_another_users_run(api):
         stored = api.runtime.store
         meta = stored.meta(run_id)
         assert meta["file_name"] == "questions.csv" and meta["owner_id"] == 1 and meta["state"] == "queued"
+        assert meta["prompt_version"] == prompts.PROMPT_VERSION
         assert meta["settings"]["depth"] == 150 and meta["settings"]["model_max_tokens"] == 300
         assert "drop" not in json.dumps(stored.inputs(run_id))
         folder = stored.root / run_id
@@ -401,6 +494,7 @@ def test_admin_starts_and_viewer_reads_another_users_run(api):
         assert page.status_code == 200 and 'id="coverageForm"' not in page.text
         listing = viewer.get("/api/knowledge-coverage/checks").json()
         assert [c["run_id"] for c in listing] == [run_id] and listing[0]["done"] == 0
+        assert listing[0]["prompt_version"] == prompts.PROMPT_VERSION
         detail = viewer.get(f"/api/knowledge-coverage/checks/{run_id}").json()
         assert detail["counts"]["waiting"] == 2 and detail["done"] == 0
         rows = viewer.get(f"/api/knowledge-coverage/checks/{run_id}/rows?limit=100").json()
@@ -420,6 +514,29 @@ def test_admin_starts_and_viewer_reads_another_users_run(api):
         assert admin.post(f"/api/knowledge-coverage/checks/{run_id}/cancel", headers=csrf(admin)).status_code == 409
         resumed = admin.post(f"/api/knowledge-coverage/checks/{run_id}/resume", headers=csrf(admin))
         assert resumed.status_code == 200 and api.queued == [run_id, run_id]
+
+
+@pytest.mark.parametrize("version", ["0123456789ab", None])
+def test_resume_with_a_different_prompt_version_returns_409(api, version):
+    api.db.users[1]["role"] = "admin"
+    store = api.runtime.store
+    meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                        prompt_version=VERSION, rows=[{"row": 1, "id": "", "question": "synthetic"}])
+    run_id = meta["run_id"]
+    store.set_state(run_id, "cancelled")
+    stored = store.meta(run_id)
+    if version is None:
+        stored.pop("prompt_version")  # a run created before step 23
+    else:
+        stored["prompt_version"] = version
+    store._write(store.root / run_id / "meta.json", stored)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        listing = client.get("/api/knowledge-coverage/checks").json()
+        assert listing[0]["prompt_version"] == version
+        response = client.post(f"/api/knowledge-coverage/checks/{run_id}/resume", headers=csrf(client))
+    assert response.status_code == 409 and response.json()["detail"] == "prompt_changed"
+    assert store.meta(run_id)["state"] == "cancelled" and api.queued == []
 
 
 def test_plain_user_is_denied_everywhere(api):
@@ -462,7 +579,8 @@ def test_disabled_flag_returns_404_and_hides_link(api, monkeypatch):
 
 def make_run(tmp_path, rows):
     store = CheckStore(tmp_path / "private")
-    meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(), rows=rows)
+    meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                         prompt_version=VERSION, rows=rows)
     return store, meta["run_id"]
 
 
@@ -470,6 +588,7 @@ def test_export_columns_and_formula_prefix(api):
     api.db.users[1]["role"] = "dashboard_viewer"
     store = api.runtime.store
     meta = store.create(owner_id=2, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                        prompt_version=VERSION,
                         rows=[{"row": 1, "id": "-5", "question": "=cmd"}, {"row": 2, "id": "@x", "question": "+1"}])
     run_id = meta["run_id"]
     store.write_result(run_id, 1, {"result": "answered", "answer_batch": 2, "answer_phase": "initial",
@@ -525,9 +644,10 @@ def test_restart_interrupts_and_resume_finishes_only_missing_rows(tmp_path):
 def test_queue_runs_in_fifo_order_and_cancel_between_rows(tmp_path):
     store = CheckStore(tmp_path / "private")
     first = store.create(owner_id=1, file_name="a.csv", documents=DOCUMENTS, settings=run_settings(),
+                         prompt_version=VERSION,
                          rows=[{"row": n, "id": "", "question": f"a{n}"} for n in (1, 2, 3)])["run_id"]
     second = store.create(owner_id=1, file_name="b.csv", documents=DOCUMENTS, settings=run_settings(),
-                          rows=[{"row": 1, "id": "", "question": "b1"}])["run_id"]
+                          prompt_version=VERSION, rows=[{"row": 1, "id": "", "question": "b1"}])["run_id"]
     order = []
 
     async def scenario():
@@ -742,6 +862,7 @@ def test_checker_saves_exactly_the_text_the_model_saw():
 
 def write_detail_run(store):
     meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                        prompt_version=VERSION,
                         rows=[{"row": n, "id": str(n), "question": f"synthetic {n}"} for n in (1, 2, 3, 4)])
     run_id = meta["run_id"]
     keys = store.write_texts(run_id, {"k1": "synthetic text one", "k2": "synthetic text two",
@@ -827,3 +948,113 @@ def test_row_detail_route_needs_results_access(api, monkeypatch, role):
         response = client.get(f"/api/knowledge-coverage/checks/{run_id}/rows/1")
     assert response.status_code == 403
     assert "synthetic" not in response.text
+
+
+# Comparison script ----------------------------------------------------
+
+COMPARE_QUESTIONS = ["پرسش ساختگی یک", "پرسش ساختگی دو", "پرسش ساختگی سه",
+                     "پرسش ساختگی چهار", "پرسش ساختگی پنج", "پرسش ساختگی شش"]
+COMPARE_NOTE = "synthetic private note"
+
+
+def compare_run(store, results, version, row_count=6, durations=None):
+    rows = [{"row": n, "id": str(n), "question": COMPARE_QUESTIONS[(n - 1) % 6]} for n in range(1, row_count + 1)]
+    run_id = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                          prompt_version=version, rows=rows)["run_id"]
+    for row, (result, error_code) in results.items():
+        store.write_result(run_id, row, {
+            "result": result, "error_code": error_code, "note": COMPARE_NOTE, "model_calls": row,
+            "duration_ms": (durations or {}).get(row, row * 100), "batches": [],
+            "titles": {"k1": "synthetic private title"}, "answer_chunk_ids": ["k1"]})
+    store.set_state(run_id, "completed")
+    return run_id
+
+
+def run_compare(tmp_path, argv):
+    from scripts import coverage_compare
+    out = io.StringIO()
+    code = coverage_compare.main(argv, artifact_dir=tmp_path / "private", out=out)
+    text = out.getvalue()
+    for secret in (*COMPARE_QUESTIONS, COMPARE_NOTE, "synthetic private title"):
+        assert secret not in text
+    return code, [json.loads(line) for line in text.splitlines()], text
+
+
+def compare_pair(tmp_path):
+    store = CheckStore(tmp_path / "private")
+    before = compare_run(store, {1: ("answered", None), 2: ("partial", None), 3: ("error", "invalid_model_output"),
+                                 4: ("not_answered", None), 5: ("chitchat", None), 6: ("answered", None)},
+                         "aaaaaaaaaaaa")
+    after = compare_run(store, {1: ("answered_combined", None), 2: ("answered", None), 3: ("not_answered", None),
+                                4: ("not_answered", None), 5: ("chitchat", None)}, VERSION)
+    return store, before, after
+
+
+def test_compare_prints_runs_change_table_and_changed_rows(tmp_path):
+    _, before, after = compare_pair(tmp_path)
+    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after])
+    assert code == 0
+    first, second, table, changed = lines
+    assert first["kind"] == "run" and first["side"] == "before" and first["run_id"] == before
+    assert first["prompt_version"] == "aaaaaaaaaaaa" and second["prompt_version"] == VERSION
+    assert first["results"] == {"answered": 2, "chitchat": 1, "error": 1, "not_answered": 1, "partial": 1}
+    assert first["error_codes"] == {"invalid_model_output": 1} and second["error_codes"] == {}
+    assert second["results"] == {"answered": 1, "answered_combined": 1, "chitchat": 1, "not_answered": 2,
+                                 "waiting": 1}
+    assert (first["model_calls_total"], first["model_calls_mean"]) == (21, 3.5)
+    assert (second["model_calls_total"], second["model_calls_mean"]) == (15, 3.0)
+    assert (first["duration_ms_mean"], first["duration_ms_p95"]) == (350.0, 600)
+    assert (second["duration_ms_mean"], second["duration_ms_p95"]) == (300.0, 500)
+    assert table == {"kind": "change_table", "pairs": [
+        {"before": "answered", "after": "answered_combined", "count": 1},
+        {"before": "answered", "after": "waiting", "count": 1},
+        {"before": "chitchat", "after": "chitchat", "count": 1},
+        {"before": "error", "after": "not_answered", "count": 1},
+        {"before": "not_answered", "after": "not_answered", "count": 1},
+        {"before": "partial", "after": "answered", "count": 1}]}
+    assert changed == {"kind": "changed_rows", "pairs": [
+        {"before": "answered", "after": "answered_combined", "rows": [1]},
+        {"before": "answered", "after": "waiting", "rows": [6]},
+        {"before": "error", "after": "not_answered", "rows": [3]},
+        {"before": "partial", "after": "answered", "rows": [2]}]}
+
+
+def test_compare_with_expected_prints_agreement(tmp_path):
+    _, before, after = compare_pair(tmp_path)
+    expected = tmp_path / "expected.csv"
+    labels = ["answered", "Answered ", "not_answered", "partial", "chitchat", "answered"]
+    # A blank line after row 2 is skipped, as the upload's parse_csv does.
+    body = "id,query,expected\n" + "".join(f"{n},{q},{label}\n" + (",,\n" if n == 2 else "")
+                                           for n, (q, label) in enumerate(zip(COMPARE_QUESTIONS, labels), 1))
+    expected.write_text("﻿" + body, encoding="utf-8")
+    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after, "--expected", str(expected)])
+    assert code == 0
+    agreement = [line for line in lines if line["kind"] == "agreement"]
+    assert agreement == [
+        {"kind": "agreement", "side": "before", "run_id": before, "agree": 3, "total": 6, "rate": 0.5,
+         "wrong_rows": [2, 3, 4]},
+        {"kind": "agreement", "side": "after", "run_id": after, "agree": 4, "total": 6, "rate": 0.6667,
+         "wrong_rows": [4, 6]}]
+
+
+def test_compare_unknown_expected_value_exits_2(tmp_path):
+    _, before, after = compare_pair(tmp_path)
+    expected = tmp_path / "expected.csv"
+    rows = "".join(f"{q},{'answered' if n != 4 else 'maybe'}\n" for n, q in enumerate(COMPARE_QUESTIONS, 1))
+    expected.write_text("query,expected\n" + rows, encoding="utf-8")
+    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after, "--expected", str(expected)])
+    assert code == 2 and lines == [{"error": "unknown_expected_value", "row": 4}]
+    expected.write_text("query\n" + "".join(q + "\n" for q in COMPARE_QUESTIONS), encoding="utf-8")
+    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after, "--expected", str(expected)])
+    assert code == 2 and lines == [{"error": "missing_expected_column"}]
+
+
+def test_compare_mismatched_row_counts_exit_2(tmp_path):
+    store = CheckStore(tmp_path / "private")
+    before = compare_run(store, {1: ("answered", None)}, VERSION, row_count=6)
+    after = compare_run(store, {1: ("answered", None)}, VERSION, row_count=5)
+    code, lines, text = run_compare(tmp_path, ["--before", before, "--after", after])
+    assert code == 2 and "row_count_mismatch" in text
+    assert lines == [{"error": "row_count_mismatch", "before": 6, "after": 5}]
+    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", "c_" + "0" * 32])
+    assert code == 2 and lines[0]["error"] == "not_found"
