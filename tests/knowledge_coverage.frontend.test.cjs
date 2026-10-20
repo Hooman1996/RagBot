@@ -81,7 +81,8 @@ async function harness(canStart, data = fixture()) {
         const d = server.data;
         let value;
         const detailMatch = path.match(/\/rows\/(\d+)$/);
-        if (path === 'documents') value = d.documents;
+        if (options.method === 'DELETE') value = { deleted: path.replace('checks/', '') };
+        else if (path === 'documents') value = d.documents;
         else if (path === 'checks' && options.method === 'POST') value = { run_id: RUN };
         else if (path === 'checks') value = d.checks;
         else if (path.endsWith('/suggestions/cancel')) value = { cancelled: 1 };
@@ -516,4 +517,68 @@ test('Has suggestion filters with suggested=1 and Stop suggestions posts cancel'
         await $('SuggestStop').dispatch('click');
         assert.ok(h.requests.some(r => r.url.endsWith('/checks/' + RUN + '/suggestions/cancel') && r.options.method === 'POST'));
     } finally { h.restore(); }
+});
+
+// Delete a check ---------------------------------------------------------
+const STATES = ['queued', 'running', 'completed', 'cancelled', 'interrupted'];
+function allStates() {
+    const data = fixture();
+    data.checks = STATES.map((state, i) => ({ ...data.checks[0], run_id: 'c_' + String(i).repeat(32), state, active_row: null }));
+    return data;
+}
+const deleteRequests = h => h.requests.filter(r => r.options.method === 'DELETE');
+
+test('Delete shows only for finished checks and only with coverage_run_start', async () => {
+    const h = await harness(true, allStates());
+    try {
+        const shown = h.$('Checks').children.map(tr => buttons(tr).includes('Delete'));
+        assert.deepEqual(shown, [false, false, true, true, true]);
+    } finally { h.restore(); }
+    const viewer = await harness(false, allStates());
+    try {
+        assert.ok(viewer.$('Checks').children.every(tr => !buttons(tr).includes('Delete')));
+    } finally { viewer.restore(); }
+});
+
+test('a cancelled confirm sends nothing; a confirmed delete sends DELETE and refreshes the list', async () => {
+    const data = fixture(); data.checks[0].state = 'completed'; data.checks[0].active_row = null;
+    const h = await harness(true, data), asked = [];
+    const savedConfirm = global.confirm;
+    try {
+        global.confirm = message => { asked.push(message); return false; };
+        const del = find(h.$('Checks').children[0], e => e.tagName === 'BUTTON' && e.textContent === 'Delete');
+        await del.dispatch('click');
+        assert.deepEqual(asked, ['Delete this check, its results and its suggestions? This cannot be undone. Download the CSV first if you need it.']);
+        assert.equal(deleteRequests(h).length, 0);
+
+        global.confirm = () => true;
+        h.server.data = { ...data, checks: [] };
+        const before = h.requests.length;
+        await h.booted.actions.delete(RUN);
+        assert.deepEqual(deleteRequests(h).map(r => r.url), ['/api/knowledge-coverage/checks/' + RUN]);
+        assert.ok(h.requests.slice(before).some(r => r.url === '/api/knowledge-coverage/checks' && !r.options.method));
+        assert.match(text(h.$('Checks')), /No checks yet\./);
+    } finally { global.confirm = savedConfirm; h.restore(); }
+});
+
+test('deleting the open check hides the results and clears the expanded rows and details cache', async () => {
+    const data = fixture(); data.checks[0].state = 'completed'; data.detail.meta.state = 'completed';
+    const h = await harness(true, data), { $ } = h;
+    const savedConfirm = global.confirm;
+    try {
+        await h.booted.actions.open(RUN);
+        toggleOf($, 1).dispatch('click');
+        await tick();
+        const { state } = h.booted;
+        assert.equal($('Results').hidden, false);
+        assert.ok(state.expanded.has(1) && state.details.size === 1);
+        global.confirm = () => true;
+        h.server.data = { ...data, checks: [] };
+        await h.booted.actions.delete(RUN);
+        assert.equal($('Results').hidden, true);
+        assert.equal(state.open, null);
+        assert.equal(state.expanded.size, 0);
+        assert.equal(state.details.size, 0);
+        assert.equal($('Rows').children.length, 0);
+    } finally { global.confirm = savedConfirm; h.restore(); }
 });

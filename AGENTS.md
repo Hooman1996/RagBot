@@ -90,10 +90,13 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 - `GET /api/knowledge-coverage/checks/{run_id}/rows/{row}`
 - `POST /api/knowledge-coverage/checks/{run_id}/cancel`
 - `POST /api/knowledge-coverage/checks/{run_id}/resume`
+- `DELETE /api/knowledge-coverage/checks/{run_id}`
 - `GET /api/knowledge-coverage/checks/{run_id}/export`
 - `POST /api/knowledge-coverage/checks/{run_id}/suggestions`
 - `GET /api/knowledge-coverage/checks/{run_id}/suggestions`
 - `POST /api/knowledge-coverage/checks/{run_id}/suggestions/cancel`
+
+Checks are stored on the server under `KNOWLEDGE_COVERAGE_ARTIFACT_DIR/checks/<run_id>/`, are kept until deleted from the page, and the CSV download is the copy to share.
 
 #### Routes from `internal_evaluation_api.py`
 

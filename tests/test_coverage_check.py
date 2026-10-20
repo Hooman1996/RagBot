@@ -14,6 +14,7 @@ from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
+from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
 import main
@@ -461,6 +462,7 @@ ROUTES = [("GET", "/knowledge-coverage"), ("GET", "/api/knowledge-coverage/docum
           ("GET", "/api/knowledge-coverage/checks/{id}/rows/1"),
           ("POST", "/api/knowledge-coverage/checks/{id}/cancel"),
           ("POST", "/api/knowledge-coverage/checks/{id}/resume"),
+          ("DELETE", "/api/knowledge-coverage/checks/{id}"),
           ("GET", "/api/knowledge-coverage/checks/{id}/export"),
           ("POST", "/api/knowledge-coverage/checks/{id}/suggestions"),
           ("GET", "/api/knowledge-coverage/checks/{id}/suggestions"),
@@ -505,9 +507,9 @@ def test_admin_starts_and_viewer_reads_another_users_run(api):
         assert viewer.get(f"/api/knowledge-coverage/checks/{run_id}/rows?limit=101").status_code == 422
         assert viewer.get(f"/api/knowledge-coverage/checks/{run_id}/export").status_code == 200
         for method, path in ROUTES:
-            if method == "POST" or path.endswith("/documents"):
+            if method != "GET" or path.endswith("/documents"):
                 url = path.replace("{id}", run_id)
-                kwargs = {"headers": csrf(viewer)} if method == "POST" else {}
+                kwargs = {"headers": csrf(viewer)} if method != "GET" else {}
                 if path.endswith("/checks"):
                     kwargs["json"] = start_payload()
                 assert viewer.request(method, url, **kwargs).status_code == 403, url
@@ -548,7 +550,7 @@ def test_plain_user_is_denied_everywhere(api):
         login(client, "alice")
         for method, path in ROUTES:
             url = path.replace("{id}", "c_" + "a" * 32)
-            kwargs = {"headers": csrf(client)} if method == "POST" else {}
+            kwargs = {"headers": csrf(client)} if method != "GET" else {}
             assert client.request(method, url, **kwargs).status_code == 403, url
         assert 'href="/knowledge-coverage"' not in client.get("/app").text
 
@@ -573,9 +575,117 @@ def test_disabled_flag_returns_404_and_hides_link(api, monkeypatch):
         monkeypatch.setenv("KNOWLEDGE_COVERAGE_ENABLED", "false")
         for method, path in ROUTES:
             url = path.replace("{id}", "c_" + "a" * 32)
-            kwargs = {"headers": csrf(client)} if method == "POST" else {}
+            kwargs = {"headers": csrf(client)} if method != "GET" else {}
             assert client.request(method, url, **kwargs).status_code == 404, url
         assert 'href="/knowledge-coverage"' not in client.get("/app").text
+
+
+@pytest.mark.parametrize("path,menu", [("/app", ".sidebar__nav"), ("/analytics", ".sidebar__nav"),
+                                       ("/knowledge-base/", ".web-header-controls--kb"),
+                                       ("/knowledge-coverage", ".sidebar__nav")])
+def test_knowledge_coverage_is_the_last_menu_link(api, path, menu):
+    api.db.users[1]["role"] = "admin"
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        page = client.get(path)
+    assert page.status_code == 200, path
+    links = BeautifulSoup(page.text, "html.parser").select_one(menu).select("a[href]")
+    assert len(links) >= 3 and links[-1]["href"] == "/knowledge-coverage", [a["href"] for a in links]
+
+
+# Delete ------------------------------------------------------------------
+
+def finished_run(store, state="completed"):
+    meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                        prompt_version=VERSION, rows=[{"row": 1, "id": "", "question": "synthetic"}])
+    run_id = meta["run_id"]
+    store.write_result(run_id, 1, plain_result())
+    store.write_suggestion(run_id, 1, {"status": "error", "error_code": "empty_suggestion"})
+    store.set_state(run_id, state)
+    return run_id
+
+
+def delete(client, run_id):
+    return client.delete(f"/api/knowledge-coverage/checks/{run_id}", headers=csrf(client))
+
+
+@pytest.mark.parametrize("state", ["completed", "cancelled", "interrupted"])
+def test_delete_removes_a_finished_run_and_its_caches(api, state, caplog):
+    api.db.users[1]["role"] = "admin"
+    store = api.runtime.store
+    run_id, kept = finished_run(store, state), finished_run(store)
+    assert store.result_codes(run_id) and store.suggestion_statuses(run_id)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        with caplog.at_level("INFO", logger="coverage_check"):
+            response = delete(client, run_id)
+        assert response.status_code == 200 and response.json() == {"deleted": run_id}
+        assert not (store.root / run_id).exists() and (store.root / kept).is_dir()
+        assert run_id not in store._results and run_id not in store._suggestions
+        for url in (f"/api/knowledge-coverage/checks/{run_id}", f"/api/knowledge-coverage/checks/{run_id}/rows",
+                    f"/api/knowledge-coverage/checks/{run_id}/rows/1"):
+            assert client.get(url).status_code == 404, url
+        assert [c["run_id"] for c in client.get("/api/knowledge-coverage/checks").json()] == [kept]
+        assert delete(client, run_id).status_code == 404
+    events = [r.ragbot_event_data for r in caplog.records if hasattr(r, "ragbot_event_data")]
+    assert [e for e in events if e["event"] == "coverage_check_deleted"] == [
+        {"event": "coverage_check_deleted", "data": {"run_id": run_id}}]
+
+
+@pytest.mark.parametrize("state", ["queued", "running"])
+def test_delete_refuses_a_queued_or_running_run(api, state):
+    api.db.users[1]["role"] = "admin"
+    store = api.runtime.store
+    run_id = finished_run(store, state)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = delete(client, run_id)
+    assert response.status_code == 409 and response.json()["detail"] == "invalid_state"
+    assert (store.root / run_id / "meta.json").is_file() and store.meta(run_id)["state"] == state
+
+
+def test_delete_refuses_while_a_suggestion_is_queued(api):
+    api.db.users[1]["role"] = "admin"
+    store = api.runtime.store
+    run_id = finished_run(store)
+    api.runtime.suggest_jobs._queued.add((run_id, 1))
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = delete(client, run_id)
+    assert response.status_code == 409 and response.json()["detail"] == "suggestions_running"
+    assert (store.root / run_id / "meta.json").is_file()
+
+
+def test_delete_bad_id_or_symlinked_run_is_404_and_touches_nothing_outside(api, tmp_path):
+    api.db.users[1]["role"] = "admin"
+    store = api.runtime.store
+    finished_run(store)
+    outside = tmp_path / "outside"
+    target_id = finished_run(CheckStore(outside))
+    target = outside / "checks" / target_id
+    link_id = "c_" + "b" * 32
+    os.symlink(target, store.root / link_id)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        for run_id in ("c_" + "a" * 32, "not-a-run", "c_" + "A" * 32, link_id):
+            response = delete(client, run_id)
+            assert response.status_code == 404 and response.json()["detail"] == "not_found", run_id
+    assert (store.root / link_id).is_symlink()
+    assert (target / "meta.json").is_file() and (target / "results" / "1.json").is_file()
+    with pytest.raises(StoreError):
+        store.delete(link_id)
+    assert target.is_dir()
+
+
+@pytest.mark.parametrize("role", ["user", "dashboard_viewer"])
+def test_delete_needs_coverage_run_start(api, role):
+    api.db.users[1]["role"] = role
+    store = api.runtime.store
+    run_id = finished_run(store)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        assert delete(client, run_id).status_code == 403
+    assert (store.root / run_id / "meta.json").is_file()
 
 
 # Export and restart ---------------------------------------------------

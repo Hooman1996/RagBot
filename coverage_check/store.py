@@ -9,6 +9,7 @@ import json
 import os
 import re
 import secrets
+import shutil
 import tempfile
 import threading
 from datetime import datetime, timezone
@@ -152,6 +153,16 @@ class CheckStore:
             if RUN_ID.match(path.name) and (path / "meta.json").is_file():
                 metas.append(self._read(path / "meta.json"))
         return sorted(metas, key=lambda m: (m["created_at"], m["run_id"]), reverse=True)
+
+    def delete(self, run_id: str) -> None:
+        """Removes the run's folder and cached codes; a folder that is a symlink or outside the root is not_found."""
+        path = self._run(run_id)
+        if path.is_symlink() or path.resolve().parent != self.root.resolve():
+            raise StoreError("not_found")
+        shutil.rmtree(path)
+        with self._lock:
+            self._results.pop(run_id, None)
+            self._suggestions.pop(run_id, None)
 
     def inputs(self, run_id: str) -> list[dict]:
         return self._read(self._run(run_id) / "input.json")

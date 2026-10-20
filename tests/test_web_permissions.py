@@ -38,6 +38,7 @@ EXPECTED = {
     ('GET', '/api/knowledge-coverage/checks/{run_id}/rows/{row}'): 'coverage_results_view',
     ('POST', '/api/knowledge-coverage/checks/{run_id}/cancel'): 'coverage_run_start',
     ('POST', '/api/knowledge-coverage/checks/{run_id}/resume'): 'coverage_run_start',
+    ('DELETE', '/api/knowledge-coverage/checks/{run_id}'): 'coverage_run_start',
     ('GET', '/api/knowledge-coverage/checks/{run_id}/export'): 'coverage_results_view',
     ('POST', '/api/knowledge-coverage/checks/{run_id}/suggestions'): 'coverage_run_start',
     ('GET', '/api/knowledge-coverage/checks/{run_id}/suggestions'): 'coverage_results_view',

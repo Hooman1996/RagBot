@@ -5,6 +5,7 @@ import base64
 import binascii
 import csv
 import io
+import logging
 from collections import Counter
 from typing import Annotated
 
@@ -24,10 +25,12 @@ from coverage_check.suggester import ELIGIBLE, Suggester
 from document_category import get_document_category
 from frontend_paths import TEMPLATE_DIR
 from new_architecture.knowledge_sources import build_datasource_listing
+from utils.structured_logging import log_event
 from versioned_assets import asset_integrity, vendor_integrity, versioned_asset
 from web_auth import WebUser
 from web_permissions import permissions_for_user
 
+logger = logging.getLogger("coverage_check")
 router = APIRouter(tags=["knowledge-coverage"])
 templates = Jinja2Templates(directory=str(TEMPLATE_DIR))
 templates.env.globals.update(versioned_asset=versioned_asset, asset_integrity=asset_integrity,
@@ -42,6 +45,7 @@ EXPORT_COLUMNS = ("row", "id", "question", "result", "answer_batch", "answer_pha
 SUGGEST_MAX_ROWS = 1000
 SUGGEST_BODY_MAX_BYTES = 65536
 NO_STORE = {"Cache-Control": "no-store"}
+FINISHED = frozenset({"completed", "cancelled", "interrupted"})
 
 
 def mount(app) -> bool:
@@ -389,6 +393,21 @@ async def resume_check(run_id: str, request: Request, user: WebUser):
     await store_call(runtime.store.set_state, run_id, "queued")
     runtime.jobs.enqueue(run_id)
     return {"run_id": run_id, "state": "queued"}
+
+
+@router.delete("/api/knowledge-coverage/checks/{run_id}")
+async def delete_check(run_id: str, request: Request, user: WebUser):
+    require(user, "coverage_run_start")
+    runtime = runtime_of(request)
+    meta = await store_call(runtime.store.meta, run_id)
+    if meta["state"] not in FINISHED or runtime.jobs.current == run_id:
+        raise HTTPException(409, detail="invalid_state")
+    suggest_jobs = runtime.suggest_jobs
+    if suggest_jobs.queued_rows(run_id) or suggest_jobs.active_row(run_id) is not None:
+        raise HTTPException(409, detail="suggestions_running")
+    await store_call(runtime.store.delete, run_id)
+    log_event(logger, "coverage_check_deleted", {"run_id": run_id})
+    return {"deleted": run_id}
 
 
 @router.get("/api/knowledge-coverage/checks/{run_id}/export")

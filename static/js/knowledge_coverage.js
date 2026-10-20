@@ -32,8 +32,11 @@
     });
     const API_ERRORS = {
         prompt_changed: 'The prompts changed since this check started; start a new check.',
-        not_eligible: 'Only Not answered or Partly answered rows can get a suggestion.'
+        not_eligible: 'Only Not answered or Partly answered rows can get a suggestion.',
+        suggestions_running: 'Stop the suggestions for this check before deleting it.'
     };
+    const FINISHED = ['completed', 'cancelled', 'interrupted'];
+    const DELETE_CONFIRM = 'Delete this check, its results and its suggestions? This cannot be undone. Download the CSV first if you need it.';
     const ELIGIBLE = ['not_answered', 'partial'];
     const SUGGEST_MARKS = { queued: 'Suggestion queued', active: 'Suggesting…' };
     const PLACEHOLDER = /\[تکمیل شود:[^\]]*\]/g;
@@ -298,6 +301,7 @@
             add('Open', actions.open);
             if (canStart && ['queued', 'running'].includes(check.state)) add('Stop', actions.stop);
             if (canStart && ['cancelled', 'interrupted'].includes(check.state)) add('Resume', actions.resume);
+            if (canStart && FINISHED.includes(check.state)) add('Delete', actions.delete);
             tr.append(cell);
             return tr;
         }));
@@ -454,8 +458,22 @@
                 state.open = id; state.offset = 0; state.lastKey = null; showError(''); await refresh();
             },
             stop: stopRun,
-            resume: async id => { try { await post('checks/' + id + '/resume'); await refresh(); } catch (e) { showError(e.message); } }
+            resume: async id => { try { await post('checks/' + id + '/resume'); await refresh(); } catch (e) { showError(e.message); } },
+            delete: async id => {
+                if (!global.confirm(DELETE_CONFIRM)) return;
+                try {
+                    await call('checks/' + id, { method: 'DELETE' });
+                    if (state.open === id) closeResults();
+                    await refresh();
+                } catch (e) { showError(e.message); }
+            }
         };
+        function closeResults() {
+            Object.assign(state, { open: null, openState: null, offset: 0, total: 0, lastKey: null, lastActive: null, activeTr: null, suggest: null });
+            state.expanded = new Set(); state.details = new Map();
+            $('Results').hidden = true; $('Rows').replaceChildren(); $('Download').setAttribute('href', '#');
+            updateStop(); renderSuggestHeader();
+        }
         async function stopOpen() {
             const button = $('Stop');
             button.disabled = true; button.textContent = 'Stopping…';

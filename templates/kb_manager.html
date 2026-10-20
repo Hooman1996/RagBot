@@ -21,9 +21,9 @@
             </div>
         </div>
         <div class="web-header-controls web-header-controls--kb">
-            {% if 'coverage_results_view' in permissions %}<a href="/knowledge-coverage" class="text-xs bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg">پوشش دانش</a>{% endif %}
             {% if 'chat' in permissions %}<a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all"><svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#back"></use></svg> بازگشت به میز کار چت</a>{% endif %}
             {% if 'analytics' in permissions %}<a href="/analytics" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all">تحلیل‌ها</a>{% endif %}
+            {% if 'coverage_results_view' in permissions %}<a href="/knowledge-coverage" class="text-xs bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg">پوشش دانش</a>{% endif %}
             {% set logout_label = "خروج" %}{% include "_logout_button.html" %}
         </div>
     </header>
