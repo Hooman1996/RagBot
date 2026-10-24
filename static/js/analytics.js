@@ -4,6 +4,7 @@
   const CONTRACT_VERSION = "main-analytics/v3";
   const charts = [];
   let requestNumber = 0;
+  let lastData = null;
   const number = (value) => Number(value).toLocaleString();
   const $ = (id) => document.getElementById(id);
   const message = (id, value) => { if ($(id)) $(id).textContent = value; };
@@ -235,8 +236,14 @@
     console.error("Analytics contract mismatch", { html: htmlVersion, script: CONTRACT_VERSION, api: apiVersion });
   }
 
+  function setExportEnabled(enabled) {
+    for (const id of ["exportSnapshot", "exportCsv"]) if ($(id)) $(id).disabled = !enabled;
+  }
+
   async function render() {
     const thisRequest = ++requestNumber;
+    lastData = null;
+    setExportEnabled(false);
     const root = $("analyticsRoot");
     const htmlVersion = root?.dataset?.analyticsContract;
     if (htmlVersion !== CONTRACT_VERSION) {
@@ -265,6 +272,8 @@
       }
       clearCharts();
       renderData(data);
+      lastData = data;
+      setExportEnabled(true);
       message("analyticsStatus", `Analytics loaded for ${days} days in UTC.`);
     } catch (error) {
       if (thisRequest !== requestNumber) return;
@@ -281,12 +290,107 @@
     }
   }
 
+  const escapeHtml = (value) => String(value).replace(/[&<>"']/g, (c) => `&#${c.charCodeAt(0)};`);
+  const exportName = (d) => `ragbot-analytics-${d.meta.days}d-${String(d.meta.end).slice(0, 10)}`;
+
+  function csvCell(value) {
+    if (value === null || value === undefined) return "";
+    let text = String(value);
+    if (typeof value === "string" && /^[=+\-@\t\r]/.test(text)) text = `'${text}`;
+    return /[",\r\n]/.test(text) ? `"${text.replace(/"/g, '""')}"` : text;
+  }
+
+  function analyticsCsv(d) {
+    const rows = [["section", "label", "series", "value"]];
+    for (const key of ["days", "timezone", "start", "end", "contract_version"]) rows.push(["meta", key, "", d.meta[key]]);
+    for (const [key, value] of Object.entries(d.kpis)) rows.push(["kpis", key, "", value]);
+    for (const [section, name] of [["queries_per_day", "Queries"], ["users_per_day", "Users"],
+      ["feedback_outcomes", "Queries"], ["conversation_depth", "Sessions"],
+      ["completion_duration", "Completed queries"], ["query_states", "Queries"]])
+      d[section].labels.forEach((label, i) => rows.push([section, label, name, d[section].data[i]]));
+    const weekly = d.weekly_comparison;
+    weekly.labels.forEach((label, i) => {
+      rows.push(["weekly_comparison", label, "Current 7 days", weekly.current[i]]);
+      rows.push(["weekly_comparison", label, "Previous 7 days", weekly.previous[i]]);
+    });
+    const hm = d.heatmap;
+    hm.weekdays.forEach((weekday, day) => hm.hours.forEach((hour, h) =>
+      rows.push(["heatmap", weekday, hour, hm.matrix[day][h]])));
+    return "﻿" + rows.map((row) => row.map(csvCell).join(",")).join("\r\n") + "\r\n";
+  }
+
+  function analyticsSnapshot() {
+    const rules = [];
+    for (const sheet of Array.from(document.styleSheets || [])) {
+      try {
+        for (const rule of Array.from(sheet.cssRules)) if (!/^@font-face/i.test(rule.cssText)) rules.push(rule.cssText);
+      } catch (_error) { /* unreadable sheet: skip it */ }
+    }
+    const clone = $("analyticsRoot").cloneNode(true);
+    clone.querySelectorAll("canvas").forEach((canvas) => {
+      const live = $(canvas.id);
+      if (canvas.hidden || !live || live.hidden) return canvas.remove();
+      const img = document.createElement("img");
+      img.setAttribute("alt", canvas.parentElement?.querySelector(".chart-card__title")?.textContent.trim() || canvas.id);
+      img.setAttribute("src", live.toDataURL("image/png"));
+      canvas.replaceWith(img);
+    });
+    clone.querySelectorAll("svg").forEach((svg) => svg.remove());
+    clone.querySelectorAll("#heatmapDetails").forEach((node) => node.setAttribute("open", ""));
+    clone.querySelectorAll("#analyticsStatus").forEach((node) => node.remove());
+    const title = escapeHtml(`RagBot analytics – ${lastData.meta.days} days (UTC)`);
+    return `<!DOCTYPE html>
+<html lang="en" dir="ltr"><head><meta charset="UTF-8">
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>${title}</title>
+<style>${rules.join("\n")}
+.analytics-page { height: auto !important; overflow: visible !important; }
+.chart-card img { display: block; width: 100%; height: auto; }
+.snapshot-header { padding: 20px 24px 0; }
+@media print { .chart-card, .kpi-card { break-inside: avoid; } body { -webkit-print-color-adjust: exact; print-color-adjust: exact; } }
+</style></head>
+<body class="${escapeHtml(document.body.className || "")}">
+<header class="snapshot-header"><h1>${title}</h1><p>Exported ${escapeHtml(new Date().toISOString())}. Offline snapshot; figures are fixed at export time.</p></header>
+${clone.outerHTML}
+</body></html>
+`;
+  }
+
+  function download(text, type, name) {
+    const url = URL.createObjectURL(new Blob([text], { type }));
+    const link = document.createElement("a");
+    link.href = url;
+    link.download = name;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  }
+
+  function exportFile(kind, build, type, extension) {
+    const data = lastData;
+    if (!data) return;
+    try {
+      download(build(data), type, `${exportName(data)}.${extension}`);
+      message("analyticsStatus", `${kind} exported for ${data.meta.days} days in UTC.`);
+    } catch (error) {
+      message("analyticsStatus", "Export failed. Refresh and try again.");
+      console.error("Analytics export failed", error?.name || "Error");
+    }
+  }
+  function exportCsv() { exportFile("CSV", analyticsCsv, "text/csv;charset=utf-8", "csv"); }
+  function exportSnapshot() { exportFile("Snapshot", analyticsSnapshot, "text/html;charset=utf-8", "html"); }
+
   function init() {
     render();
     $("refreshAnalytics")?.addEventListener("click", render);
+    $("exportSnapshot")?.addEventListener("click", exportSnapshot);
+    $("exportCsv")?.addEventListener("click", exportCsv);
     $("timeRange")?.addEventListener("change", render);
   }
   if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", init);
   else init();
-  window._analyticsDashboard = { reload: render, contractVersion: CONTRACT_VERSION };
+  window._analyticsDashboard = { reload: render, contractVersion: CONTRACT_VERSION,
+                                 exportCsv, exportSnapshot, analyticsCsv, analyticsSnapshot };
 })();

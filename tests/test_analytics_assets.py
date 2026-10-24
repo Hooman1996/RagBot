@@ -114,7 +114,7 @@ def test_served_analytics_page_assets_api_and_render_path(setup, monkeypatch, po
         text=True, capture_output=True, timeout=15,
     )
     assert result.returncode == 0, result.stdout + result.stderr
-    assert "# tests 7" in result.stdout
+    assert "# tests 15" in result.stdout
 
 
 def test_asset_digest_changes_with_content(monkeypatch):

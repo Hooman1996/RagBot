@@ -64,6 +64,12 @@
                 <button id="refreshAnalytics" class="status-chip" style="cursor:pointer;border:none;">
                     <svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#refresh"></use></svg> Refresh
                 </button>
+                <button id="exportSnapshot" type="button" class="status-chip analytics-export" disabled title="Download an offline copy of this dashboard (HTML; print it to save as PDF)">
+                    <svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#download"></use></svg> Export snapshot
+                </button>
+                <button id="exportCsv" type="button" class="status-chip analytics-export" disabled title="Download the numbers in this window as CSV for Excel">
+                    <svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#download"></use></svg> Export CSV
+                </button>
             </div>
         </div>
 
