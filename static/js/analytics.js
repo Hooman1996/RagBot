@@ -345,6 +345,7 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
 <style>${rules.join("\n")}
+html, body { height: auto !important; overflow: visible !important; }
 .analytics-page { height: auto !important; overflow: visible !important; }
 .chart-card img { display: block; width: 100%; height: auto; }
 .snapshot-header { padding: 20px 24px 0; }

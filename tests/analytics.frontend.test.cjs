@@ -352,6 +352,7 @@ test('snapshot is a self-contained offline copy of the rendered dashboard', asyn
   for (const banned of ['<canvas', '<svg', '<script', 'http://', 'https://', 'id="analyticsStatus"'])
     assert.equal(html.includes(banned), false, banned);
   assert.ok(html.includes('.kpi-card { color: red; }'));
+  assert.ok(html.indexOf('html, body { height: auto !important; overflow: visible !important; }') > html.indexOf('.kpi-card { color: red; }'));
   assert.equal(html.includes('@font-face'), false);
   assert.ok(html.includes('RagBot analytics – 7 days (UTC)'));
   assert.ok(html.includes('<body class="light-mode">'));
