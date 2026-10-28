@@ -6,7 +6,7 @@ import re
 
 PERMISSIONS = frozenset({
     "chat", "sessions", "feedback", "downloads", "documents", "ocr",
-    "analytics", "kb_page", "kb_read", "kb_write", "batch", "system",
+    "analytics", "kb_page", "kb_read", "kb_write", "batch", "system", "users_manage",
 })
 
 USER_PERMISSIONS = frozenset({
@@ -59,6 +59,8 @@ def landing_for(role: str | None) -> str:
 # Each entry is (HTTP method, full path regex, permission). Unknown routes
 # remain unclassified and are denied by the browser middleware.
 ROUTES = (
+    ("GET", r"/admin/users", "users_manage"),
+    ("POST", r"/api/admin/users", "users_manage"),
     ("GET", r"/knowledge-coverage", "coverage_results_view"),
     ("GET", r"/api/knowledge-coverage/documents", "coverage_run_start"),
     ("POST", r"/api/knowledge-coverage/checks", "coverage_run_start"),

@@ -1,0 +1,57 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+<head>
+    <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+    <title>Users · Negah Bank AI</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
+    {% for css in ['css/base.css','css/app.css','css/web_controls.css','css/admin_users.css'] %}
+    <link rel="stylesheet" href="{{ versioned_asset(request, css) }}" integrity="{{ asset_integrity(css) }}" crossorigin="anonymous">
+    {% endfor %}
+    <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
+</head>
+<body class="users-workspace">
+<div class="app-shell">
+    <aside class="sidebar" aria-label="Main navigation">
+        <div class="sidebar__brand"><div class="sidebar__logo">N</div><div class="sidebar__brand-text"><div class="sidebar__brand-name" data-i18n="brand_name">Negah Bank AI</div><div class="sidebar__brand-sub" data-i18n="brand_sub">RAG Platform</div></div></div>
+        <nav class="sidebar__nav">
+            {% for permission, path, icon, key, label in [('chat','/app','chat','nav_chat','Chat'), ('kb_page','/knowledge-base','knowledge','nav_knowledge','Knowledge'), ('analytics','/analytics','analytics','nav_analytics','Analytics')] %}
+            {% if permission in permissions %}<a href="{{ path }}" class="sidebar__nav-item"><svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#{{ icon }}"></use></svg><span data-i18n="{{ key }}">{{ label }}</span></a>{% endif %}
+            {% endfor %}
+            {% set users_active = true %}{% include "_users_nav_link.html" %}
+            {% include "_coverage_nav_link.html" %}
+        </nav>
+    </aside>
+    <main class="main-content">
+        <header class="topbar"><div class="topbar__title" data-i18n="nav_users">Users</div><div class="topbar__actions"><div class="web-header-controls">
+            {% set logout_label = 'Log out' %}{% set logout_localized = true %}{% include "_logout_button.html" %}
+            <button id="usersTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode"><svg aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#moon"></use></svg></button>
+            <div class="lang-toggle-container"><button class="lang-option" type="button" data-lang="fa">FA</button><span class="lang-separator">|</span><button class="lang-option" type="button" data-lang="en">EN</button></div>
+        </div></div></header>
+        <div class="users-page">
+            <section class="users-card" aria-labelledby="usersTitle">
+                <h1 id="usersTitle" data-i18n="users_add">Add user</h1>
+                <p class="users-hint" data-i18n="users_hint">Create an account with access defined by its role.</p>
+                <p id="usersStatus" role="status" aria-live="polite" tabindex="-1" hidden></p>
+                <p id="usersError" class="users-error" role="alert" tabindex="-1" hidden></p>
+                <form id="usersForm" method="post" action="/api/admin/users" novalidate>
+                    <div class="users-grid">
+                        {% for name, label, kind, maximum, autocomplete, direction in [('username','Username','text',100,'off','ltr'), ('email','Email','email',255,'off','ltr'), ('full_name','Full name','text',255,'off','auto')] %}
+                        <div class="users-field"><label for="user-{{ name }}" data-i18n="users_{{ name }}">{{ label }}</label><input id="user-{{ name }}" name="{{ name }}" type="{{ kind }}" maxlength="{{ maximum }}" autocomplete="{{ autocomplete }}" dir="{{ direction }}" required aria-describedby="error-{{ name }}"><span id="error-{{ name }}" class="users-field-error" hidden></span></div>
+                        {% endfor %}
+                        <div class="users-field"><label for="user-role" data-i18n="users_role">Role</label><select id="user-role" name="role" required aria-describedby="error-role" dir="ltr">{% for role in roles %}<option value="{{ role }}"{% if role == 'user' %} selected{% endif %}>{{ role }}</option>{% endfor %}</select><span id="error-role" class="users-field-error" hidden></span></div>
+                        {% for name, label in [('password','Password'), ('confirm_password','Confirm password')] %}
+                        <div class="users-field"><label for="user-{{ name }}" data-i18n="users_{{ name }}">{{ label }}</label><input id="user-{{ name }}" name="{{ name }}" type="password" autocomplete="new-password" dir="auto" required aria-describedby="error-{{ name }}{% if name == 'password' %} usersPasswordHint{% endif %}"><span id="error-{{ name }}" class="users-field-error" hidden></span></div>
+                        {% endfor %}
+                    </div>
+                    <p id="usersPasswordHint" class="users-hint" data-i18n="users_password_hint">Use a nonempty password of at most 72 UTF-8 bytes, without NUL.</p>
+                    <button id="usersSubmit" class="users-primary" type="submit" data-i18n="users_add">Add user</button>
+                </form>
+            </section>
+        </div>
+    </main>
+</div>
+<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
+<script src="{{ versioned_asset(request, 'js/admin_users.js') }}" integrity="{{ asset_integrity('js/admin_users.js') }}" crossorigin="anonymous"></script>
+</body>
+</html>

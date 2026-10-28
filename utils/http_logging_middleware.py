@@ -41,6 +41,8 @@ def route_log_policy(path: str) -> RouteLogPolicy:
     """Central policy; it has no effect on routing or authentication."""
     if path == "/static" or path.startswith("/static/"):
         return RouteLogPolicy(False, False, False)
+    if path in {"/admin/users", "/api/admin/users"}:
+        return RouteLogPolicy(True, False, False)
     if path == "/knowledge-coverage" or path.startswith("/api/knowledge-coverage/"):
         return RouteLogPolicy(True, False, False)
     if path in {"/", "/app", "/analytics", "/api/health", "/docs",

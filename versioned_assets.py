@@ -24,6 +24,7 @@ VERSIONED_ASSETS = frozenset({
     "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/app.js",
     "js/kb_manager.js",
     "css/knowledge_coverage.css", "js/knowledge_coverage.js",
+    "css/admin_users.css", "js/admin_users.js",
 })
 _DIGEST = re.compile(r"[0-9a-f]{64}\Z")
 

@@ -10,12 +10,9 @@ from __future__ import annotations
 
 import argparse
 import getpass
-import hmac
 from pathlib import Path
-import re
 import sys
 from datetime import datetime, timezone
-from uuid import uuid4
 
 from dotenv import dotenv_values
 
@@ -23,10 +20,11 @@ ROOT = Path(__file__).resolve().parents[1]
 ENV_FILE = ROOT / '.env'
 sys.path.insert(0, str(ROOT))
 from web_permissions import ROLE_PERMISSIONS, landing_for  # noqa: E402
-
-
-class CliError(Exception):
-    """An operator-safe error message (never contains credentials)."""
+from web_user_accounts import (  # noqa: E402
+    AccountError as CliError, validate_text, validate_username, validate_email,
+    validate_password, confirm_password, hash_password, check_duplicate,
+    duplicate_error, insert_account,
+)
 
 
 class SafeParser(argparse.ArgumentParser):
@@ -64,43 +62,10 @@ def build_parser():
     return parser
 
 
-def validate_text(value, label, maximum, *, spaces=False):
-    if not value or value != value.strip() or len(value) > maximum or any(ord(c) < 32 or ord(c) == 127 for c in value):
-        raise CliError(f'{label} must be nonempty, trimmed, free of control characters, and at most {maximum} characters.')
-    if not spaces and any(c.isspace() for c in value):
-        raise CliError(f'{label} cannot contain whitespace.')
-    return value
-
-
-def validate_username(value):
-    return validate_text(value, 'Username', 100)
-
-
-def validate_email(value):
-    validate_text(value, 'Email', 255)
-    if not re.fullmatch(r'[^@\s]+@[^@\s]+\.[^@\s]+', value):
-        raise CliError('Email must have one address and domain.')
-    return value
-
-
-def validate_password(value):
-    # bcrypt checks only the first 72 UTF-8 bytes on supported versions.
-    if not value or len(value.encode('utf-8')) > 72 or '\x00' in value:
-        raise CliError('Password must be nonempty and at most 72 UTF-8 bytes, without NUL.')
-    return value
-
-
 def prompt_password():
     first = getpass.getpass('New password: ')
     second = getpass.getpass('Repeat password: ')
-    if not hmac.compare_digest(first, second):
-        raise CliError('Password entries do not match.')
-    return validate_password(first)
-
-
-def hash_password(password):
-    import bcrypt
-    return bcrypt.hashpw(password.encode('utf-8'), bcrypt.gensalt()).decode('ascii')
+    return confirm_password(first, second)
 
 
 def load_config(path=None):
@@ -182,28 +147,6 @@ def print_account(row):
     print(f'ID: {user_id}; username: {username}; active: {active}; role: {role}; permissions: {permissions}')
 
 
-def check_duplicate(conn, username, email):
-    with conn.cursor() as cursor:
-        cursor.execute('SELECT username, email FROM users WHERE username = %s OR email = %s',
-                       (username, email))
-        rows = cursor.fetchall()
-    if any(row[0] == username for row in rows):
-        raise CliError('Username already exists.')
-    if any(row[1] == email for row in rows):
-        raise CliError('Email already exists.')
-
-
-def duplicate_error(exc):
-    if getattr(exc, 'pgcode', None) != '23505':
-        return None
-    constraint = getattr(getattr(exc, 'diag', None), 'constraint_name', '') or ''
-    if 'username' in constraint:
-        return CliError('Username already exists.')
-    if 'email' in constraint:
-        return CliError('Email already exists.')
-    return CliError('Account conflicts with an existing record.')
-
-
 def run_database_command(args):
     username = validate_username(args.username) if args.command != 'users' else None
     if args.command == 'users' and not 1 <= args.limit <= 500:
@@ -252,16 +195,9 @@ def run_database_command(args):
             raise CliError('Connected PostgreSQL target changed since preview; retry from the beginning.')
         if args.command == 'create':
             check_duplicate(conn, username, args.email)
-            now = datetime.now(timezone.utc).replace(tzinfo=None)
-            with conn.cursor() as cursor:
-                cursor.execute('''INSERT INTO users
-                    (uuid, email, username, password_hash, full_name, role,
-                     is_active, is_verified, settings, created_at, updated_at)
-                    VALUES (%s, %s, %s, %s, %s, %s, TRUE, FALSE, %s::jsonb, %s, %s)
-                    RETURNING id''',
-                    (str(uuid4()), args.email, username, password_hash, args.full_name,
-                     args.role, '{}', now, now))
-                created_id = cursor.fetchone()[0]
+            created_id = insert_account(conn, username=username, email=args.email,
+                                        full_name=args.full_name, role=args.role,
+                                        password_hash=password_hash)['id']
             conn.commit()
             print(f'Created account ID {created_id}; role={args.role}.')
         else:

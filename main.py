@@ -69,13 +69,15 @@ from utils.structured_logging import log_event, start_logging
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
-from web_permissions import permissions_for, permissions_for_user
+from web_permissions import ROLE_PERMISSIONS, permissions_for, permissions_for_user
 from coverage_check import api as coverage_check_api
 from coverage_check.settings import coverage_enabled as coverage_check_enabled
 from coverage_check.settings import load_settings as load_coverage_check_settings
 from web_auth import (WebUser, current_web_user, create_session as create_web_session,
                       set_cookies, clear_cookies, web_auth_middleware, safe_user,
                       validate_config, job_access_token, valid_job_access)
+from web_user_accounts import (AccountValidationError, DuplicateAccountError,
+                               validate_creation, create_browser_account)
 from document_category import get_document_category
 
 class Config:
@@ -640,6 +642,33 @@ async def analytics_page(request: Request):
                                                           "analytics_contract_version": ANALYTICS_CONTRACT_VERSION},
                                       headers={"Cache-Control": "private, no-store, max-age=0",
                                                "Pragma": "no-cache", "Vary": "Cookie"})
+
+
+@app.get("/admin/users", response_class=HTMLResponse)
+async def admin_users_page(request: Request, user: WebUser):
+    return templates.TemplateResponse(request=request, name="admin_users.html", context={
+        "permissions": permissions_for_user(user.role, user.id),
+        "roles": sorted(ROLE_PERMISSIONS),
+    }, headers={"Cache-Control": "no-store"})
+
+
+@app.post("/api/admin/users", status_code=201)
+async def admin_create_user(request: Request, user: WebUser):
+    try:
+        data = validate_creation(await request.json())
+    except AccountValidationError as exc:
+        return JSONResponse({"detail": "Invalid account fields", "errors": {
+            exc.field: exc.code}}, status_code=422, headers={"Cache-Control": "no-store"})
+    except (ValueError, UnicodeError):
+        return JSONResponse({"detail": "Invalid account fields", "errors": {"form": "fields"}},
+                            status_code=422, headers={"Cache-Control": "no-store"})
+    try:
+        account = await blocking_runner.run(create_browser_account, db_manager, data,
+                                           wait_for_completion_on_cancel=True)
+    except DuplicateAccountError as exc:
+        return JSONResponse({"detail": "Account already exists", "errors": {
+            exc.field or "form": "duplicate"}}, status_code=409, headers={"Cache-Control": "no-store"})
+    return JSONResponse({"user": account}, status_code=201, headers={"Cache-Control": "no-store"})
 
 
 @app.get("/access-denied", response_class=HTMLResponse)

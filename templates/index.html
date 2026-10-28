@@ -39,6 +39,7 @@
                 <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#analytics"></use></svg>
                 <span data-i18n="nav_analytics">Analytics</span>
             </a>{% endif %}
+            {% include "_users_nav_link.html" %}
             {% include "_coverage_nav_link.html" %}
         </div>
 

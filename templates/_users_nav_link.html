@@ -1,0 +1,6 @@
+{% if 'users_manage' in permissions %}
+<a href="/admin/users" class="sidebar__nav-item{% if users_active %} active{% endif %}"{% if users_active %} aria-current="page"{% endif %}>
+    <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#users"></use></svg>
+    <span data-i18n="nav_users">Users</span>
+</a>
+{% endif %}

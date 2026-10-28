@@ -12,7 +12,8 @@ stage='node frontend tests'
 node tests/knowledge_coverage.frontend.test.cjs
 node tests/kb_manager.frontend.test.cjs
 node tests/analytics.frontend.test.cjs
-printf 'node frontend tests: PASS (3 harnesses)\n'
+node tests/admin_users.frontend.test.cjs
+printf 'node frontend tests: PASS (4 harnesses)\n'
 
 stage='offline frontend audit'
 python scripts/audit_offline_frontend.py

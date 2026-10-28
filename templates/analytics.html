@@ -40,6 +40,7 @@
                 <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#analytics"></use></svg>
                 <span>Analytics</span>
             </a>
+            {% include "_users_nav_link.html" %}
             {% include "_coverage_nav_link.html" %}
         </div>
 
@@ -168,5 +169,6 @@
     }
   })();
 </script>
+<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

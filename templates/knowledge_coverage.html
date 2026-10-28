@@ -20,6 +20,7 @@
             {% if 'chat' in permissions %}<a href="/app" class="sidebar__nav-item">Chat</a>{% endif %}
             {% if 'kb_page' in permissions %}<a href="/knowledge-base/" class="sidebar__nav-item">Knowledge base</a>{% endif %}
             {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">Analytics</a>{% endif %}
+            {% include "_users_nav_link.html" %}
             {% set coverage_active = true %}{% include "_coverage_nav_link.html" %}
         </nav>
     </aside>
@@ -83,5 +84,6 @@
     </main>
 </div>
 <script src="{{ versioned_asset(request, 'js/knowledge_coverage.js') }}" integrity="{{ asset_integrity('js/knowledge_coverage.js') }}" crossorigin="anonymous"></script>
+<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

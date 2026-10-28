@@ -197,8 +197,8 @@ async def web_auth_middleware(request: Request, call_next, db):
     row = await run_in_threadpool(db.get_web_user_by_id, payload["uid"]) if payload else None
     if row is None or not row["is_active"]:
         if not path.startswith("/api/") and not path.startswith("/knowledge-base/api/"):
-            return RedirectResponse("/", status_code=303)
-        return JSONResponse({"detail": "Not authenticated"}, status_code=401)
+            return RedirectResponse("/", status_code=303, headers={"Cache-Control": "no-store"})
+        return JSONResponse({"detail": "Not authenticated"}, status_code=401, headers={"Cache-Control": "no-store"})
     request.state.web_user = CurrentWebUser(
         row["id"], row["username"], row.get("full_name"), row.get("role")
     )
@@ -221,10 +221,10 @@ async def web_auth_middleware(request: Request, call_next, db):
         if not (csrf and header and len(header) <= 128 and header.isascii()
                 and hmac.compare_digest(csrf, expected)
                 and hmac.compare_digest(header, expected)):
-            return JSONResponse({"detail": "CSRF validation failed"}, status_code=403)
+            return JSONResponse({"detail": "CSRF validation failed"}, status_code=403, headers={"Cache-Control": "no-store"})
         origin = request.headers.get("origin")
         if origin and origin != os.environ["WEB_PUBLIC_ORIGIN"]:
-            return JSONResponse({"detail": "Invalid origin"}, status_code=403)
+            return JSONResponse({"detail": "Invalid origin"}, status_code=403, headers={"Cache-Control": "no-store"})
     response = await call_next(request)
     response.headers["Cache-Control"] = "no-store"
     return response
