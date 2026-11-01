@@ -206,7 +206,7 @@ class HistoryRewritingService:
 
         return summary, history_prompt_string, meta
 
-    async def rewrite_query(self, current_query: str, current_summary: str) -> str:
+    async def rewrite_query(self, current_query: str, current_summary: str, *, platform_context=None) -> str:
         started = time.perf_counter()
         current_query = normalize_persian_text(current_query)
         if not current_summary or current_summary == "[بدون مکالمه قبلی]":

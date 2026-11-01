@@ -132,7 +132,9 @@ def numbers(ids, wanted):
 
 # Same path as chat ----------------------------------------------------
 
-def test_same_normalization_intent_input_and_retrieval_query_as_chat():
+def test_same_normalization_intent_input_and_retrieval_query_as_chat(monkeypatch):
+    from platform_context import SOURCE_PLATFORMS
+    monkeypatch.setitem(SOURCE_PLATFORMS, "Synthetic_FAQ", "hibank")
     rag = Rag(judge=lambda kind, ids, call: {"verdict": "complete", "chunk_numbers": [1], "note": ""})
     result, service = check(rag)
     assert result["result"] == "answered"

@@ -204,3 +204,7 @@ KNOWLEDGE_COVERAGE_MODEL_MAX_TOKENS=300
 KNOWLEDGE_COVERAGE_SUGGEST_CONTEXT=5
 # Output tokens per suggestion; integer 128–2048.
 KNOWLEDGE_COVERAGE_SUGGEST_MAX_TOKENS=700
+
+# Chat platform: hibank (default), negahboom (fixed instance), or auto (shared dev).
+# Shared localhost:7000 development: set CHATBOT_PLATFORM=auto.
+CHATBOT_PLATFORM=hibank

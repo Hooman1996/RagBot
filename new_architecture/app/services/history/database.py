@@ -9,6 +9,7 @@ import uuid
 import os
 from dotenv import load_dotenv
 from utils.service_errors import ServiceError, ServiceUnavailableError
+from platform_context import resolve_platform
 
 # Load variables from .env into os.environ
 load_dotenv()
@@ -356,8 +357,9 @@ class DatabaseManager:
 
     def create_session(self, user_id: int, title: str = "New Chat",
                        model_name: str = None,
-                       temperature: float = 0.7) -> dict | None:
+                       temperature: float = 0.7, platform_context=None) -> dict | None:
         import uuid as _uuid
+        context = resolve_platform(header=platform_context.platform if platform_context else None)
         now = datetime.utcnow()
         return self._execute("""
         INSERT INTO chat_sessions (
@@ -368,7 +370,7 @@ class DatabaseManager:
         ) VALUES (
             %s, %s, %s, %s, %s,
             '{}', 0, 0,
-            'active', FALSE, '{}',
+            'active', FALSE, %s,
             %s, %s, %s
         )
         RETURNING id, uuid, user_id, title, model_name, temperature,
@@ -377,6 +379,7 @@ class DatabaseManager:
                   created_at, updated_at, last_activity_at;
         """, (
             str(_uuid.uuid4()), user_id, title, model_name, temperature,
+            json.dumps({"chatbot_platform": context.platform}),
             now, now, now,
         ), fetch="one")
 
@@ -384,6 +387,12 @@ class DatabaseManager:
         return self._execute(
             "SELECT * FROM chat_sessions WHERE id = %s",
             (session_id,), fetch="one"
+        )
+
+    def get_query_session(self, query_id: int) -> dict | None:
+        return self._execute(
+            "SELECT s.* FROM chat_sessions s JOIN queries q ON q.chat_session_id = s.id WHERE q.id = %s",
+            (query_id,), fetch="one",
         )
 
     def query_owned_by_user(self, query_id: int, user_id: int) -> bool:
@@ -817,10 +826,14 @@ class DatabaseManager:
         return meta
 
     def update_session_metadata(self, session_id: int, metadata: dict) -> None:
-        """Overwrite the meta_data JSON column."""
+        """Merge metadata atomically; the stored platform binding is immutable."""
         now = datetime.utcnow()
         self._execute(
-            "UPDATE chat_sessions SET meta_data = %s, updated_at = %s WHERE id = %s",
+            """UPDATE chat_sessions SET meta_data = (
+                COALESCE(meta_data::jsonb, '{}'::jsonb) || %s::jsonb ||
+                jsonb_build_object('chatbot_platform',
+                    COALESCE(meta_data::jsonb->>'chatbot_platform', 'hibank'))
+            )::json, updated_at = %s WHERE id = %s""",
             (json.dumps(metadata, ensure_ascii=False), now, session_id)
         )
 
@@ -839,13 +852,14 @@ class DatabaseManager:
 
     def get_or_create_mobile_session(
             self, user_id: int, session_uuid: str,
-            require_active: bool = True) -> dict:
+            require_active: bool = True, platform_context=None) -> dict:
         """Resolve and authorize a mobile UUID, creating it if it is unbound."""
         existing = self.get_session_by_uuid(session_uuid)
         if existing:
-            return self._validate_mobile_session(
-                existing, user_id, require_active=require_active
-            )
+            self._validate_mobile_session(existing, user_id, require_active=require_active)
+            resolve_platform(header=platform_context.platform if platform_context else None, session=existing)
+            return existing
+        context = resolve_platform(header=platform_context.platform if platform_context else None)
 
         # The UUID constraint makes first-user binding safe across workers.
         now = datetime.utcnow()
@@ -856,18 +870,21 @@ class DatabaseManager:
                                                            created_at, updated_at, last_activity_at)
                                 VALUES (%s, %s, %s, NULL, 0.7,
                                         '{}', 0, 0,
-                                        'active', FALSE, '{}',
+                                        'active', FALSE, %s,
                                         %s, %s, %s)
                                 ON CONFLICT (uuid) DO NOTHING
                                 RETURNING *;
-                                """, (session_uuid, user_id, "Mobile App Chat", now, now, now), fetch="one")
+                                """, (session_uuid, user_id, "Mobile App Chat", json.dumps({"chatbot_platform": context.platform}), now, now, now), fetch="one")
         if created:
             return self._validate_mobile_session(
                 created, user_id, require_active=require_active
             )
 
-        # Another transaction won the UUID race. It is authoritative.
+        # Another transaction won the UUID race. Its binding is authoritative.
         existing = self.get_session_by_uuid(session_uuid)
+        if existing:
+            self._validate_mobile_session(existing, user_id, require_active=require_active)
+            resolve_platform(header=context.platform, session=existing)
         return self._validate_mobile_session(
             existing, user_id, require_active=require_active
         )
@@ -899,8 +916,8 @@ class ChatManager:
 
     def create_new_chat(self, user_id: int, title: str = "New Chat",
                         model_name: str = None,
-                        temperature: float = 0.7) -> dict:
-        row = self.db.create_session(user_id, title, model_name, temperature)
+                        temperature: float = 0.7, platform_context=None) -> dict:
+        row = self.db.create_session(user_id, title, model_name, temperature, platform_context=platform_context)
         if not row:
             raise RuntimeError("Failed to create chat session")
         return self._format_session(row)
@@ -1015,16 +1032,16 @@ class ChatManager:
 
     def resolve_mobile_session(
             self, user_id: int, session_uuid: str,
-            require_active: bool = True) -> str:
+            require_active: bool = True, platform_context=None) -> str:
         """Returns the internal integer ID (as a string) based on the mobile UUID."""
         if not session_uuid:
             raise ValueError("Mobile sessionID cannot be empty")
 
         if require_active:
-            row = self.db.get_or_create_mobile_session(user_id, session_uuid)
+            row = self.db.get_or_create_mobile_session(user_id, session_uuid, platform_context=platform_context)
         else:
             row = self.db.get_or_create_mobile_session(
-                user_id, session_uuid, require_active=False
+                user_id, session_uuid, require_active=False, platform_context=platform_context
             )
         return str(row["id"])
 

@@ -109,6 +109,7 @@ class RequestContextParityTests(unittest.IsolatedAsyncioTestCase):
             documents=["FAQ", "Cards"],
         )
         request = SimpleNamespace(
+            headers={},
             app=SimpleNamespace(state=SimpleNamespace(answering_service=service))
         )
 

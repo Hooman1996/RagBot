@@ -477,3 +477,14 @@ def test_unavailable_server_address_uses_configured_host_and_server_port(environ
     assert call('set-role', '--username', 'testuser', '--role', 'dashboard_viewer', '--apply') == 0
     assert 'server unavailable:5432' in capsys.readouterr().out
     assert conn.commits == 1
+
+
+def test_unicode_password_confirmation_uses_exact_utf8(monkeypatch):
+    answers = iter(['رمز🔑é', 'رمز🔑é'])
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda label: next(answers))
+    password = cli.prompt_password()
+    assert bcrypt.checkpw(password.encode(), cli.hash_password(password).encode())
+    answers = iter(['é', 'e\u0301'])
+    monkeypatch.setattr(cli.getpass, 'getpass', lambda label: next(answers))
+    with pytest.raises(cli.CliError, match='do not match'):
+        cli.prompt_password()

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from answering_service import AnswerRequestContext, AnsweringService
+from platform_context import PlatformContext
 from conversation_history import NO_CONVERSATION_HISTORY
 from pipeline_observer import (
     PipelineStage,
@@ -235,6 +236,7 @@ class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             rewriter.rewrite_calls,
             [{
+                "platform_context": PlatformContext("hibank"),
                 "current_query": "انقضا چی",
                 "current_summary": (
                     "User: cvv2 کارتمو چجوری ببینم؟\n"
@@ -413,16 +415,16 @@ class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_selection_validator_passes_only_current_documents(self):
         service = self.make_service(
-            selection_validator=lambda _documents: ["current"]
+            selection_validator=lambda _documents: ["قرارداد جاری"]
         )
         await service.answer(
             AnswerRequestContext(
                 original_query="knowledge question",
-                selected_documents=("General_FAQ", "current"),
+                selected_documents=("General_FAQ", "قرارداد جاری"),
                 session_id="12",
             )
         )
-        self.assertEqual(self.agent.persisted[0]["selected_docs"], ["current"])
+        self.assertEqual(self.agent.persisted[0]["selected_docs"], ["قرارداد جاری"])
 
     async def test_online_and_batch_feed_equivalent_fresh_turn_inputs_to_graph(self):
         service = self.make_service()

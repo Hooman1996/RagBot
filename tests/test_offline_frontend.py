@@ -24,12 +24,14 @@ from starlette.templating import Jinja2Templates
 
 from frontend_paths import PROJECT_DIR, STATIC_DIR, TEMPLATE_DIR
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION
+from web_permissions import ROLE_PERMISSIONS, COVERAGE_ROLE_CAPABILITIES
 from versioned_assets import VERSIONED_ASSETS, VersionedStaticFiles, asset_digest, asset_integrity, vendor_integrity, versioned_asset
 
 
 AUDIT_SCRIPT = PROJECT_DIR / "scripts" / "audit_offline_frontend.py"
 TEMPLATE_PATHS = {
     "login.html": "/",
+    "admin_users.html": "/admin/users",
     "index.html": "/app",
     "analytics.html": "/analytics",
     "kb_manager.html": "/knowledge-base/",
@@ -96,7 +98,9 @@ def _render_templates() -> dict[str, str]:
         }
         request = Request(scope)
         rendered[name] = templates.get_template(name).render(
-            request=request, analytics_contract_version=ANALYTICS_CONTRACT_VERSION)
+            request=request, analytics_contract_version=ANALYTICS_CONTRACT_VERSION,
+            permissions=ROLE_PERMISSIONS['admin'] | COVERAGE_ROLE_CAPABILITIES['admin'],
+            roles=sorted(ROLE_PERMISSIONS))
     return rendered
 
 

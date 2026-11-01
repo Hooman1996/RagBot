@@ -29,6 +29,8 @@ pytestmark = pytest.mark.usefixtures("coverage_staging")
 
 # Independent expected inventory: method and FastAPI route path -> grant.
 EXPECTED = {
+    ('GET', '/admin/users'): 'users_manage',
+    ('POST', '/api/admin/users'): 'users_manage',
     ('GET', '/knowledge-coverage'): 'coverage_results_view',
     ('GET', '/api/knowledge-coverage/documents'): 'coverage_run_start',
     ('POST', '/api/knowledge-coverage/checks'): 'coverage_run_start',

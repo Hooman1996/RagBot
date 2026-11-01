@@ -41,6 +41,7 @@ from utils.faq_fallback import FAQ_FALLBACK_FRAGMENT
 
 # ---------- State definition ----------
 class AgentState(TypedDict):
+    platform: str
     # messages: Annotated[List[Dict[str, str]], operator.add]
     messages: List[Dict[str, str]]
     latest_user_input: str

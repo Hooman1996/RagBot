@@ -301,6 +301,12 @@ class ImmediateRunner:
 
 
 class GatewayDatabase:
+    _validate_mobile_session = staticmethod(database_module.DatabaseManager._validate_mobile_session)
+
+    @staticmethod
+    def get_session_by_uuid(_session_uuid):
+        return session_row(12)
+
     @staticmethod
     def get_or_create_user_by_national_code(_national_code):
         return {"id": 7}
@@ -337,7 +343,7 @@ class GatewayChatManager:
 
     @staticmethod
     def resolve_mobile_session(
-            user_id, session_id, require_active=True):
+            user_id, session_id, require_active=True, platform_context=None):
         if user_id != 7 or session_id != "mobile-uuid":
             raise AssertionError("mobile session resolution changed")
         if require_active:
@@ -366,7 +372,7 @@ def request_with(chat_manager, answering_service=None):
         blocking_runner=ImmediateRunner(),
         request_limiter=object(),
     )
-    return SimpleNamespace(app=SimpleNamespace(state=state))
+    return SimpleNamespace(app=SimpleNamespace(state=state), headers={})
 
 
 class MobileHistoryContentApiTests(unittest.IsolatedAsyncioTestCase):
@@ -450,7 +456,7 @@ class MobileTalkSessionIdTests(unittest.IsolatedAsyncioTestCase):
                 self.resolved_session_ids = []
                 self.messages = []
 
-            def resolve_mobile_session(self, user_id, session_id):
+            def resolve_mobile_session(self, user_id, session_id, platform_context=None):
                 self.resolved_session_ids.append((user_id, session_id))
                 return "12"
 
@@ -619,7 +625,7 @@ class MobileSessionAuthorizationTests(unittest.TestCase):
 class MobileAuthorizationApiTests(unittest.IsolatedAsyncioTestCase):
     async def assert_talk_denied_before_pipeline(self, existing_session):
         chat_manager = database_module.ChatManager(
-            ScriptedMobileSessionDatabase([existing_session])
+            ScriptedMobileSessionDatabase([existing_session, existing_session])
         )
         chat_manager.add_message = Mock()
         chat_manager.get_messages = Mock()
@@ -654,7 +660,7 @@ class MobileAuthorizationApiTests(unittest.IsolatedAsyncioTestCase):
 
     async def test_specific_history_wrong_owner_returns_no_messages(self):
         chat_manager = database_module.ChatManager(
-            ScriptedMobileSessionDatabase([session_row(12, user_id=25)])
+            ScriptedMobileSessionDatabase([session_row(12, user_id=25)] * 2)
         )
         chat_manager.get_messages = Mock()
 
@@ -670,6 +676,9 @@ class MobileAuthorizationApiTests(unittest.IsolatedAsyncioTestCase):
 
 
 class StatefulCloseDatabase(database_module.DatabaseManager):
+    def get_session_by_uuid(self, session_uuid):
+        return dict(self.row) if self.row["uuid"] == session_uuid else None
+
     def __init__(self, row):
         self.row = dict(row)
         self.executions = []

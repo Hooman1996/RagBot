@@ -407,6 +407,7 @@ async def execute_evaluation_turn(
         result = await request.app.state.answering_service.answer(
             AnswerRequestContext(
                 original_query=payload.query,
+                platform_header=request.headers.get("X-Chatbot-Platform"),
                 selected_documents=tuple(payload.documents),
                 session_id=None,
                 conversation_key=payload.evaluation_session_key,

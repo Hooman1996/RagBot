@@ -409,8 +409,8 @@ class HealthTests(unittest.IsolatedAsyncioTestCase):
                 self.assertEqual((await client.get("/api/health/ready")).status_code, 503)
                 original = self.app.state.request_limiter.snapshot()
                 query = main.QueryRequest(query="synthetic", session_id=1, documents=[])
-                with patch.object(main, "require_owned_session", AsyncMock()), patch.object(main, "_query_documents", AsyncMock(return_value={"answer": "mocked-success"})):
-                    request = NS(app=main.app)
+                with patch.object(main, "require_owned_session", AsyncMock(return_value={"meta_data": {}})), patch.object(main, "_query_documents", AsyncMock(return_value={"answer": "mocked-success"})):
+                    request = NS(app=main.app, headers={})
                     self.assertEqual(await main.query_documents(query, request, NS(user_id=1)), {"answer": "mocked-success"})
                 self.assertTrue(self.app.state.ready)
                 self.assertEqual(self.app.state.request_limiter.capacity, original.capacity)
