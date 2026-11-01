@@ -38,6 +38,8 @@ import time
 
 
 from utils.faq_fallback import FAQ_FALLBACK_FRAGMENT
+from platform_context import PlatformContext
+from negahboom_prompts import MISSING_INFORMATION
 
 # ---------- State definition ----------
 class AgentState(TypedDict):
@@ -297,8 +299,10 @@ def make_handle_general(rag_system):
             recent_history=recent_text,
             current_summary="", tone="friendly", response_type="normal",
             enable_history=False, category=category,
+            platform_context=PlatformContext(state.get("platform", "hibank")),
         )
-        if FAQ_FALLBACK_FRAGMENT in (answer or ""):
+        fallback = MISSING_INFORMATION if state.get("platform") == "negahboom" else FAQ_FALLBACK_FRAGMENT
+        if fallback in (answer or ""):
             state["fallback_reason"] = (
                 state.get("fallback_reason") or "LLM_CONTEXT_REFUSAL"
             )
@@ -341,7 +345,8 @@ def make_handle_chitchat(rag_system):
             tone="friendly",
             response_type="normal",
             enable_history=False,
-            category="chitchat"  # Used by RAGSystem to apply a conversational prompt
+            category="chitchat",  # Used by RAGSystem to apply a conversational prompt
+            platform_context=PlatformContext(state.get("platform", "hibank")),
         )
 
         state["last_answer"] = answer

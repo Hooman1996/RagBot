@@ -307,8 +307,17 @@ class RAGSystem:
 
     async def answer(self, user_question, context, recent_history, current_summary, tone, response_type,
                max_new_tokens=None,
-               enable_history=True, category=None):
+               enable_history=True, category=None, *, platform_context=None):
 
+        # Legacy callers retain their exact Hibank path; resolved contexts select locally.
+        from negahboom_prompts import NegahBoomPrompts
+        from utils.service_errors import InvalidRequestError
+
+        prompts = Config
+        if platform_context is not None and platform_context.platform == "negahboom":
+            if category in ("ابلاغیه ها", "قرارداد ها"):
+                raise InvalidRequestError("Document workflow is not configured for NegahBoom")
+            prompts = NegahBoomPrompts
         prompt_started = time.perf_counter()
         max_new_tokens = (
             max_new_tokens or PERFORMANCE_SETTINGS.rag_max_new_tokens
@@ -326,16 +335,16 @@ class RAGSystem:
             generation_seed = PERFORMANCE_SETTINGS.rag_answer_seed
 
         if category == "chitchat":
-            system_prompt_template = Config.CHITCHAT_SYSTEM_PROMPT
-            user_prompt_template = Config.CHITCHAT_USER_PROMPT
+            system_prompt_template = prompts.CHITCHAT_SYSTEM_PROMPT
+            user_prompt_template = prompts.CHITCHAT_USER_PROMPT
             user_prompt = user_prompt_template.format(
                 current_history=recent_history,
                 question=user_question
             )
 
         elif category == "ابلاغیه ها" or category == "قرارداد ها":
-            system_prompt_template = Config.DOCUMENT_RAG_SYSTEM_PROMPT
-            user_prompt_template = Config.DOCUMENT_RAG_USER_PROMPT
+            system_prompt_template = prompts.DOCUMENT_RAG_SYSTEM_PROMPT
+            user_prompt_template = prompts.DOCUMENT_RAG_USER_PROMPT
             user_prompt = user_prompt_template.format(
                 current_context=context,
                 current_history=recent_history,
@@ -343,8 +352,8 @@ class RAGSystem:
             )
 
         else:
-            system_prompt_template = Config.GENERAL_RAG_SYSTEM_PROMPT
-            user_prompt_template = Config.GENERAL_RAG_USER_PROMPT
+            system_prompt_template = prompts.GENERAL_RAG_SYSTEM_PROMPT
+            user_prompt_template = prompts.GENERAL_RAG_USER_PROMPT
             user_prompt = user_prompt_template.format(
                 formatted_search_results=context,
                 question=user_question

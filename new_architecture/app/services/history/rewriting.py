@@ -234,7 +234,11 @@ class HistoryRewritingService:
                 duration_ms=(time.perf_counter() - started) * 1000,
             ))
             return current_query
-        rewrite_prompt = self.config.QUERY_REWRITE_PROMPT.format(
+        template = self.config.QUERY_REWRITE_PROMPT
+        if platform_context is not None and platform_context.platform == "negahboom":
+            from negahboom_prompts import NegahBoomPrompts
+            template = NegahBoomPrompts.QUERY_REWRITE_PROMPT
+        rewrite_prompt = template.format(
             current_history=current_summary, current_query=current_query
         )
         try:
