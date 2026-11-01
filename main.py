@@ -43,7 +43,6 @@ from utils.RagSystem import RAGSystem
 from intent_classifier_factory import build_intent_classifier
 from utils.health_checks import HealthCoordinator
 from agent_service import AgentService
-from platform_context import instance_platform, resolve_platform, request_header, session_platform, check_session, check_query
 from answering_service import AnsweringService, AnswerRequestContext
 from conversation_history import ProductionHistoryProvider
 from mass_answer_service import MassAnswerProcessor
@@ -222,7 +221,6 @@ async def lifespan(app: FastAPI):
 
     app.state.health_phase = "starting"
     validate_config()
-    instance_platform()  # Fail startup on invalid CHATBOT_PLATFORM.
     # An invalid coverage-check variable stops startup with its name.
     coverage_check_settings = (
         load_coverage_check_settings() if coverage_check_enabled() else None
@@ -726,11 +724,10 @@ async def get_documents():
 # ----------------------------------------------------------------------
 @app.post("/api/query")
 async def query_documents(query_req: QueryRequest, request: Request, user: WebUser):
-    row = await require_owned_session(query_req.session_id, user)
-    context = resolve_platform(documents=query_req.documents, header=request_header(request), session=row)
+    await require_owned_session(query_req.session_id, user)
     async def operation():
         async with trace_span("pipeline"):
-            return await _query_documents(query_req, platform_context=context)
+            return await _query_documents(query_req)
 
     mark_event("pre_admission_start")
     mark_event("pre_admission_end")
@@ -751,7 +748,7 @@ async def query_documents(query_req: QueryRequest, request: Request, user: WebUs
         ) from exc
 
 
-async def _query_documents(query_req: QueryRequest, platform_context=None):
+async def _query_documents(query_req: QueryRequest):
     global answering_service, chat_manager
     if agent_service is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent not initialized")
@@ -779,7 +776,6 @@ async def _query_documents(query_req: QueryRequest, platform_context=None):
     result = await answering_service.answer(
         AnswerRequestContext(
             original_query=original_query,
-            platform_context=platform_context,
             session_id=session_id,
             selected_documents=tuple(query_req.documents),
             channel="web",
@@ -860,22 +856,19 @@ async def require_owned_query(query_id, user):
 
 @app.get("/api/sessions")
 async def get_sessions(user: WebUser, request: Request):
-    context = resolve_platform(header=request_header(request))
     sessions_dict = await blocking_runner.run(
         chat_manager.get_user_sessions, user.id
     )
-    return {"sessions": [s for s in sessions_dict.values() if session_platform(s) == context.platform]}
+    return {"sessions": list(sessions_dict.values())}
 
 
 @app.post("/api/sessions")
 async def create_session(req: SessionCreateRequest, user: WebUser, request: Request):
-    context = resolve_platform(header=request_header(request))
     return await blocking_runner.run(
         chat_manager.create_new_chat,
         user.id,
         model_name="",
         temperature=0.7,
-        platform_context=context,
         wait_for_completion_on_cancel=True,
     )
 
@@ -883,7 +876,6 @@ async def create_session(req: SessionCreateRequest, user: WebUser, request: Requ
 @app.get("/api/sessions/{session_id}")
 async def get_session(session_id: str, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
-    await check_session(request, db_manager, blocking_runner, session_id)
     session = await blocking_runner.run(
         chat_manager.get_session, session_id
     )
@@ -895,7 +887,6 @@ async def get_session(session_id: str, user: WebUser, request: Request):
 @app.post("/api/sessions/{session_id}/message")
 async def add_message(session_id: str, req: MessageRequest, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
-    await check_session(request, db_manager, blocking_runner, session_id)
     msg = await blocking_runner.run(
         chat_manager.add_message,
         session_id,
@@ -911,7 +902,6 @@ async def add_message(session_id: str, req: MessageRequest, user: WebUser, reque
 @app.get("/api/sessions/{session_id}/messages")
 async def get_session_messages(session_id: str, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
-    await check_session(request, db_manager, blocking_runner, session_id)
     msgs = await blocking_runner.run(
         chat_manager.get_messages, session_id
     )
@@ -921,7 +911,6 @@ async def get_session_messages(session_id: str, user: WebUser, request: Request)
 @app.delete("/api/sessions/{session_id}")
 async def delete_session_endpoint(session_id: str, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
-    await check_session(request, db_manager, blocking_runner, session_id)
     try:
         await blocking_runner.run(
             chat_manager.delete_chat,
@@ -936,7 +925,6 @@ async def delete_session_endpoint(session_id: str, user: WebUser, request: Reque
 @app.patch("/api/sessions/{session_id}/pin")
 async def toggle_pin_session(session_id: str, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
-    await check_session(request, db_manager, blocking_runner, session_id)
     try:
         updated = await blocking_runner.run(
             chat_manager.toggle_pin,
@@ -954,7 +942,6 @@ async def toggle_pin_session(session_id: str, user: WebUser, request: Request):
 @app.get("/api/sessions/{session_id}/download")
 async def download_session_html(session_id: str, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
-    await check_session(request, db_manager, blocking_runner, session_id)
     session = await blocking_runner.run(
         chat_manager.get_session, session_id
     )
@@ -1035,7 +1022,6 @@ async def download_session_html(session_id: str, user: WebUser, request: Request
 @app.patch("/api/queries/{query_id}/feedback")
 async def submit_feedback(query_id: int, req: FeedbackRequest, user: WebUser, request: Request):
     await require_owned_query(query_id, user)
-    await check_query(request, db_manager, blocking_runner, query_id)
     result = await blocking_runner.run(
         db_manager.update_query_feedback,
         query_id,
@@ -1050,7 +1036,6 @@ async def submit_feedback(query_id: int, req: FeedbackRequest, user: WebUser, re
 @app.patch("/api/queries/{query_id}/comment")
 async def submit_comment(query_id: int, req: CommentRequest, user: WebUser, request: Request):
     await require_owned_query(query_id, user)
-    await check_query(request, db_manager, blocking_runner, query_id)
     result = await blocking_runner.run(
         db_manager.update_query_comment,
         query_id,
@@ -1066,7 +1051,6 @@ async def submit_comment(query_id: int, req: CommentRequest, user: WebUser, requ
 async def session_satisfaction(session_id: str, req: SatisfactionRequest, user: WebUser, request: Request):
     await require_owned_session(session_id, user)
     global agent_service, db_manager
-    await check_session(request, db_manager, blocking_runner, session_id)
     session_pk = int(session_id)
 
     meta = await blocking_runner.run(
@@ -1193,7 +1177,6 @@ async def process_mass_answer(
     df, question_col, docs_list, ext, filename = await _read_mass_answer_input(
         file, selected_docs
     )
-    resolve_platform(documents=docs_list, header=request_header(request))
     if len(df.index) > PERFORMANCE_SETTINGS.mass_answer_direct_max_rows:
         return await _create_mass_answer_job(
             df=df,

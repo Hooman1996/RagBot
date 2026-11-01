@@ -5,7 +5,7 @@ from types import SimpleNamespace
 from unittest import mock
 
 from answering_service import AnswerRequestContext, AnsweringService
-from platform_context import PlatformContext
+from prompt_selection import PromptContext
 from conversation_history import NO_CONVERSATION_HISTORY
 from pipeline_observer import (
     PipelineStage,
@@ -236,7 +236,7 @@ class AnsweringServiceTests(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(
             rewriter.rewrite_calls,
             [{
-                "platform_context": PlatformContext("hibank"),
+                "prompt_context": PromptContext("hibank"),
                 "current_query": "انقضا چی",
                 "current_summary": (
                     "User: cvv2 کارتمو چجوری ببینم؟\n"

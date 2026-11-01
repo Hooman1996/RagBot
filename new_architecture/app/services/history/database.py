@@ -9,7 +9,6 @@ import uuid
 import os
 from dotenv import load_dotenv
 from utils.service_errors import ServiceError, ServiceUnavailableError
-from platform_context import resolve_platform
 
 # Load variables from .env into os.environ
 load_dotenv()
@@ -357,9 +356,8 @@ class DatabaseManager:
 
     def create_session(self, user_id: int, title: str = "New Chat",
                        model_name: str = None,
-                       temperature: float = 0.7, platform_context=None) -> dict | None:
+                       temperature: float = 0.7) -> dict | None:
         import uuid as _uuid
-        context = resolve_platform(header=platform_context.platform if platform_context else None)
         now = datetime.utcnow()
         return self._execute("""
         INSERT INTO chat_sessions (
@@ -379,7 +377,7 @@ class DatabaseManager:
                   created_at, updated_at, last_activity_at;
         """, (
             str(_uuid.uuid4()), user_id, title, model_name, temperature,
-            json.dumps({"chatbot_platform": context.platform}),
+            json.dumps({}),
             now, now, now,
         ), fetch="one")
 
@@ -826,13 +824,11 @@ class DatabaseManager:
         return meta
 
     def update_session_metadata(self, session_id: int, metadata: dict) -> None:
-        """Merge metadata atomically; the stored platform binding is immutable."""
+        """Merge metadata atomically without erasing unrelated existing fields."""
         now = datetime.utcnow()
         self._execute(
             """UPDATE chat_sessions SET meta_data = (
-                COALESCE(meta_data::jsonb, '{}'::jsonb) || %s::jsonb ||
-                jsonb_build_object('chatbot_platform',
-                    COALESCE(meta_data::jsonb->>'chatbot_platform', 'hibank'))
+                COALESCE(meta_data::jsonb, '{}'::jsonb) || %s::jsonb
             )::json, updated_at = %s WHERE id = %s""",
             (json.dumps(metadata, ensure_ascii=False), now, session_id)
         )
@@ -852,14 +848,12 @@ class DatabaseManager:
 
     def get_or_create_mobile_session(
             self, user_id: int, session_uuid: str,
-            require_active: bool = True, platform_context=None) -> dict:
+            require_active: bool = True) -> dict:
         """Resolve and authorize a mobile UUID, creating it if it is unbound."""
         existing = self.get_session_by_uuid(session_uuid)
         if existing:
             self._validate_mobile_session(existing, user_id, require_active=require_active)
-            resolve_platform(header=platform_context.platform if platform_context else None, session=existing)
             return existing
-        context = resolve_platform(header=platform_context.platform if platform_context else None)
 
         # The UUID constraint makes first-user binding safe across workers.
         now = datetime.utcnow()
@@ -874,7 +868,7 @@ class DatabaseManager:
                                         %s, %s, %s)
                                 ON CONFLICT (uuid) DO NOTHING
                                 RETURNING *;
-                                """, (session_uuid, user_id, "Mobile App Chat", json.dumps({"chatbot_platform": context.platform}), now, now, now), fetch="one")
+                                """, (session_uuid, user_id, "Mobile App Chat", json.dumps({}), now, now, now), fetch="one")
         if created:
             return self._validate_mobile_session(
                 created, user_id, require_active=require_active
@@ -884,7 +878,6 @@ class DatabaseManager:
         existing = self.get_session_by_uuid(session_uuid)
         if existing:
             self._validate_mobile_session(existing, user_id, require_active=require_active)
-            resolve_platform(header=context.platform, session=existing)
         return self._validate_mobile_session(
             existing, user_id, require_active=require_active
         )
@@ -916,8 +909,8 @@ class ChatManager:
 
     def create_new_chat(self, user_id: int, title: str = "New Chat",
                         model_name: str = None,
-                        temperature: float = 0.7, platform_context=None) -> dict:
-        row = self.db.create_session(user_id, title, model_name, temperature, platform_context=platform_context)
+                        temperature: float = 0.7) -> dict:
+        row = self.db.create_session(user_id, title, model_name, temperature)
         if not row:
             raise RuntimeError("Failed to create chat session")
         return self._format_session(row)
@@ -1032,16 +1025,16 @@ class ChatManager:
 
     def resolve_mobile_session(
             self, user_id: int, session_uuid: str,
-            require_active: bool = True, platform_context=None) -> str:
+            require_active: bool = True) -> str:
         """Returns the internal integer ID (as a string) based on the mobile UUID."""
         if not session_uuid:
             raise ValueError("Mobile sessionID cannot be empty")
 
         if require_active:
-            row = self.db.get_or_create_mobile_session(user_id, session_uuid, platform_context=platform_context)
+            row = self.db.get_or_create_mobile_session(user_id, session_uuid)
         else:
             row = self.db.get_or_create_mobile_session(
-                user_id, session_uuid, require_active=False, platform_context=platform_context
+                user_id, session_uuid, require_active=False
             )
         return str(row["id"])
 

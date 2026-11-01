@@ -221,7 +221,7 @@ class CountingRewriter:
     def __init__(self, counts):
         self.counts = counts
 
-    async def rewrite_query(self, *, current_query, current_summary, platform_context=None):
+    async def rewrite_query(self, *, current_query, current_summary, prompt_context=None):
         self.counts["rewrite"] += 1
         rewritten = f"بازنویسی {current_query}"
         emit_pipeline_stage_lazy(lambda: PipelineStageResult(

@@ -206,7 +206,7 @@ class HistoryRewritingService:
 
         return summary, history_prompt_string, meta
 
-    async def rewrite_query(self, current_query: str, current_summary: str, *, platform_context=None) -> str:
+    async def rewrite_query(self, current_query: str, current_summary: str, *, prompt_context=None) -> str:
         started = time.perf_counter()
         current_query = normalize_persian_text(current_query)
         if not current_summary or current_summary == "[بدون مکالمه قبلی]":
@@ -235,9 +235,9 @@ class HistoryRewritingService:
             ))
             return current_query
         template = self.config.QUERY_REWRITE_PROMPT
-        if platform_context is not None and platform_context.platform == "negahboom":
-            from negahboom_prompts import NegahBoomPrompts
-            template = NegahBoomPrompts.QUERY_REWRITE_PROMPT
+        if prompt_context is not None:
+            from prompt_selection import prompt_templates
+            template = prompt_templates(prompt_context, fallback=self.config).QUERY_REWRITE_PROMPT
         rewrite_prompt = template.format(
             current_history=current_summary, current_query=current_query
         )

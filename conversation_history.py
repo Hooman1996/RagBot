@@ -220,6 +220,8 @@ def hydrate_agent_state(
     state = new_agent_state(actor_id)
     if isinstance(existing, dict):
         state.update(existing)
+    state.pop("platform", None)
+    state.pop("chatbot_platform", None)
     state["messages"] = canonical_history_messages(
         list(state.get("messages") or [])
     )

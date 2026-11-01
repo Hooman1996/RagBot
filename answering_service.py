@@ -7,7 +7,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Callable
 
-from platform_context import PlatformContext, resolve_platform, snapshot_session
+from prompt_selection import select_prompt_context
 from utils.request_instrumentation import trace_span
 from utils.service_errors import InvalidRequestError
 from utils.persian_normalization import normalize_persian_text, query_fingerprint
@@ -50,8 +50,6 @@ class AnswerRequestContext:
     timeout_seconds: float | None = None
     conversation_key: object | None = None
     apply_mobile_empty_answer_fallback: bool = False
-    platform_context: PlatformContext | None = None
-    platform_header: str | None = None
 
 
 @dataclass
@@ -205,27 +203,7 @@ class AnsweringService:
         )
         enforce_history_policy(provider, execution_policy)
 
-        # Ownership and session consistency must precede every history read/rewrite.
-        platform_session = None
-        if provider is not None and conversation_key is not None:
-            snapshot_loader = getattr(provider, "load_snapshot", None)
-            if callable(snapshot_loader):
-                snapshot = await snapshot_loader(conversation_key)
-                if snapshot is not None:
-                    platform_session = snapshot_session(snapshot, provider.namespace)
-        context = resolve_platform(
-            documents=request.selected_documents,
-            header=request.platform_header,
-            session=platform_session,
-        )
-        if request.platform_context is not None:
-            context = resolve_platform(
-                documents=request.selected_documents,
-                header=request.platform_context.platform,
-                session=platform_session,
-            )
-            if request.platform_header is not None and request.platform_header != context.platform:
-                raise InvalidRequestError("Conflicting chatbot platforms")
+        # Ownership is checked by the API; prompt identity depends only on this selection.
         requested_documents = list(request.selected_documents)
         if self.selection_validator is not None:
             documents = await self._timed(
@@ -242,6 +220,8 @@ class AnsweringService:
                 for document in requested_documents
                 if str(document).strip()
             ))
+
+        context = select_prompt_context(documents)
 
         history_messages: list[dict[str, str]] = []
         history = NO_CONVERSATION_HISTORY
@@ -297,7 +277,7 @@ class AnsweringService:
                     self.history_rewriting_service.rewrite_query(
                         current_query=normalized_query,
                         current_summary=history,
-                        platform_context=context,
+                        prompt_context=context,
                     ),
                 )
                 rewrite_used = True
@@ -439,7 +419,6 @@ class AnsweringService:
                 retrieval_query=final_retrieval_query,
                 preclassified_intent=intent_data,
                 doc_category=category,
-                platform_context=context,
                 history_provider=provider,
                 execution_policy=execution_policy,
             )
@@ -450,7 +429,6 @@ class AnsweringService:
                 retrieval_query=final_retrieval_query,
                 preclassified_intent=intent_data,
                 doc_category=category,
-                platform_context=context,
             )
         timings["graph"] = (time.perf_counter() - graph_started) * 1000
         timings["total"] = (time.perf_counter() - total_started) * 1000

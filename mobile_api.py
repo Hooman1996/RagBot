@@ -8,7 +8,6 @@ from psycopg2.extras import RealDictCursor
 from utils.concurrency import run_with_limit
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import ServiceError, ServiceTimeoutError
-from platform_context import resolve_platform, request_header, check_query, session_platform
 from answering_service import AnswerRequestContext
 from utils.request_instrumentation import current_trace, mark_event, trace_span
 
@@ -81,15 +80,14 @@ def get_services(request: Request):
     )
 
 
-async def mobile_platform(
-        request, chat_manager, runner, session_uuid, documents=(), *,
-        user_id, require_active=False):
+async def validate_mobile_access(
+        chat_manager, runner, session_uuid, *, user_id, require_active=False):
     row = await runner.run(chat_manager.db.get_session_by_uuid, session_uuid)
     if row is not None:
         chat_manager.db._validate_mobile_session(
             row, user_id, require_active=require_active
         )
-    return resolve_platform(documents=documents, header=request_header(request), session=row)
+    return row
 
 
 # ==========================================
@@ -143,8 +141,8 @@ async def _gateway_talk(req: TalkRequest, request: Request):
         raise HTTPException(status_code=500, detail="Database failure: Could not provision user profile.")
     user_id = user_row["id"]
 
-    context = await mobile_platform(
-        request, chat_manager, blocking_runner, req.session_id, req.documents,
+    await validate_mobile_access(
+        chat_manager, blocking_runner, req.session_id,
         user_id=user_id, require_active=True,
     )
     try:
@@ -154,7 +152,6 @@ async def _gateway_talk(req: TalkRequest, request: Request):
                 chat_manager.resolve_mobile_session,
                 user_id,
                 req.session_id,
-                platform_context=context,
                 wait_for_completion_on_cancel=True,
             )
         internal_session_id = session_obj["id"] if isinstance(session_obj, dict) else session_obj
@@ -176,7 +173,6 @@ async def _gateway_talk(req: TalkRequest, request: Request):
         result = await answering_service.answer(
             AnswerRequestContext(
                 original_query=req.query,
-                platform_context=context,
                 session_id=str(internal_session_id),
                 selected_documents=tuple(req.documents),
                 channel="mobile",
@@ -262,7 +258,6 @@ async def gateway_history(
 
     # SCENARIO A: Only national_code provided -> Return all non-deleted sessions
     if not session_id:
-        context = resolve_platform(header=request_header(request))
         sessions_dict = await blocking_runner.run(
             chat_manager.get_user_sessions, user_id, True
         )
@@ -274,7 +269,6 @@ async def gateway_history(
                 "created_at": session.get("created_at"),
             }
             for session in sessions_dict.values()
-            if session_platform(session) == context.platform
         ] if sessions_dict else []
         return {
             "national_code": national_code,
@@ -282,8 +276,8 @@ async def gateway_history(
         }
 
     # SCENARIO B: session_id is provided -> Return specific message thread
-    context = await mobile_platform(
-        request, chat_manager, blocking_runner, session_id, user_id=user_id
+    await validate_mobile_access(
+        chat_manager, blocking_runner, session_id, user_id=user_id
     )
     try:
         session_obj = await blocking_runner.run(
@@ -291,7 +285,6 @@ async def gateway_history(
             user_id,
             session_id,
             require_active=False,
-            platform_context=context,
             wait_for_completion_on_cancel=True,
         )
         internal_session_id = session_obj["id"] if isinstance(session_obj, dict) else session_obj
@@ -316,7 +309,6 @@ async def gateway_history(
 @mobile_router.post("/v1/queries/{query_id}/feedback")
 async def gateway_feedback(query_id: int, req: FeedbackRequest, request: Request):
     from main import blocking_runner, db_manager
-    await check_query(request, db_manager, blocking_runner, query_id)
     result = await blocking_runner.run(
         db_manager.update_query_feedback,
         query_id,
@@ -331,7 +323,6 @@ async def gateway_feedback(query_id: int, req: FeedbackRequest, request: Request
 @mobile_router.post("/v1/queries/{query_id}/comment")
 async def gateway_comment(query_id: int, req: CommentRequest, request: Request):
     from main import blocking_runner, db_manager
-    await check_query(request, db_manager, blocking_runner, query_id)
     result = await blocking_runner.run(
         db_manager.update_query_comment,
         query_id,
@@ -359,8 +350,8 @@ async def gateway_close_session(
             detail="Database failure: Could not provision user profile.",
         )
 
-    await mobile_platform(
-        request, chat_manager, blocking_runner, session_id, user_id=user_row["id"]
+    await validate_mobile_access(
+        chat_manager, blocking_runner, session_id, user_id=user_row["id"]
     )
     await blocking_runner.run(
         chat_manager.close_mobile_session,
@@ -384,7 +375,6 @@ async def gateway_satisfaction(session_id: str, req: SatisfactionRequest, reques
     if not session_row:
         raise HTTPException(status_code=404, detail="Session not found")
 
-    resolve_platform(header=request_header(request), session=session_row)
     internal_session_id = session_row["id"]
     user_id = session_row["user_id"]
 

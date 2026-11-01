@@ -11,7 +11,6 @@ from typing import Any, Optional
 from dataclasses import dataclass
 
 from agent_graph import build_graph, AgentState
-from platform_context import resolve_platform, snapshot_session
 from new_architecture.app.services.history.database import DatabaseManager, ChatManager
 from utils.concurrency import BoundedBlockingRunner
 from utils.request_instrumentation import trace_span
@@ -67,7 +66,6 @@ class AgentService:
         retrieval_query: Optional[str] = None,
         preclassified_intent: Optional[dict] = None,
         doc_category: Optional[str] = None,
-        platform_context=None,
         history_provider: ConversationHistoryProvider | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
     ) -> Optional[str]:
@@ -78,7 +76,6 @@ class AgentService:
             retrieval_query=retrieval_query,
             preclassified_intent=preclassified_intent,
             doc_category=doc_category,
-            platform_context=platform_context,
             history_provider=history_provider,
             execution_policy=execution_policy,
         )
@@ -92,7 +89,6 @@ class AgentService:
         retrieval_query: Optional[str] = None,
         preclassified_intent: Optional[dict] = None,
         doc_category: Optional[str] = None,
-        platform_context=None,
         history_provider: ConversationHistoryProvider | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
     ) -> AgentTurnResult:
@@ -114,7 +110,6 @@ class AgentService:
                 retrieval_query=retrieval_query,
                 preclassified_intent=preclassified_intent,
                 doc_category=doc_category,
-                platform_context=platform_context,
                 history_provider=provider,
                 execution_policy=execution_policy,
             )
@@ -127,7 +122,6 @@ class AgentService:
         retrieval_query: Optional[str] = None,
         preclassified_intent: Optional[dict] = None,
         doc_category: Optional[str] = None,
-        platform_context=None,
         history_provider: ConversationHistoryProvider | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
     ) -> AgentTurnResult:
@@ -149,12 +143,6 @@ class AgentService:
         state = hydrate_agent_state(snapshot.agent_state, user_id)
         history_before = [dict(message) for message in state["messages"]]
 
-        context = resolve_platform(
-            documents=selected_docs,
-            header=platform_context.platform if platform_context else None,
-            session=snapshot_session(snapshot, provider.namespace),
-        )
-        state["platform"] = context.platform
         state["allowed_docs"] = selected_docs
         state["doc_category"] = doc_category
 
@@ -201,7 +189,13 @@ class AgentService:
         # receive a production DatabaseManager/ChatManager write dependency.
         if execution_policy.persist_conversation_state:
             async with trace_span("persistence"):
-                await provider.save_snapshot(snapshot, final_state)
+                # Preserve opaque legacy fields without consulting or rebinding them.
+                # They never enter the graph or select a prompt bundle.
+                persisted_state = dict(final_state)
+                for key in ("platform", "chatbot_platform"):
+                    if key in (snapshot.agent_state or {}):
+                        persisted_state[key] = snapshot.agent_state[key]
+                await provider.save_snapshot(snapshot, persisted_state)
         return AgentTurnResult(
             answer=answer, state=final_state, history_before=history_before
         )
@@ -214,7 +208,6 @@ class AgentService:
         retrieval_query: Optional[str] = None,
         preclassified_intent: Optional[dict] = None,
         doc_category: Optional[str] = None,
-        platform_context=None,
     ) -> AgentTurnResult:
         """Run one isolated turn without reading or writing chat records."""
         if not user_message.strip():
@@ -222,9 +215,7 @@ class AgentService:
         documents = list(selected_docs or [])
         if doc_category is None and documents and self.category_resolver:
             doc_category = self.category_resolver(documents[0])
-        context = resolve_platform(documents=documents, header=platform_context.platform if platform_context else None)
         state = new_agent_state(None)
-        state["platform"] = context.platform
         state.update({
             "latest_user_input": user_message,
             "retrieval_query": retrieval_query or user_message,

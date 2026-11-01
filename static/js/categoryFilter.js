@@ -35,7 +35,8 @@ const CategoryFilter = {
 
             window.dispatchEvent(new Event('categoryFilterLoaded'));
         } catch (e) {
-            console.error('Failed to load categories', e);
+            if (typeof Chat !== 'undefined') Chat.showError(e);
+            else alert(API.errorMessage(e));
         }
     },
 

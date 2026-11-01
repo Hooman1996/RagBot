@@ -1,532 +1,386 @@
-"""Synthetic platform/session tests; no application services or private data."""
-
+"""Correction regressions: real handlers/graph with synthetic in-memory services."""
 import asyncio
 import copy
 import json
+import subprocess
 import threading
 from concurrent.futures import ThreadPoolExecutor
+from pathlib import Path
 from types import SimpleNamespace
+from unittest.mock import AsyncMock
 
 import pytest
+from fastapi.testclient import TestClient
 
-from answering_service import AnswerRequestContext
-from conversation_history import ConversationSnapshot
-from document_category import get_document_category
-from platform_context import (
-    PlatformContext,
-    instance_platform,
-    resolve_platform,
-    session_platform,
+import main
+from agent_service import AgentService
+from answering_service import AnsweringService, AnswerRequestContext
+from conversation_history import (
+    EVALUATION_EXECUTION_POLICY,
+    ConversationSnapshot,
 )
-from tests import test_answering_service as answering_tests
+from document_category import get_document_category
+from mixed_source_prompts import MixedSourcePrompts
+from negahboom_prompts import NegahBoomPrompts
+from new_architecture.app.config import Config
+from prompt_selection import select_prompt_context
+from tests.test_answering_service import Classifier, ImmediateRunner, Processor
 from tests.test_mobile_history_content import (
-    GatewayChatManager,
     StatefulCloseDatabase,
     database_module,
     mobile_api,
     request_with,
     session_row,
 )
-from utils.service_errors import InvalidRequestError
+from tests.test_negahboom_prompts import load_rewriter
+from tests.test_rag_answer_prompt_roles import make_rag
+from tests.test_web_auth import csrf, login, setup  # noqa: F401
+from utils.concurrency import AdmissionLimiter
+
+SOURCES = ('General_FAQ', 'NegahBoom_FAQ', 'General_FAQ')
 
 
-@pytest.fixture(autouse=True)
-def shared_mode(monkeypatch):
-    monkeypatch.setenv("CHATBOT_PLATFORM", "auto")
+class MemoryDb:
+    """Only records data locally; no database constructor or connection."""
+    def __init__(self, binding=None):
+        self.metadata = {'other': {'keep': True}}
+        if binding is not None:
+            self.metadata['chatbot_platform'] = binding
+        self.metadata['agent_state'] = {
+            'platform': binding or 'obsolete',
+            'allowed_docs': ['STALE_FAQ'],
+            'messages': [{'role': 'user', 'content': 'previous reference'},
+                         {'role': 'assistant', 'content': 'old service details'}],
+        }
+        self.messages = []
+        self.row = session_row(12, user_id=1, meta_data=self.metadata, uuid='mobile-uuid')
+
+    def get_session_by_id(self, key):
+        return self.row if int(key) == 12 else None
+
+    def get_session_metadata(self, key):
+        return copy.deepcopy(self.metadata)
+
+    def update_session_metadata(self, key, metadata):
+        self.metadata.update(copy.deepcopy(metadata))
+
+    def get_session_by_uuid(self, key):
+        return self.row if key == 'mobile-uuid' else None
+
+    def get_or_create_user_by_national_code(self, code):
+        return {'id': 1}
+
+    _validate_mobile_session = staticmethod(database_module.DatabaseManager._validate_mobile_session)
 
 
-def test_default_and_configuration(monkeypatch):
-    monkeypatch.delenv("CHATBOT_PLATFORM")
-    assert instance_platform() == "hibank"
-    assert resolve_platform().platform == "hibank"
-    monkeypatch.setenv("CHATBOT_PLATFORM", "unknown")
-    with pytest.raises(ValueError, match="CHATBOT_PLATFORM"):
-        instance_platform()
+class MemoryChats:
+    def __init__(self, db): self.db = db
+
+    def create_new_chat(self, user_id, **kwargs):
+        assert not kwargs.get('platform_context')
+        assert user_id == 1
+        return self.db.row
+
+    def resolve_mobile_session(self, user_id, uuid, require_active=True):
+        self.db._validate_mobile_session(self.db.get_session_by_uuid(uuid), user_id, require_active)
+        return '12'
+
+    def add_message(self, session_id, role, content, **kwargs):
+        assert str(session_id) == '12'
+        msg = {'id': str(len(self.db.messages) + 1), 'role': role, 'content': content, 'created_at': None}
+        self.db.messages.append(msg)
+        return msg
+
+    def get_messages(self, key): return self.db.messages
+    def get_session(self, key): return self.db.row
+
+    def get_user_sessions(self, user_id, *args):
+        return {str(n): {**self.db.row, 'id': n, 'meta_data': binding}
+                for n, binding in enumerate(({}, {'chatbot_platform': 'hibank'},
+                                               {'chatbot_platform': 'negahboom'}), 12)}
 
 
-@pytest.mark.parametrize(
-    "title,owner",
-    [
-        ("General_FAQ", "hibank"),
-        ("NegahBoom_FAQ", "negahboom"),
-        ("قرارداد نمونه", "hibank"),
-        ("ابلاغیه نمونه", "hibank"),
-    ],
-)
-def test_ownership_independent_of_category(title, owner):
-    assert resolve_platform(documents=[title]).platform == owner
-    if title.endswith("FAQ"):
-        assert get_document_category(title) == "FAQ"
+def pipeline(db):
+    rag = make_rag()
+    async def retrieve(query, top_k, allowed_docs):
+        return [SimpleNamespace(doc_id=title, score=1.0,
+                                content=f'question: synthetic\nanswer: evidence_{title}')
+                for title in allowed_docs]
+    rag.retrieve = AsyncMock(side_effect=retrieve)
+    rag.search_engine = SimpleNamespace(
+        rerank=AsyncMock(side_effect=lambda q, items, **kw: items),
+        rerank_search_results=AsyncMock(side_effect=lambda q, items, **kw: items),
+    )
+    rewriter = load_rewriter()(rag, None)
+    chats = MemoryChats(db)
+    agent = AgentService(rag, Classifier(), {}, db, chats,
+                         blocking_runner=ImmediateRunner(), category_resolver=get_document_category)
+    answerer = AnsweringService(
+        agent_service=agent, intent_classifier=Classifier(),
+        history_rewriting_service=rewriter, text_processor=Processor(),
+        blocking_runner=ImmediateRunner(), category_resolver=get_document_category,
+        selection_validator=lambda docs: [d for d in docs if d in (*SOURCES, 'New_FAQ')],
+        history_provider=agent.history_provider,
+    )
+    return chats, rag, answerer
 
 
-@pytest.mark.parametrize(
-    "kwargs",
-    [
-        {"documents": ["General_FAQ", "NegahBoom_FAQ"]},
-        {"documents": ["NegahBoom_FAQ", "General_FAQ"]},
-        {"documents": ["unknown"]},
-        {"header": "auto"},
-        {"header": "NegahBoom"},
-        {"header": ""},
-        {"documents": ["General_FAQ"], "header": "negahboom"},
-        {"header": "negahboom", "session": {"meta_data": {}}},
-        {
-            "documents": ["General_FAQ"],
-            "session": {"meta_data": {"chatbot_platform": "negahboom"}},
-        },
-    ],
-)
-def test_invalid_or_conflicting_signals(kwargs):
-    with pytest.raises(InvalidRequestError):
-        resolve_platform(**kwargs)
+@pytest.mark.parametrize('binding', [None, 'hibank', 'negahboom', 'obsolete'])
+@pytest.mark.parametrize('mode', [None, 'hibank', 'negahboom', 'auto', 'obsolete'])
+def test_real_web_session_switches_with_history_and_scoped_evidence(setup, monkeypatch, mode, binding):  # noqa: F811
+    if mode is None: monkeypatch.delenv('CHATBOT_PLATFORM', raising=False)
+    else: monkeypatch.setenv('CHATBOT_PLATFORM', mode)
+    db = MemoryDb(binding)
+    chats, rag, answerer = pipeline(db)
+    monkeypatch.setattr(main, 'db_manager', db)
+    monkeypatch.setattr(main, 'chat_manager', chats)
+    monkeypatch.setattr(main, 'agent_service', answerer.agent_service)
+    monkeypatch.setattr(main, 'answering_service', answerer)
+    monkeypatch.setattr(main.app.state, 'request_limiter', AdmissionLimiter(2), raising=False)
+    # Authentication continues using the isolated fixture's user registry.
+    db.get_web_user_by_id = setup.get_web_user_by_id
+    with TestClient(main.app) as client:
+        login(client, 'alice')
+        created = client.post('/api/sessions', json={}, headers=csrf(client))
+        assert created.status_code == 200 and created.json()['id'] == 12
+        for i, title in enumerate((*SOURCES, 'New_FAQ')):
+            headers = csrf(client)
+            if i: headers['X-Chatbot-Platform'] = ('hibank', 'obsolete', 'negahboom')[i-1]
+            response = client.post('/api/query', json={'session_id': 12, 'query': 'synthetic', 'documents': [title]}, headers=headers)
+            assert response.status_code == 200, response.text
+            assert response.json()['related_questions']
+            # Actual FAQ model message contains current evidence only, no previous assistant data.
+            call = rag._completion.await_args.kwargs['messages']
+            expected = NegahBoomPrompts if title == 'NegahBoom_FAQ' else Config
+            assert call[0]['content'] == expected.GENERAL_RAG_SYSTEM_PROMPT
+            assert f'evidence_{title}' in call[1]['content']
+            assert 'old service details' not in call[1]['content']
+            assert all(f'evidence_{other}' not in call[1]['content'] for other in set(SOURCES) - {title})
+        assert len(db.messages) == 8
+        assert len(db.metadata['agent_state']['messages']) == 10
+        assert db.metadata['agent_state']['messages'][0]['content'] == 'previous reference'
+        assert db.metadata['other'] == {'keep': True}
+        assert db.metadata.get('chatbot_platform') == binding
+        assert db.metadata['agent_state']['platform'] == (binding or 'obsolete')
+        assert len(client.get('/api/sessions', headers={'X-Chatbot-Platform': 'obsolete'}).json()['sessions']) == 3
+        assert len(client.get('/api/sessions/12/messages').json()['messages']) == 8
+        assert client.get('/api/sessions/12/download').status_code == 200
+        assert [c.kwargs['allowed_docs'] for c in rag.retrieve.await_args_list] == [[t] for t in (*SOURCES, 'New_FAQ')]
+        # Rewriter precedes answer and uses this turn's family even with legacy binding.
+        rewrite_calls = [c.kwargs['messages'][1]['content'] for c in rag._completion.await_args_list
+                         if c.kwargs['messages'][0]['content'] == 'You are a helpful assistant.']
+        assert len(rewrite_calls) == 4
+        assert NegahBoomPrompts.QUERY_REWRITE_PROMPT.format(current_query='synthetic', current_history='SENTINEL').split('SENTINEL')[0] in rewrite_calls[1]
+        assert Config.QUERY_REWRITE_PROMPT.format(current_query='synthetic', current_history='SENTINEL').split('SENTINEL')[0] in rewrite_calls[2]
 
 
-@pytest.mark.parametrize(
-    "mode,other", [("hibank", "NegahBoom_FAQ"), ("negahboom", "General_FAQ")]
-)
-def test_fixed_instances(mode, other):
-    assert resolve_platform(mode=mode).platform == mode
-    with pytest.raises(InvalidRequestError):
-        resolve_platform(mode=mode, documents=[other])
-    with pytest.raises(InvalidRequestError):
-        resolve_platform(
-            mode=mode, header="negahboom" if mode == "hibank" else "hibank"
-        )
-
-
-def test_legacy_and_existing_sessions():
-    assert session_platform({"meta_data": None}) == "hibank"
-    assert session_platform({"meta_data": "{}"}) == "hibank"
-    row = {"meta_data": {"chatbot_platform": "negahboom"}}
-    assert resolve_platform(session=row).platform == "negahboom"
-
-
-class BoundProvider:
-    namespace = "production"
-
-    def __init__(self, platform):
-        self.platform = platform
-        self.history_reads = 0
-
-    async def load_snapshot(self, key):
-        metadata = {} if self.platform is None else {"chatbot_platform": self.platform}
-        return ConversationSnapshot(key, 7, {}, metadata)
-
-    async def load_rewrite_messages(self, key):
-        self.history_reads += 1
-        return [{"role": "user", "content": "synthetic history"}]
-
-
-def test_cross_platform_stops_before_rewrite_and_generation():
+@pytest.mark.parametrize('binding', [None, 'hibank', 'negahboom'])
+def test_same_mobile_uuid_source_switches(binding, monkeypatch):
+    monkeypatch.setattr(mobile_api, "AnswerRequestContext", AnswerRequestContext)
     async def run():
-        fixture = answering_tests.AnsweringServiceTests()
-        provider = BoundProvider(None)
-        service = fixture.make_service(history_provider=provider)
-        with pytest.raises(InvalidRequestError):
-            await service.answer(
-                AnswerRequestContext(
-                    original_query="synthetic",
-                    session_id="12",
-                    selected_documents=("NegahBoom_FAQ",),
-                )
-            )
-        assert provider.history_reads == 0
-        assert fixture.rewriter.rewrite_calls == []
-        assert fixture.agent.persisted == []
-        assert fixture.classifier.queries == []
-
+        db = MemoryDb(binding)
+        chats, rag, answerer = pipeline(db)
+        req = request_with(chats, answerer)
+        for i, title in enumerate(SOURCES):
+            req.headers = {} if not i else {'X-Chatbot-Platform': 'obsolete'}
+            reply = await mobile_api.gateway_talk(mobile_api.TalkRequest(
+                session_id='mobile-uuid', national_code='synthetic', query='synthetic', documents=[title]), req)
+            assert reply.session_id == 'mobile-uuid'
+            assert reply.related_questions
+        assert len(db.messages) == 6
+        assert [c.kwargs['allowed_docs'] for c in rag.retrieve.await_args_list] == [[s] for s in SOURCES]
+        history = await mobile_api.gateway_history(req, 'synthetic', 'mobile-uuid')
+        assert len(history['messages']) == 6
+        assert len((await mobile_api.gateway_history(req, 'synthetic'))['sessions']) == 3
     asyncio.run(run())
 
 
-def test_bound_negahboom_turns_and_explicit_rewrite_context():
+def test_mixed_and_optional_source_fallback_are_order_independent():
+    for docs in [('General_FAQ','NegahBoom_FAQ'), ('NegahBoom_FAQ','General_FAQ'),
+                 ('NegahBoom_FAQ','New_FAQ')]:
+        assert select_prompt_context(docs).family == 'mixed'
+    assert select_prompt_context(['New_FAQ']).family == 'hibank'
+    assert select_prompt_context([]).family == 'hibank'
+    assert select_prompt_context(['NegahBoom_FAQ'] * 2).family == 'negahboom'
+    assert all(get_document_category(title) == 'FAQ' for title in SOURCES)
+
+
+def test_mixed_fake_model_answer_chitchat_rewrite_and_concurrency():
     async def run():
-        fixture = answering_tests.AnsweringServiceTests()
-        service = fixture.make_service(
-            intent="chitchat", history_provider=BoundProvider("negahboom")
-        )
-        for documents in [("NegahBoom_FAQ",), ()]:
-            await service.answer(
-                AnswerRequestContext(
-                    original_query="synthetic",
-                    session_id="12",
-                    selected_documents=documents,
-                )
-            )
-        assert all(
-            call["platform_context"].platform == "negahboom"
-            for call in fixture.agent.persisted
-        )
-        assert all(
-            call["platform_context"].platform == "negahboom"
-            for call in fixture.rewriter.rewrite_calls
-        )
-
-    asyncio.run(run())
-
-
-def test_concurrent_answers_have_independent_context():
-    async def run():
-        fixture = answering_tests.AnsweringServiceTests()
-        service = fixture.make_service()
-
-        async def rewrite(**kwargs):
+        rag = make_rag()
+        rewriter = load_rewriter()(rag, None)
+        response = rag._completion.return_value
+        async def completion(**kwargs):
             await asyncio.sleep(0)
-            fixture.rewriter.rewrite_calls.append(kwargs)
-            return kwargs["current_query"]
-
-        fixture.rewriter.rewrite_query = rewrite
-        await asyncio.gather(
-            *[
-                service.answer(
-                    AnswerRequestContext(
-                        original_query=platform,
-                        session_id=str(index),
-                        selected_documents=(document,),
-                    )
-                )
-                for index, (platform, document) in enumerate(
-                    [
-                        ("hibank", "General_FAQ"),
-                        ("negahboom", "NegahBoom_FAQ"),
-                    ]
-                )
-            ]
-        )
-        for call in fixture.agent.persisted:
-            assert call["user_message"] == call["platform_context"].platform
-        for call in fixture.rewriter.rewrite_calls:
-            assert call["current_query"] == call["platform_context"].platform
-
+            return response
+        rag._completion.side_effect = completion
+        for docs in [('General_FAQ', 'NegahBoom_FAQ'), ('NegahBoom_FAQ', 'General_FAQ')]:
+            context = select_prompt_context(docs)
+            for category in ('FAQ','chitchat', 'قرارداد ها', 'ابلاغیه ها'):
+                await rag.answer('synthetic', 'current evidence', '', '', '', '', category=category, prompt_context=context)
+                messages = rag._completion.await_args.kwargs['messages']
+                expected = (MixedSourcePrompts.GENERAL_RAG_SYSTEM_PROMPT if category == 'FAQ' else MixedSourcePrompts.CHITCHAT_SYSTEM_PROMPT if category == 'chitchat' else MixedSourcePrompts.DOCUMENT_RAG_SYSTEM_PROMPT)
+                assert messages[0]['content'] == expected
+            await rewriter.rewrite_query('synthetic', 'User: reference', prompt_context=context)
+            assert rag._completion.await_args.kwargs['messages'][1]['content'] == MixedSourcePrompts.QUERY_REWRITE_PROMPT.format(current_query='synthetic',current_history='User: reference')
+        # Same shared clients, independent local bundles.
+        async def turn(docs):
+            await rag.answer(str(docs), 'evidence', '', '', '', '', category='FAQ', prompt_context=select_prompt_context(docs))
+        await asyncio.gather(*(turn(docs) for docs in [('General_FAQ',), ('NegahBoom_FAQ',), SOURCES[:2]] * 10))
+        expected = {'hibank': Config, 'negahboom': NegahBoomPrompts, 'mixed': MixedSourcePrompts}
+        for call in rag._completion.await_args_list[-30:]:
+            messages = call.kwargs['messages']
+            user = messages[1]['content']
+            family = 'mixed' if 'General_FAQ' in user and 'NegahBoom_FAQ' in user else 'negahboom' if 'NegahBoom_FAQ' in user else 'hibank'
+            assert messages[0]['content'] == expected[family].GENERAL_RAG_SYSTEM_PROMPT
     asyncio.run(run())
 
 
 class RacingDatabase(database_module.DatabaseManager):
-    """Model PostgreSQL UUID uniqueness and atomic statement execution."""
-
     def __init__(self):
         self.row = None
         self.lock = threading.Lock()
         self.first_reads = threading.Barrier(2)
         self.local = threading.local()
-        self.updates = []
 
     def get_session_by_uuid(self, uuid):
-        if not getattr(self.local, "read", False):
+        if not getattr(self.local, 'read', False):
             self.local.read = True
             self.first_reads.wait(timeout=5)
             return None
-        with self.lock:
-            return copy.deepcopy(self.row)
+        with self.lock: return copy.deepcopy(self.row)
 
-    def _execute(self, query, params=None, fetch=None):
+    def _execute(self, sql, params=None, fetch=None):
         with self.lock:
-            if "INSERT INTO chat_sessions" in query:
-                assert "ON CONFLICT (uuid) DO NOTHING" in query
-                if self.row is not None:
-                    return None
-                self.row = session_row(12, meta_data=json.loads(params[3]))
+            if 'INSERT' in sql:
+                assert 'ON CONFLICT (uuid) DO NOTHING' in sql
+                if self.row: return None
+                self.row = session_row(12, user_id=params[1], meta_data=json.loads(params[3]))
                 return copy.deepcopy(self.row)
-            assert "COALESCE(meta_data::jsonb->>'chatbot_platform', 'hibank')" in query
-            assert "jsonb_build_object" in query
-            binding = session_platform(self.row)
-            self.row["meta_data"].update(json.loads(params[0]))
-            self.row["meta_data"]["chatbot_platform"] = binding
-            self.updates.append(query)
+            assert "COALESCE(meta_data::jsonb, '{}'::jsonb) || %s::jsonb" in sql
+            self.row['meta_data'].update(json.loads(params[0]))
 
 
-@pytest.mark.parametrize(
-    "platforms", [("negahboom", "hibank"), ("negahboom", "negahboom")]
-)
-def test_concurrent_first_creation_and_stale_metadata_updates(platforms):
+@pytest.mark.parametrize('users', [(7,7), (7,25)])
+def test_concurrent_uuid_creation_and_atomic_unrelated_metadata_merge(users):
     db = RacingDatabase()
-
-    def create(platform):
-        try:
-            return db.get_or_create_mobile_session(
-                7, "synthetic-uuid", platform_context=PlatformContext(platform)
-            )
-        except InvalidRequestError:
-            return None
-
+    def create(user):
+        try: return db.get_or_create_mobile_session(user, 'synthetic-uuid')
+        except database_module.SessionUnavailableError: return None
     with ThreadPoolExecutor(2) as executor:
-        results = list(executor.map(create, platforms))
-    winner = session_platform(db.row)
-    assert sum(result is not None for result in results) == (
-        2 if platforms[0] == platforms[1] else 1
-    )
-    assert all(session_platform(result) == winner for result in results if result)
-    # An old snapshot and an attempted overwrite cannot erase/change the binding.
-    db.update_session_metadata(12, {"agent_state": {"messages": []}})
-    db.update_session_metadata(
-        12,
-        {
-            "chatbot_platform": "hibank" if winner == "negahboom" else "negahboom",
-            "other": True,
-        },
-    )
-    assert session_platform(db.row) == winner
-    assert db.row["meta_data"]["other"] is True
-    assert "agent_state" in db.row["meta_data"]
+        results = list(executor.map(create, users))
+    assert sum(r is not None for r in results) == (2 if users[0] == users[1] else 1)
+    assert all(r['user_id'] == db.row['user_id'] for r in results if r)
+    assert db.row['meta_data'] == {}
+    db.row['meta_data'] = {'chatbot_platform': 'obsolete', 'other': True}
+    db.update_session_metadata(12, {'agent_state': {'messages': []}})
+    assert db.row['meta_data'] == {'chatbot_platform': 'obsolete', 'other': True, 'agent_state': {'messages': []}}
 
 
-def test_history_and_close_respect_platform_and_preserve_owner_checks():
-    async def run():
-        for platform in ("hibank", "negahboom"):
-            row = session_row(
-                12, uuid="synthetic-uuid", meta_data={"chatbot_platform": platform}
-            )
-            db = StatefulCloseDatabase(row)
-            manager = database_module.ChatManager(db)
-            req = request_with(manager)
-            req.headers = {
-                "X-Chatbot-Platform": "hibank"
-                if platform == "negahboom"
-                else "negahboom"
-            }
-            with pytest.raises(InvalidRequestError):
-                await mobile_api.gateway_close_session(
-                    "synthetic-uuid",
-                    mobile_api.CloseSessionRequest(national_code="synthetic"),
-                    req,
-                )
-            assert db.row["status"] == "active"
-            manager.get_messages = lambda _key: []
-            with pytest.raises(InvalidRequestError):
-                await mobile_api.gateway_history(req, "synthetic", "synthetic-uuid")
-            # Ownership denial takes precedence even when platform signals conflict.
-            db.row["user_id"] = 25
-            with pytest.raises(database_module.SessionUnavailableError):
-                await mobile_api.gateway_close_session(
-                    "synthetic-uuid",
-                    mobile_api.CloseSessionRequest(national_code="synthetic"),
-                    req,
-                )
-            with pytest.raises(database_module.SessionUnavailableError):
-                await mobile_api.gateway_history(req, "synthetic", "synthetic-uuid")
-            db.row["user_id"] = 7
-            req.headers = {}
-            await mobile_api.gateway_close_session(
-                "synthetic-uuid",
-                mobile_api.CloseSessionRequest(national_code="synthetic"),
-                req,
-            )
-            assert db.row["status"] == "closed"
-            assert session_platform(db.row) == platform
-
-        manager = GatewayChatManager()
-        original = manager.get_user_sessions
-
-        def listing(*args):
-            rows = original(*args)
-            rows["13"] = {
-                **rows["12"],
-                "id": "13",
-                "meta_data": {"chatbot_platform": "negahboom"},
-            }
-            return rows
-
-        manager.get_user_sessions = listing
-        req = request_with(manager)
-        assert [
-            s["id"]
-            for s in (await mobile_api.gateway_history(req, "synthetic"))["sessions"]
-        ] == [12]
-        req.headers = {"X-Chatbot-Platform": "negahboom"}
-        assert [
-            s["id"]
-            for s in (await mobile_api.gateway_history(req, "synthetic"))["sessions"]
-        ] == [13]
-
-    asyncio.run(run())
-
-
-def test_real_agent_and_history_provider_preserve_binding_across_turns():
-    from tests import test_p0_p1_repairs as agent_tests
-
-    async def run():
-        fixture = agent_tests.AgentServiceContractTests()
-        await fixture.asyncSetUp()
-        try:
-            db = fixture.FakeDb()
-            db.metadata = {"chatbot_platform": "negahboom", "other": "synthetic"}
-            service = fixture.module.AgentService(
-                rag_system=object(),
-                intent_classifier=object(),
-                scenarios_db={},
-                db_manager=db,
-                chat_manager=object(),
-            )
-            for documents in [["NegahBoom_FAQ"], []]:
-                result = await service.process_message_detailed(
-                    "12", "synthetic", selected_docs=documents
-                )
-                assert result.state["platform"] == "negahboom"
-                assert db.metadata["chatbot_platform"] == "negahboom"
-                assert db.metadata["other"] == "synthetic"
-            assert len(db.metadata["agent_state"]["messages"]) == 4
-            before = len(fixture.graph.inputs)
-            with pytest.raises(InvalidRequestError):
-                await service.process_message_detailed(
-                    "12", "synthetic", selected_docs=["General_FAQ"]
-                )
-            assert len(fixture.graph.inputs) == before
-        finally:
-            await fixture.asyncTearDown()
-
-    asyncio.run(run())
-
-
-def web_functions(**overrides):
-    """Execute the actual handlers without starting heavy application services."""
-    import ast
-    from pathlib import Path
-
-    from fastapi import HTTPException
-
-    from platform_context import check_query, check_session, request_header
-
-    tree = ast.parse(Path("main.py").read_text())
-    names = {
-        "require_owned_session",
-        "get_sessions",
-        "get_session",
-        "create_session",
-        "query_documents",
-        "lifespan",
-    }
-    functions = [
-        node
-        for node in tree.body
-        if isinstance(node, ast.AsyncFunctionDef) and node.name in names
-    ]
-    for node in functions:
-        node.decorator_list = []
-    module = ast.Module(
-        body=[
-            ast.ImportFrom(
-                module="__future__", names=[ast.alias(name="annotations")], level=0
-            ),
-            *functions,
-        ],
-        type_ignores=[],
-    )
-    namespace = dict(
-        resolve_platform=resolve_platform,
-        session_platform=session_platform,
-        check_session=check_session,
-        check_query=check_query,
-        request_header=request_header,
-        blocking_runner=answering_tests.ImmediateRunner(),
-        HTTPException=HTTPException,
-        **overrides,
-    )
-    exec(compile(ast.fix_missing_locations(module), "main.py", "exec"), namespace)  # noqa: S102 - isolated actual handlers
-    return namespace
-
-
-def test_web_creation_listing_access_and_ownership():
-    from fastapi import HTTPException
-
-    async def run():
-        row = session_row(12, meta_data={"chatbot_platform": "negahboom"})
-        db = SimpleNamespace(get_session_by_id=lambda _id: row)
-        manager = SimpleNamespace(
-            get_user_sessions=lambda _id: {"12": row, "13": session_row(13)},
-            get_session=lambda _id: row,
-            create_new_chat=lambda _id, **kwargs: kwargs,
-        )
-        ns = web_functions(db_manager=db, chat_manager=manager)
-        request = SimpleNamespace(headers={})
-        user = SimpleNamespace(id=7)
-        assert len((await ns["get_sessions"](user, request))["sessions"]) == 1
-        assert (await ns["get_sessions"](user, request))["sessions"][0]["id"] == 13
-        request.headers = {"X-Chatbot-Platform": "negahboom"}
-        assert (await ns["get_sessions"](user, request))["sessions"] == [row]
-        created = await ns["create_session"](None, user, request)
-        assert created["platform_context"].platform == "negahboom"
-        assert await ns["get_session"]("12", user, request) == row
-        request.headers = {"X-Chatbot-Platform": "hibank"}
-        with pytest.raises(InvalidRequestError):
-            await ns["get_session"]("12", user, request)
-        with pytest.raises(HTTPException) as denied:
-            await ns["get_session"]("12", SimpleNamespace(id=99), request)
-        assert denied.value.status_code == 404
-
-    asyncio.run(run())
-
-
-def test_web_insert_includes_binding_before_first_history_read():
+def test_web_creation_sql_has_empty_metadata():
     db = database_module.DatabaseManager.__new__(database_module.DatabaseManager)
     captured = []
-
-    def execute(query, params=None, fetch=None):
-        captured.append((query, params))
-        assert "'active', FALSE, %s" in query
-        return session_row(12, meta_data=json.loads(params[5]))
-
-    db._execute = execute
-    row = db.create_session(7, platform_context=PlatformContext("negahboom"))
-    assert session_platform(row) == "negahboom"
-    assert len(captured) == 1
+    db._execute = lambda sql, params, **kw: captured.append((sql, params)) or {'meta_data': json.loads(params[5])}
+    assert db.create_session(7)['meta_data'] == {}
+    assert 'chatbot_platform' not in captured[0][0]
 
 
-def test_legacy_database_session_cannot_be_claimed():
-    from tests.test_mobile_history_content import ScriptedMobileSessionDatabase
-
-    db = ScriptedMobileSessionDatabase([session_row(12)])
-    with pytest.raises(InvalidRequestError):
-        db.get_or_create_mobile_session(
-            7, "synthetic", platform_context=PlatformContext("negahboom")
-        )
-    assert len(db.executions) == 1
-
-
-def test_startup_rejects_invalid_mode_before_service_initialization(monkeypatch):
-    from types import SimpleNamespace
-
-    monkeypatch.setenv("CHATBOT_PLATFORM", "invalid")
-    ns = web_functions(
-        validate_config=lambda: None, instance_platform=instance_platform
-    )
-
+@pytest.mark.parametrize('binding', ['hibank', 'negahboom', None])
+def test_old_header_cannot_block_mobile_close_or_override_owner(binding):
     async def run():
-        startup = ns["lifespan"](SimpleNamespace(state=SimpleNamespace()))
-        with pytest.raises(ValueError, match="CHATBOT_PLATFORM"):
-            await anext(startup)
-
+        row = session_row(12, uuid='mobile-uuid', meta_data={'chatbot_platform': binding})
+        db = StatefulCloseDatabase(row)
+        chats = database_module.ChatManager(db)
+        req = request_with(chats)
+        req.headers = {'X-Chatbot-Platform': 'obsolete'}
+        db.row['user_id'] = 99
+        with pytest.raises(database_module.SessionUnavailableError):
+            await mobile_api.gateway_close_session('mobile-uuid', mobile_api.CloseSessionRequest(national_code='synthetic'), req)
+        assert db.row['status'] == 'active'
+        db.row['user_id'] = 7
+        await mobile_api.gateway_close_session('mobile-uuid', mobile_api.CloseSessionRequest(national_code='synthetic'), req)
+        assert db.row['status'] == 'closed' and db.row['meta_data'] == row['meta_data']
     asyncio.run(run())
 
 
-def test_web_and_mobile_reject_switch_before_turn_side_effects():
-    from types import SimpleNamespace
+def test_original_prompt_modules_are_byte_identical_to_head():
+    for name in ('new_architecture/app/config.py', 'negahboom_prompts.py'):
+        assert Path(name).read_bytes() == subprocess.check_output(['git', 'show', f'HEAD:{name}'])
+
+
+def test_evaluation_legacy_state_switches_and_batch_is_stateless():
+    class Provider:
+        namespace = 'evaluation'
+        def __init__(self):
+            self.state = {'platform': 'obsolete', 'allowed_docs': ['STALE_FAQ'],
+                          'messages': [{'role':'user', 'content':'reference'},
+                                       {'role':'assistant', 'content':'old service details'}]}
+        async def load_snapshot(self, key):
+            return ConversationSnapshot(key, 1, copy.deepcopy(self.state), {'chatbot_platform':'negahboom'})
+        async def load_rewrite_messages(self, key): return self.state['messages']
+        async def save_snapshot(self, snapshot, final_state): self.state = copy.deepcopy(final_state)
 
     async def run():
-        row = session_row(12)
-        db = SimpleNamespace(
-            _validate_mobile_session=database_module.DatabaseManager._validate_mobile_session,
-            get_session_by_id=lambda _key: row,
-            get_session_by_uuid=lambda _key: row,
-            get_or_create_user_by_national_code=lambda _code: {"id": 7},
-        )
-        ns = web_functions(db_manager=db)
-        req = SimpleNamespace(headers={})
-        with pytest.raises(InvalidRequestError):
-            await ns["query_documents"](
-                SimpleNamespace(session_id="12", documents=["NegahBoom_FAQ"]),
-                req,
-                SimpleNamespace(id=7),
-            )
-        req = request_with(SimpleNamespace(db=db))
-        with pytest.raises(InvalidRequestError):
-            await mobile_api.gateway_talk(
-                mobile_api.TalkRequest(
-                    session_id="synthetic",
-                    query="synthetic",
-                    national_code="synthetic",
-                    documents=["NegahBoom_FAQ"],
-                ),
-                req,
-            )
-        # These minimal doubles deliberately have no history/generation/write APIs.
+        db = MemoryDb('hibank')
+        _, rag, service = pipeline(db)
+        provider = Provider()
+        before = copy.deepcopy(db.metadata)
+        for title in SOURCES:
+            result = await service.answer(AnswerRequestContext(
+                original_query='synthetic', selected_documents=(title,),
+                conversation_key=('eval-session','synthetic'), channel='evaluation'),
+                history_provider=provider, execution_policy=EVALUATION_EXECUTION_POLICY)
+            assert result.related_questions
+        assert len(provider.state['messages']) == 8
+        assert db.metadata == before and db.messages == []
+        for title in SOURCES:
+            await service.answer(AnswerRequestContext(
+                original_query='synthetic', selected_documents=(title,), channel='mass_answer',
+                use_history=False, persist_agent_state=False))
+        assert db.metadata == before
+        assert [c.kwargs['allowed_docs'] for c in rag.retrieve.await_args_list] == [[t] for t in SOURCES * 2]
+        assert rag._completion.await_args.kwargs['messages'][0]['content'] == Config.GENERAL_RAG_SYSTEM_PROMPT
+    asyncio.run(run())
 
+
+def test_no_documents_ignores_old_identity_and_general_requires_current_selection():
+    async def run():
+        db = MemoryDb('negahboom')
+        _, rag, service = pipeline(db)
+        service.intent_classifier = Classifier('chitchat')
+        result = await service.answer(AnswerRequestContext(original_query='hello',session_id='12'))
+        assert result.related_questions == []
+        assert rag._completion.await_args.kwargs['messages'][0]['content'] == Config.CHITCHAT_SYSTEM_PROMPT
+        rag.retrieve.assert_not_awaited()
+        service.intent_classifier = Classifier('general')
+        with pytest.raises(ValueError, match='current datasource'):
+            await service.answer(AnswerRequestContext(original_query='synthetic', session_id='12'))
+        rag.retrieve.assert_not_awaited()
+    asyncio.run(run())
+
+
+def test_optional_association_and_unregistered_category_fallback(monkeypatch):
+    import prompt_selection
+    monkeypatch.setattr(prompt_selection, 'SOURCE_PROMPT_FAMILIES', {
+        **prompt_selection.SOURCE_PROMPT_FAMILIES, 'Additional_FAQ': 'negahboom',
+    })
+    for docs in [('Additional_FAQ', 'NegahBoom_FAQ'), ('NegahBoom_FAQ', 'Additional_FAQ')]:
+        assert select_prompt_context(docs).family == 'negahboom'
+    for title in ['Unregistered source', 'قرارداد نمونه', 'ابلاغیه نمونه', 'Other_FAQ']:
+        assert select_prompt_context([title]).family == 'hibank'
+
+
+def test_mixed_selection_runs_real_graph_with_both_current_sources():
+    async def run():
+        db = MemoryDb('hibank')
+        _, rag, service = pipeline(db)
+        for docs in [('General_FAQ', 'NegahBoom_FAQ'), ('NegahBoom_FAQ', 'General_FAQ')]:
+            result = await service.answer(AnswerRequestContext(
+                original_query='synthetic', session_id='12', selected_documents=docs))
+            assert result.related_questions
+            messages = rag._completion.await_args.kwargs['messages']
+            assert messages[0]['content'] == MixedSourcePrompts.GENERAL_RAG_SYSTEM_PROMPT
+            assert all(f'evidence_{title}' in messages[1]['content'] for title in docs)
+            assert 'old service details' not in messages[1]['content']
+        assert len(db.metadata['agent_state']['messages']) == 6
     asyncio.run(run())

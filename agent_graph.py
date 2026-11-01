@@ -37,13 +37,10 @@ from pipeline_observer import (
 import time
 
 
-from utils.faq_fallback import FAQ_FALLBACK_FRAGMENT
-from platform_context import PlatformContext
-from negahboom_prompts import MISSING_INFORMATION
+from prompt_selection import select_prompt_context
 
 # ---------- State definition ----------
 class AgentState(TypedDict):
-    platform: str
     # messages: Annotated[List[Dict[str, str]], operator.add]
     messages: List[Dict[str, str]]
     latest_user_input: str
@@ -299,9 +296,9 @@ def make_handle_general(rag_system):
             recent_history=recent_text,
             current_summary="", tone="friendly", response_type="normal",
             enable_history=False, category=category,
-            platform_context=PlatformContext(state.get("platform", "hibank")),
+            prompt_context=select_prompt_context(state.get("allowed_docs", [])),
         )
-        fallback = MISSING_INFORMATION if state.get("platform") == "negahboom" else FAQ_FALLBACK_FRAGMENT
+        fallback = select_prompt_context(allowed).faq_fallback
         if fallback in (answer or ""):
             state["fallback_reason"] = (
                 state.get("fallback_reason") or "LLM_CONTEXT_REFUSAL"
@@ -346,7 +343,7 @@ def make_handle_chitchat(rag_system):
             response_type="normal",
             enable_history=False,
             category="chitchat",  # Used by RAGSystem to apply a conversational prompt
-            platform_context=PlatformContext(state.get("platform", "hibank")),
+            prompt_context=select_prompt_context(state.get("allowed_docs", [])),
         )
 
         state["last_answer"] = answer

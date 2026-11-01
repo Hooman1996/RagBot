@@ -74,7 +74,7 @@ const Chat = {
         this.renderDocumentTags(this.allDocuments);
       }
     } catch(e) {
-      console.error(e);
+      this.showError(e);
     }
   },
 
@@ -304,7 +304,7 @@ const Chat = {
         await API.submitFeedback(queryId, newVal);
         likeBtn.classList.toggle("feedback-btn--active", newVal === 1);
         dislikeBtn.classList.toggle("feedback-btn--active", newVal === 0);
-      } catch(e) { console.error("Feedback error:", e); }
+      } catch(e) { this.showError(e); }
     };
 
     likeBtn.addEventListener("click", () => setFeedback(1));
@@ -322,7 +322,7 @@ const Chat = {
         await API.submitComment(queryId, text);
         commentBtn.classList.add("feedback-btn--active");
         commentPanel.style.display = "none";
-      } catch(e) { console.error("Comment error:", e); }
+      } catch(e) { this.showError(e); }
     });
 
     bar.appendChild(copyBtn);
@@ -499,6 +499,14 @@ const Chat = {
     this.textarea.disabled = isSending || this.isLocked;
   },
 
+  showError(error) {
+    const message = document.createElement("div");
+    message.className = "message message--error";
+    message.setAttribute("role", "alert");
+    message.textContent = API.errorMessage(error);
+    (this.messagesContainer || document.getElementById("messages"))?.appendChild(message);
+  },
+
   async send() {
     if (this.isSending || this.isLocked) return;
     this.isSending = true;
@@ -509,23 +517,24 @@ const Chat = {
       return;
     }
 
-    await Sessions.ensureSession();
-
-    // Remove any pending satisfaction prompts
-    document.querySelectorAll(".feedback-satisfaction").forEach(el => el.remove());
-
-    let finalQuery = text;
-    let uploadedTextToSend = null;
-    if (this.uploadedDocSelected && this.uploadedDocText) {
-      uploadedTextToSend = this.uploadedDocText;
-      finalQuery = `[فایل بارگذاری‌شده: ${this.uploadedDocName}]\n${this.uploadedDocText}\n\nسوال:\n${text}`;
-    }
-
-    this.addUserMessage(text);
-    this.textarea.value = "";
-    this.typing();
-
+    this.setSendingState(true);
     try {
+      await Sessions.ensureSession();
+
+      // Remove any pending satisfaction prompts
+      document.querySelectorAll(".feedback-satisfaction").forEach(el => el.remove());
+
+      let finalQuery = text;
+      let uploadedTextToSend = null;
+      if (this.uploadedDocSelected && this.uploadedDocText) {
+        uploadedTextToSend = this.uploadedDocText;
+        finalQuery = `[فایل بارگذاری‌شده: ${this.uploadedDocName}]\n${this.uploadedDocText}\n\nسوال:\n${text}`;
+      }
+
+      this.addUserMessage(text);
+      this.textarea.value = "";
+      this.typing();
+
       const res = await API.query(finalQuery, this.selectedDocs, Sessions.currentSessionId, 10, 0.5, uploadedTextToSend);
       this.removeTyping();
 
@@ -543,14 +552,14 @@ const Chat = {
         );
         Sessions.load();
       } else {
-        this.addAIMessage("Error retrieving response.");
+        this.showError();
       }
     } catch (err) {
-      console.error(err);
-      this.removeTyping();
-      this.addAIMessage("System error. Please try again.");
+      this.showError(err);
     } finally {
+      this.removeTyping();
       this.isSending = false;
+      this._updateLockState();
     }
   }
 };

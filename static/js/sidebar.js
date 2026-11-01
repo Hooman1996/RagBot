@@ -38,8 +38,11 @@ const Sidebar = {
             });
 
         } catch (err) {
-            list.innerHTML = `<li class="error">Failed to load documents.</li>`;
-            console.error("Sidebar.loadDocuments error:", err);
+            list.innerHTML = "";
+            const error = document.createElement("li");
+            error.className = "error";
+            error.textContent = API.errorMessage(err);
+            list.appendChild(error);
         }
     },
 
@@ -84,8 +87,7 @@ const Sidebar = {
             }
 
         } catch (err) {
-            alert("Error during initialization.");
-            console.error("Sidebar.initializeSystem error:", err);
+            alert(API.errorMessage(err));
         } finally {
             if (btn) btn.disabled = false;
         }
@@ -106,6 +108,10 @@ const Sidebar = {
 
 
 const Sessions = {
+    showError(error) {
+        if (typeof Chat !== 'undefined') Chat.showError(error);
+        else alert(API.errorMessage(error));
+    },
     currentSessionId: null,
     createPromise: null,
     rawSessions: [],           // store unfiltered sessions
@@ -122,7 +128,7 @@ const Sessions = {
             this.rawSessions = data.sessions || [];
             this.applyFilterAndRender();
         } catch (err) {
-            console.error('Failed to load sessions:', err);
+            this.showError(err);
         }
     },
 
@@ -232,8 +238,8 @@ const Sessions = {
 
     // Load messages for a session
     async loadMessages(sessionId) {
-        const res = await fetch(`/api/sessions/${sessionId}/messages`);
-        const data = await res.json();
+        const res = await API.request(`/api/sessions/${sessionId}/messages`);
+        const data = await API.readJSON(res);
         const messages = data.messages || data;
         const container = document.getElementById('messages');
         container.innerHTML = '';
@@ -249,19 +255,21 @@ const Sessions = {
     async create() {
         if (this.createPromise) return this.createPromise;
         this.createPromise = (async () => {
-            const res = await fetch('/api/sessions', {
+            const res = await API.request('/api/sessions', {
                 method: 'POST',
                 headers: {'Content-Type': 'application/json'},
                 body: JSON.stringify({title: 'New Chat'})
             });
-            const session = await res.json();
+            const session = await API.readJSON(res);
             this.currentSessionId = parseInt(session.id);
             await this.load();          // refresh sidebar list (will re-apply filter)
             return session;
         })();
-        const result = await this.createPromise;
-        this.createPromise = null;
-        return result;
+        try {
+            return await this.createPromise;
+        } finally {
+            this.createPromise = null;
+        }
     },
 
     async ensureSession() {
@@ -274,12 +282,12 @@ const Sessions = {
         this.currentSessionId = parseInt(sessionId);
         await this.load();            // re-render with active highlight
         try {
-            const res = await fetch(`/api/sessions/${sessionId}/messages`);
-            const data = await res.json();
+            const res = await API.request(`/api/sessions/${sessionId}/messages`);
+            const data = await API.readJSON(res);
             const messages = Array.isArray(data) ? data : (data.messages || []);
             Chat.loadMessages(messages);
         } catch (err) {
-            console.error('Failed to load messages for session:', sessionId, err);
+            this.showError(err);
         }
     },
 
@@ -359,8 +367,7 @@ const Sessions = {
             }
             await this.load();
         } catch (err) {
-            console.error('Failed to delete session:', err);
-            alert('Failed to delete chat. Please try again.');
+            this.showError(err);
         }
     },
 
@@ -370,8 +377,7 @@ const Sessions = {
             const result = await API.pinSession(sessionId);
             if (result.success) await this.load();
         } catch (err) {
-            console.error('Failed to pin session:', err);
-            alert('Failed to pin chat. Please try again.');
+            this.showError(err);
         }
     },
 
@@ -381,9 +387,9 @@ const Sessions = {
         const menu = document.getElementById(`menu-${sessionId}`);
         if (menu) menu.classList.remove('sidebar__chat-item__menu--open');
 
-        fetch(`/api/sessions/${sessionId}/download`)
-            .then(response => {
-                if (!response.ok) throw new Error('Download failed');
+        API.request(`/api/sessions/${sessionId}/download`)
+            .then(async response => {
+                if (!response.ok) await API.readJSON(response);
                 return response.blob();
             })
             .then(blob => {
@@ -397,8 +403,7 @@ const Sessions = {
                 URL.revokeObjectURL(url);
             })
             .catch(err => {
-                console.error('Download error:', err);
-                alert('Failed to download chat history.');
+                    this.showError(err);
             });
     },
 
@@ -433,7 +438,9 @@ document.addEventListener('click', () => {
 });
 
 // Hook new-chat button
-document.querySelector('.btn-new-chat')?.addEventListener('click', () => Sessions.create());
+document.querySelector('.btn-new-chat')?.addEventListener('click', () => {
+    Sessions.create().catch(err => Sessions.showError(err));
+});
 
 // Initial session load
 Sessions.load();

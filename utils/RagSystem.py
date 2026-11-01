@@ -307,17 +307,12 @@ class RAGSystem:
 
     async def answer(self, user_question, context, recent_history, current_summary, tone, response_type,
                max_new_tokens=None,
-               enable_history=True, category=None, *, platform_context=None):
+               enable_history=True, category=None, *, prompt_context=None):
 
-        # Legacy callers retain their exact Hibank path; resolved contexts select locally.
-        from negahboom_prompts import NegahBoomPrompts
-        from utils.service_errors import InvalidRequestError
+        # Workflow categories retain their established templates.
+        from prompt_selection import prompt_templates
 
-        prompts = Config
-        if platform_context is not None and platform_context.platform == "negahboom":
-            if category in ("ابلاغیه ها", "قرارداد ها"):
-                raise InvalidRequestError("Document workflow is not configured for NegahBoom")
-            prompts = NegahBoomPrompts
+        prompts = prompt_templates(prompt_context, fallback=Config, category=category)
         prompt_started = time.perf_counter()
         max_new_tokens = (
             max_new_tokens or PERFORMANCE_SETTINGS.rag_max_new_tokens
