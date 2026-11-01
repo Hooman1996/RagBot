@@ -35,6 +35,8 @@ from dotenv import load_dotenv
 # Load variables from .env into os.environ
 load_dotenv()
 
+import argparse
+import contextlib
 import sys
 import json
 import uuid
@@ -93,7 +95,7 @@ class Config:
     MINIO_ENDPOINT = os.getenv("MINIO_ENDPOINT", "localhost:9000")
     MINIO_ACCESS_KEY = os.getenv("MINIO_ACCESS_KEY")
     MINIO_SECRET_KEY = os.getenv("MINIO_SECRET_KEY")
-    MINIO_SECURE = os.getenv("MINIO_SECURE", False).lower() == "true"
+    MINIO_SECURE = os.getenv("MINIO_SECURE", "false").lower() == "true"
     MINIO_BUCKET = os.getenv("MINIO_BUCKET", "hihelp-documents")
 
 
@@ -143,22 +145,14 @@ DATA_DIR = os.getenv("DATA_INSERTION_DIRECTORY")  # ? REPLACE THIS
 #                (must match the folder name exactly)
 
 
-documents_directory = os.path.join(DATA_DIR, "DOCUMENTS")
-CHUNKS_ROOT_DIR = os.path.join(DATA_DIR, "CHUNKS")
+INSERT_ONLY = False
+SOURCE_NAME = None
 
-DOCUMENTS = [
-    {
-        "file_path": str(source.file_path),
-        "chunk_dir": source.title,
-        "title": source.title,
-        "owner": "admin",  # Must match a username below
-        "collection": "Hi_Help",  # Must match a collection below
-    }
-    for source in discover_knowledge_sources(
-        documents_directory,
-        CHUNKS_ROOT_DIR,
-    )
-]
+documents_directory = os.path.join(DATA_DIR, "DOCUMENTS") if DATA_DIR else None
+CHUNKS_ROOT_DIR = os.path.join(DATA_DIR, "CHUNKS") if DATA_DIR else None
+
+DOCUMENTS = []  # Discovered only after CLI source selection.
+
 
 
 # DOCUMENTS = [
@@ -360,7 +354,7 @@ class Connections:
         self.minio = None
         self.qdrant = None
 
-    def connect(self) -> bool:
+    def connect(self, insert_only=False) -> bool:
         """Connect to all databases"""
 
         print()
@@ -381,6 +375,8 @@ class Connections:
             )
             print("  ? Connected")
         except Exception as e:
+            if insert_only:
+                raise InsertOnlyRefusal("Service connection or existing storage prerequisite failed") from None
             print(f"  ? Failed: {e}")
             return False
 
@@ -394,10 +390,14 @@ class Connections:
                 secure=Config.MINIO_SECURE
             )
             if not self.minio.bucket_exists(Config.MINIO_BUCKET):
+                if insert_only:
+                    raise RuntimeError("Configured bucket must already exist")
                 self.minio.make_bucket(Config.MINIO_BUCKET)
                 print(f"  ? Created bucket: {Config.MINIO_BUCKET}")
             print("  ? Connected")
         except Exception as e:
+            if insert_only:
+                raise InsertOnlyRefusal("Service connection or existing storage prerequisite failed") from None
             print(f"  ? Failed: {e}")
             return False
 
@@ -415,6 +415,8 @@ class Connections:
                 for c in self.qdrant.get_collections().collections
             ]
             if Config.QDRANT_COLLECTION not in collections:
+                if insert_only:
+                    raise RuntimeError("Configured vector collection must already exist")
                 self.qdrant.create_collection(
                     collection_name=Config.QDRANT_COLLECTION,
                     vectors_config=VectorParams(
@@ -425,6 +427,8 @@ class Connections:
                 print(f"  ? Created collection: {Config.QDRANT_COLLECTION}")
             print("  ? Connected")
         except Exception as e:
+            if insert_only:
+                raise InsertOnlyRefusal("Service connection or existing storage prerequisite failed") from None
             print(f"  ? Failed: {e}")
             return False
 
@@ -529,7 +533,8 @@ def preview_chunk_folders(chunks_root: str):
     print(f"  Root: {chunks_root}")
     print()
 
-    subfolders = sorted([f for f in root.iterdir() if f.is_dir()])
+    subfolders = sorted([f for f in root.iterdir() if f.is_dir()
+                         and (SOURCE_NAME is None or f.name == SOURCE_NAME)])
 
     if not subfolders:
         print("  ? No subfolders found")
@@ -782,6 +787,8 @@ def insert_documents(
         existing = cursor.fetchone()
 
         if existing:
+            if INSERT_ONLY:
+                raise InsertOnlyRefusal("Document title already exists")
             document_ids[doc["title"]] = existing[0]
             print(f"    ? Skipped (exists) ID: {existing[0]}")
             print()
@@ -821,6 +828,9 @@ def insert_documents(
         print(f"    MIME      : {mime_type}")
         print(f"    Hash      : {file_hash[:16]}...")
         print(f"    MinIO path: {minio_path}")
+
+        if INSERT_ONLY:
+            require_object_absent(minio, minio_path)
 
         # -- Upload to MinIO ----------------------------------
         try:
@@ -894,7 +904,8 @@ def insert_documents(
             pg.commit()
         except Exception:
             pg.rollback()
-            minio.remove_object(Config.MINIO_BUCKET, minio_path)
+            if not INSERT_ONLY:
+                minio.remove_object(Config.MINIO_BUCKET, minio_path)
             raise
 
         print(f"    ? Inserted into PostgreSQL (ID: {doc_id})")
@@ -963,6 +974,8 @@ def insert_chunks(
         existing = cursor.fetchall()
 
         if existing:
+            if INSERT_ONLY:
+                raise InsertOnlyRefusal("Unexpected existing chunks")
             existing_ids = [r[0] for r in existing]
             all_chunk_ids[doc_title] = existing_ids
             print(f"    ? Skipped (exists): {len(existing_ids)} chunks")
@@ -1091,6 +1104,8 @@ def insert_embeddings(
         existing_count = cursor.fetchone()[0]
 
         if existing_count > 0:
+            if INSERT_ONLY:
+                raise InsertOnlyRefusal("Unexpected existing embeddings")
             print(f"    ? Skipped ({existing_count} embeddings exist)")
             print()
             continue
@@ -1113,6 +1128,9 @@ def insert_embeddings(
             print()
             continue
 
+        if INSERT_ONLY:
+            require_vectors_absent(qdrant, c_ids)
+
         # -- Generate embeddings ------------------------------
         print(f"    ? Generating embeddings...")
 
@@ -1129,6 +1147,9 @@ def insert_embeddings(
             c_texts,
             c_ids,
         )
+
+        if INSERT_ONLY and len(vectors) != len(c_ids):
+            raise InsertOnlyRefusal("Incomplete embedding generation")
 
         print(f"    ? Generated {len(vectors)} vectors (dim: {len(vectors[0])})")
 
@@ -1155,11 +1176,14 @@ def insert_embeddings(
         # )
 
         # Example for upload_points
+        if INSERT_ONLY:
+            require_vectors_absent(qdrant, c_ids)
         qdrant.upload_points(
             collection_name=Config.QDRANT_COLLECTION,
             points=points,  # A list of PointStruct objects
             batch_size=256,  # Optimal batch size for internal processing
             parallel=2,  # Number of parallel threads
+            **({"wait": True} if INSERT_ONLY else {}),
         )
 
         print(f"    ? Uploaded {len(points)} vectors to Qdrant")
@@ -1210,11 +1234,12 @@ def insert_embeddings(
             pg.commit()
         except Exception:
             pg.rollback()
-            qdrant.delete(
-                collection_name=Config.QDRANT_COLLECTION,
-                points_selector=PointIdsList(points=c_ids),
-                wait=True,
-            )
+            if not INSERT_ONLY:
+                qdrant.delete(
+                    collection_name=Config.QDRANT_COLLECTION,
+                    points_selector=PointIdsList(points=c_ids),
+                    wait=True,
+                )
             raise
 
         print(f"    ? Saved {len(c_ids)} embedding records")
@@ -1325,7 +1350,7 @@ def verify(pg, qdrant):
 # MAIN
 # -----------------------------------------------------------
 
-def main():
+def run_import(*, yes=False, preflight_only=False):
     if not DOCUMENTS:
         print("No valid source documents with chunks were found; nothing to insert.")
         return 0
@@ -1343,7 +1368,7 @@ def main():
 
     # -- Confirm before proceeding ----------------------------
     print("  Proceed with insertion? (yes/no): ", end="")
-    answer = input().strip().lower()
+    answer = "yes" if yes else input().strip().lower()
 
     if answer != "yes":
         print("\n  Cancelled.\n")
@@ -1351,16 +1376,28 @@ def main():
 
     # -- Connect ----------------------------------------------
     db = Connections()
-    if not db.connect():
+    try:
+        connected = db.connect(insert_only=True) if INSERT_ONLY else db.connect()
+    except BaseException:
+        db.close()
+        raise
+    if not connected:
         print("? Connection failed. Exiting.")
+        db.close()
         return 1
 
     try:
+        if INSERT_ONLY:
+            user_ids, collection_ids = insert_only_preflight(db)
+            if preflight_only:
+                return 0
         # -- Step 1: Users -------------------------------------
-        user_ids = insert_users(db.pg)
+        if not INSERT_ONLY:
+            user_ids = insert_users(db.pg)
 
         # -- Step 2: Collections -------------------------------
-        collection_ids = insert_collections(db.pg, user_ids)
+        if not INSERT_ONLY:
+            collection_ids = insert_collections(db.pg, user_ids)
 
         # -- Step 3: Documents ? MinIO + PostgreSQL ------------
         document_ids = insert_documents(
@@ -1410,6 +1447,9 @@ def main():
                 embedding_session,
             )
 
+        if INSERT_ONLY:
+            verify_insert_only(db, document_ids, all_chunk_ids)
+
         # -- Step 6: Verify ------------------------------------
         # verify(db.pg, db.qdrant)
 
@@ -1423,6 +1463,8 @@ def main():
         return 0
 
     except Exception as e:
+        if INSERT_ONLY:
+            raise
         print(f"\n? Error: {e}")
         import traceback
         traceback.print_exc()
@@ -1430,6 +1472,143 @@ def main():
 
     finally:
         db.close()
+
+
+class InsertOnlyRefusal(RuntimeError):
+    """A fixed, non-sensitive diagnostic safe to display."""
+
+
+def require_object_absent(minio, key):
+    try:
+        minio.stat_object(Config.MINIO_BUCKET, key)
+    except S3Error as exc:
+        if exc.code in {"NoSuchKey", "NoSuchObject"}:
+            return
+        raise
+    raise InsertOnlyRefusal("Object key collision")
+
+
+def require_vectors_absent(qdrant, ids):
+    for offset in range(0, len(ids), 256):
+        if qdrant.retrieve(Config.QDRANT_COLLECTION, ids=ids[offset:offset + 256],
+                           with_payload=False, with_vectors=False):
+            raise InsertOnlyRefusal("Vector ID collision")
+
+
+def insert_only_preflight(db):
+    """Read-only checks; session lock survives insertion commits until close."""
+    if len(DOCUMENTS) != 1:
+        raise InsertOnlyRefusal("Insert-only requires exactly one source")
+    doc = DOCUMENTS[0]
+    with db.pg.cursor() as cursor:
+        cursor.execute("SELECT pg_advisory_lock(hashtextextended(%s, 0))",
+                       ("ragbot:add-source:" + doc["title"],))
+        cursor.execute("SELECT id FROM documents WHERE title = %s", (doc["title"],))
+        if cursor.fetchone():
+            raise InsertOnlyRefusal("Document title already exists")
+        cursor.execute("SELECT id FROM users WHERE username = %s AND is_active = true",
+                       (doc["owner"],))
+        owners = cursor.fetchall()
+        if len(owners) != 1:
+            raise InsertOnlyRefusal("Existing active owner required")
+        owner_id = owners[0][0]
+        cursor.execute("SELECT id FROM collections WHERE name = %s AND user_id = %s",
+                       (doc["collection"], owner_id))
+        groups = cursor.fetchall()
+        if len(groups) != 1:
+            raise InsertOnlyRefusal("Existing owner grouping required")
+    if not db.minio.bucket_exists(Config.MINIO_BUCKET):
+        raise InsertOnlyRefusal("Existing bucket required")
+    info = db.qdrant.get_collection(Config.QDRANT_COLLECTION)
+    vectors = info.config.params.vectors
+    if (getattr(vectors, "size", None) != Config.QDRANT_VECTOR_SIZE
+            or vectors.distance != Distance.COSINE):
+        raise InsertOnlyRefusal("Existing vector configuration is incompatible")
+    return {doc["owner"]: owner_id}, {doc["collection"]: groups[0][0]}
+
+
+def verify_insert_only(db, document_ids, all_chunk_ids):
+    for title, doc_id in document_ids.items():
+        with db.pg.cursor() as cursor:
+            cursor.execute("SELECT file_path, file_size FROM documents WHERE id = %s", (doc_id,))
+            key, size = cursor.fetchone()
+        if db.minio.stat_object(Config.MINIO_BUCKET, key).size != size:
+            raise InsertOnlyRefusal("Incomplete object upload")
+        expected = len(load_chunks_from_folder(CHUNKS_ROOT_DIR, title))
+        ids = all_chunk_ids[title]
+        if not expected or len(ids) != expected:
+            raise InsertOnlyRefusal("Incomplete chunks")
+        with db.pg.cursor() as cursor:
+            cursor.execute("SELECT COUNT(*) FROM embeddings WHERE document_id = %s",
+                           (doc_id,))
+            if cursor.fetchone()[0] != expected:
+                raise InsertOnlyRefusal("Incomplete embedding metadata")
+            cursor.execute("SELECT processing_status FROM documents WHERE id = %s", (doc_id,))
+            if cursor.fetchone()[0] != "completed":
+                raise InsertOnlyRefusal("Incomplete document")
+        for offset in range(0, len(ids), 256):
+            batch = ids[offset:offset + 256]
+            points = db.qdrant.retrieve(Config.QDRANT_COLLECTION, ids=batch,
+                                       with_payload=True, with_vectors=False)
+            if ({point.id for point in points} != set(batch)
+                    or any(point.payload.get("document_id") != doc_id for point in points)):
+                raise InsertOnlyRefusal("Incomplete vector ingestion")
+
+
+def main(argv=None):
+    global DOCUMENTS, CHUNKS_ROOT_DIR, INSERT_ONLY, SOURCE_NAME
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--source-name")
+    parser.add_argument("--insert-only", action="store_true")
+    parser.add_argument("--yes", action="store_true")
+    parser.add_argument("--data-root", default=DATA_DIR)
+    parser.add_argument("--preflight-only", action="store_true")
+    args = parser.parse_args(argv)
+    if not args.data_root:
+        parser.error("DATA_INSERTION_DIRECTORY or --data-root is required")
+    if (args.insert_only and not args.source_name) or (args.preflight_only and not args.insert_only):
+        parser.error("Insert-only requires --source-name; preflight requires --insert-only")
+    if args.source_name is not None and (not args.source_name.strip()
+                             or args.source_name.startswith(".")
+                             or "\\" in args.source_name
+                             or Path(args.source_name).name != args.source_name):
+        parser.error("Invalid source name")
+    INSERT_ONLY, SOURCE_NAME = args.insert_only, args.source_name
+    root = Path(args.data_root)
+    CHUNKS_ROOT_DIR = str(root / "CHUNKS")
+    # Filter before discovery, including before inspecting any unrelated chunks.
+    if SOURCE_NAME:
+        paths = [p for p in (root / "DOCUMENTS").glob("*")
+                 if p.stem == SOURCE_NAME and p.is_file() and p.stat().st_size]
+        DOCUMENTS = [{"file_path": str(p), "chunk_dir": SOURCE_NAME,
+                      "title": SOURCE_NAME, "owner": "admin", "collection": "Hi_Help"}
+                     for p in paths
+                     if discover_chunk_files(root / "CHUNKS" / SOURCE_NAME)]
+        if len(DOCUMENTS) != 1:
+            print("Selected source must have exactly one nonempty document and chunks.")
+            return 1
+    else:
+        DOCUMENTS = [{"file_path": str(s.file_path), "chunk_dir": s.title,
+                      "title": s.title, "owner": "admin", "collection": "Hi_Help"}
+                     for s in discover_knowledge_sources(root / "DOCUMENTS", root / "CHUNKS")]
+    if not INSERT_ONLY:
+        return run_import(yes=args.yes)
+    if not args.yes and input("Proceed with insert-only operation? (yes/no): ").strip().lower() != "yes":
+        return 0
+    try:
+        # Legacy diagnostics may contain service URLs or chunk read errors.
+        with open(os.devnull, "w") as sink, contextlib.redirect_stdout(sink), contextlib.redirect_stderr(sink):
+            result = run_import(yes=True, preflight_only=args.preflight_only)
+        if result:
+            raise RuntimeError("Connection failed")
+        print("Insert-only preflight passed." if args.preflight_only else "Insert-only ingestion verified.")
+        return 0
+    except (Exception, KeyboardInterrupt) as exc:
+        if isinstance(exc, InsertOnlyRefusal):
+            print(str(exc))
+        print("Insert-only operation failed. Partial NEW data may remain in PostgreSQL, MinIO, "
+              "or Qdrant. Nothing was deleted. Inspect state before any retry.")
+        return 1
 
 
 if __name__ == "__main__":

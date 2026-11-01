@@ -45,7 +45,6 @@ def generate_knowledge_files(
     title = _resolve_source_name(source_path, source_name)
     data = pd.read_csv(source_path)
     required_columns = {
-        "سوال استاندارد",
         "موضوع اصلی",
         "کلید کنترل تجمیع",
         "سوال شفاف‌سازی شده",
