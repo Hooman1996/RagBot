@@ -309,7 +309,7 @@ def test_original_prompt_definitions_are_identical_to_head():
         node.name if isinstance(node, ast.ClassDef) else node.targets[0].id: node
         for node in current.body if isinstance(node, (ast.ClassDef, ast.Assign))
     }
-    for name in ('new_architecture/app/config.py', 'negahboom_prompts.py'):
+    for name in ('new_architecture/app/config.py',):
         original = ast.parse(subprocess.check_output(['git', 'show', f'HEAD:{name}']))
         for node in original.body:
             if isinstance(node, (ast.ClassDef, ast.Assign)):

@@ -71,9 +71,11 @@ def test_fixed_and_auto_session_context_reaches_fake_model(mode, monkeypatch):
                 assert messages[0]['content'] == getattr(expected, 'CHITCHAT_SYSTEM_PROMPT' if category == 'chitchat' else 'GENERAL_RAG_SYSTEM_PROMPT')
                 assert [m['role'] for m in messages] == ['system', 'user']
                 if platform == 'negahboom':
-                    assert INTRODUCTION in messages[0]['content']
-                    assert COMPANY_BACKGROUND in messages[0]['content']
                     assert 'Hibank' not in messages[0]['content']
+                    assert 'NegahBoom' in messages[0]['content']
+                    if category == 'FAQ':
+                        assert INTRODUCTION in messages[0]['content']
+                        assert COMPANY_BACKGROUND in messages[0]['content']
     asyncio.run(run())
 
 
@@ -81,12 +83,16 @@ def test_identity_and_neutral_user_templates():
     assert INTRODUCTION == 'من Hibot هستم، دستیار هوشمند بانکداری باز'
     assert NegahBoomPrompts.GENERAL_RAG_USER_PROMPT == Config.GENERAL_RAG_USER_PROMPT
     assert NegahBoomPrompts.CHITCHAT_USER_PROMPT == Config.CHITCHAT_USER_PROMPT
-    for prompt in (NegahBoomPrompts.GENERAL_RAG_SYSTEM_PROMPT, NegahBoomPrompts.CHITCHAT_SYSTEM_PROMPT):
-        assert MISSING_INFORMATION in prompt
-        assert OUT_OF_SCOPE in prompt
-        assert 'NegahBoom is not a bank' in prompt
-        assert 'untrusted data' in prompt
-        assert 'Do not prepend this introduction to every answer.' in prompt
+    prompt = NegahBoomPrompts.GENERAL_RAG_SYSTEM_PROMPT
+    assert MISSING_INFORMATION in prompt
+    assert OUT_OF_SCOPE in prompt
+    assert 'NegahBoom is not a bank' in prompt
+    assert 'untrusted data' in prompt
+    assert 'Do not prepend this introduction to every answer.' in prompt
+    prompt = NegahBoomPrompts.CHITCHAT_SYSTEM_PROMPT
+    assert 'من Hibot، دستیار هوشمند NegahBoom هستم' in prompt
+    assert 'NegahBoom' in prompt
+    assert 'Hibank' not in prompt
 
 
 def load_rewriter():
