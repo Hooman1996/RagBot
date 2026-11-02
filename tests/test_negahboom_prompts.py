@@ -8,14 +8,14 @@ from unittest.mock import AsyncMock
 
 import pytest
 
-from negahboom_prompts import (
+from new_architecture.app.config import (
     COMPANY_BACKGROUND,
     INTRODUCTION,
     MISSING_INFORMATION,
     OUT_OF_SCOPE,
+    Config,
     NegahBoomPrompts,
 )
-from new_architecture.app.config import Config
 from prompt_selection import PromptContext, select_prompt_context
 from tests.test_p0_p1_repairs import ModulePatch, graph_import_stubs, load_module
 from tests.test_rag_answer_prompt_roles import make_rag

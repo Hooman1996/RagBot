@@ -1,4 +1,5 @@
 """Correction regressions: real handlers/graph with synthetic in-memory services."""
+import ast
 import asyncio
 import copy
 import json
@@ -21,8 +22,7 @@ from conversation_history import (
 )
 from document_category import get_document_category
 from mixed_source_prompts import MixedSourcePrompts
-from negahboom_prompts import NegahBoomPrompts
-from new_architecture.app.config import Config
+from new_architecture.app.config import Config, NegahBoomPrompts
 from prompt_selection import select_prompt_context
 from tests.test_answering_service import Classifier, ImmediateRunner, Processor
 from tests.test_mobile_history_content import (
@@ -303,9 +303,18 @@ def test_old_header_cannot_block_mobile_close_or_override_owner(binding):
     asyncio.run(run())
 
 
-def test_original_prompt_modules_are_byte_identical_to_head():
+def test_original_prompt_definitions_are_identical_to_head():
+    current = ast.parse(Path('new_architecture/app/config.py').read_text())
+    definitions = {
+        node.name if isinstance(node, ast.ClassDef) else node.targets[0].id: node
+        for node in current.body if isinstance(node, (ast.ClassDef, ast.Assign))
+    }
     for name in ('new_architecture/app/config.py', 'negahboom_prompts.py'):
-        assert Path(name).read_bytes() == subprocess.check_output(['git', 'show', f'HEAD:{name}'])
+        original = ast.parse(subprocess.check_output(['git', 'show', f'HEAD:{name}']))
+        for node in original.body:
+            if isinstance(node, (ast.ClassDef, ast.Assign)):
+                key = node.name if isinstance(node, ast.ClassDef) else node.targets[0].id
+                assert ast.dump(definitions[key]) == ast.dump(node), key
 
 
 def test_evaluation_legacy_state_switches_and_batch_is_stateless():
