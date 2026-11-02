@@ -6,7 +6,6 @@ import csv
 import hashlib
 import io
 import json
-import stat
 import threading
 import time
 from types import SimpleNamespace
@@ -18,7 +17,7 @@ import main
 from coverage_check import prompts, suggest_prompts
 from coverage_check.jobs import CheckJobs
 from coverage_check.settings import CoverageSettings, RunSettings, SettingsError, load_settings
-from coverage_check.store import CheckStore
+from tests.coverage_memory_store import MemoryCheckStore
 from coverage_check.suggest_jobs import SuggestJobs
 from coverage_check.suggester import Suggester, context_chunk_ids
 from tests.test_coverage_check import (  # noqa: F401  (fixtures)
@@ -26,7 +25,7 @@ from tests.test_coverage_check import (  # noqa: F401  (fixtures)
 from tests.test_web_auth import csrf, login, setup  # noqa: F401  (fixture)
 from utils.concurrency import AdmissionLimiter
 
-SETTINGS = CoverageSettings(artifact_dir=None, upload_max_bytes=5242880, max_rows=100, run=RunSettings(),
+SETTINGS = CoverageSettings(list_days=30, upload_max_bytes=5242880, max_rows=100, run=RunSettings(),
                             combine_max=10, chunk_max_chars=4000, model_max_tokens=300)
 GOOD = {"chunk_numbers": [1], "missing": ["daily limit"], "faq_question": "پرسش ساختگی؟",
         "faq_answer": "پاسخ ساختگی. [تکمیل شود: سقف روزانه]"}
@@ -54,7 +53,7 @@ class SuggestRag:
 
 
 def new_store(tmp_path, rows=1):
-    store = CheckStore(tmp_path / "private")
+    store = MemoryCheckStore()
     meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
                         prompt_version=VERSION,
                         rows=[{"row": n, "id": str(n), "question": f" synthetic question {n} "}
@@ -235,19 +234,16 @@ def test_unverified_numbers_are_stored_with_the_suggestion(tmp_path):
 
 # Store ------------------------------------------------------------------
 
-def test_suggestion_files_are_private_and_replaced(tmp_path):
+def test_suggestions_are_replaced_and_codes_reload(tmp_path):
     store, run_id = new_store(tmp_path, rows=3)
     assert store.suggestion_statuses(run_id) == {} and store.suggestion(run_id, 1) is None
-    assert not (store.root / run_id / "suggestions").exists()
     store.write_suggestion(run_id, 1, {"status": "error", "error_code": "model_failed"})
     store.write_suggestion(run_id, 2, {"status": "done"})
     store.write_suggestion(run_id, 1, {"status": "done", "faq_question": "synthetic"})
-    folder = store.root / run_id / "suggestions"
-    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
-    assert all(stat.S_IMODE(f.stat().st_mode) == 0o600 for f in folder.glob("*.json"))
     assert store.suggestion(run_id, 1)["faq_question"] == "synthetic"
     assert store.suggested_rows(run_id) == {1, 2}
-    fresh = CheckStore(tmp_path / "private")
+    store._suggestions.clear()
+    fresh = store
     assert fresh.suggestion_statuses(run_id) == {1: "done", 2: "done"}
 
 
@@ -287,7 +283,6 @@ def test_cancel_stops_the_model_call_at_once_and_writes_nothing(tmp_path):
         await jobs.aclose()
 
     asyncio.run(scenario())
-    assert not (store.root / run_id / "suggestions").exists()
     assert store.suggestion_statuses(run_id) == {}
 
 

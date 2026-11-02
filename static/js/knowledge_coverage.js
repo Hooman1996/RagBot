@@ -287,8 +287,8 @@
         tbody.replaceChildren(...out);
         return activeTr;
     }
-    function renderChecks(document, tbody, checks, canStart, actions) {
-        if (!checks.length) { const tr = node(document, 'tr'); const td = node(document, 'td', 'No checks yet.', 'coverage-empty'); td.setAttribute('colspan', '7'); tr.append(td); tbody.replaceChildren(tr); return; }
+    function renderChecks(document, tbody, checks, canStart, actions, emptyMessage = 'No checks yet.') {
+        if (!checks.length) { const tr = node(document, 'tr'); const td = node(document, 'td', emptyMessage, 'coverage-empty'); td.setAttribute('colspan', '7'); tr.append(td); tbody.replaceChildren(tr); return; }
         tbody.replaceChildren(...checks.map(check => {
             const tr = node(document, 'tr');
             tr.append(node(document, 'td', String(check.created_at || '').replace('T', ' ').slice(0, 19)));
@@ -316,9 +316,10 @@
         const $ = name => document.getElementById('coverage' + name);
         const root = $('Root'), canStart = root.dataset.canStart === 'true', follow = $('Follow');
         const state = {
-            checks: [], open: null, openState: null, offset: 0, total: 0, timer: null,
+            listAll: false, checks: [], open: null, openState: null, offset: 0, total: 0, timer: null,
             expanded: new Set(), details: new Map(), lastKey: null, lastActive: null, activeTr: null, suggest: null
         };
+        const listDays = $('ListScope')?.dataset.days || '30';
         if (follow) follow.checked = true;
         function showError(code) { $('Error').textContent = code ? API_ERRORS[code] || 'Error: ' + code : ''; $('Error').hidden = !code; }
         function stopFollowing() { if (follow) follow.checked = false; }
@@ -433,8 +434,9 @@
             $('Download').setAttribute('href', API + 'checks/' + id + '/export');
         }
         async function loadChecks() {
-            state.checks = await call('checks');
-            renderChecks(document, $('Checks'), state.checks, canStart, actions);
+            state.checks = await call('checks' + (state.listAll ? '?all=true' : ''));
+            renderChecks(document, $('Checks'), state.checks, canStart, actions,
+                state.listAll ? 'No checks yet.' : 'No checks in the last ' + listDays + ' days.');
         }
         // Polls every 3 seconds while a check runs or the open check has suggestions queued or active.
         function updateTimer() {
@@ -453,7 +455,8 @@
             open: async id => {
                 if (state.open !== id) {
                     state.expanded = new Set(); state.details = new Map(); state.lastActive = null; state.openState = null; state.suggest = null;
-                    if (follow) follow.checked = true;
+                    const listDays = $('ListScope')?.dataset.days || '30';
+        if (follow) follow.checked = true;
                 }
                 state.open = id; state.offset = 0; state.lastKey = null; showError(''); await refresh();
             },
@@ -509,6 +512,13 @@
 
         if (global.localStorage && global.localStorage.getItem('theme') === 'light') document.body.classList.add('light-mode');
         $('Theme').addEventListener('click', () => { const light = document.body.classList.toggle('light-mode'); global.localStorage.setItem('theme', light ? 'light' : 'dark'); });
+        $('ListAll')?.addEventListener('click', () => {
+            state.listAll = !state.listAll;
+            $('ListAll')?.setAttribute('aria-pressed', String(state.listAll));
+            if ($('ListAll')) $('ListAll').textContent = state.listAll ? 'Show last ' + listDays + ' days' : 'Show all checks';
+            if ($('ListScope')) $('ListScope').textContent = state.listAll ? 'All checks' : 'Last ' + listDays + ' days';
+            return refresh();
+        });
         if ($('Legend')) renderLegend(document, $('Legend'));
         $('Filter').addEventListener('change', () => { stopFollowing(); state.offset = 0; loadResults().catch(e => showError(e.message)); });
         $('Previous').addEventListener('click', () => { stopFollowing(); state.offset = Math.max(0, state.offset - PAGE_SIZE); loadResults().catch(e => showError(e.message)); });

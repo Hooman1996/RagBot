@@ -10,7 +10,6 @@ from pathlib import Path
 
 from dotenv import dotenv_values
 
-from coverage_check.settings import DEFAULT_ARTIFACT_DIR
 from scripts.check_tracked_secrets import secret_key
 from scripts.validate_environment import SPECS, analyze_environment, render_text
 
@@ -224,7 +223,6 @@ OLD_AUDIT_KEYS = {
 def coverage_settings_keys() -> dict[str, tuple[str, str, str | None, str | None]]:
     source = (REPOSITORY_ROOT / "coverage_check" / "settings.py").read_text(encoding="utf-8")
     keys = {key: (kind, default, low, high) for kind, key, default, low, high in _COVERAGE_READ.findall(source)}
-    keys["KNOWLEDGE_COVERAGE_ARTIFACT_DIR"] = ("path", DEFAULT_ARTIFACT_DIR, None, None)
     return keys
 
 

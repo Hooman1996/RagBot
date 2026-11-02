@@ -7,7 +7,6 @@ import csv
 import io
 import json
 import os
-import stat
 import threading
 import time
 from dataclasses import dataclass
@@ -25,7 +24,8 @@ from coverage_check import prompts
 from coverage_check.checker import CoverageChecker
 from coverage_check.jobs import CheckJobs
 from coverage_check.settings import CoverageSettings, RunSettings, SettingsError, load_settings
-from coverage_check.store import CheckStore, StoreError, parse_csv
+from coverage_check.store import StoreError, parse_csv
+from tests.coverage_memory_store import MemoryCheckStore
 from tests.test_web_auth import csrf, login, setup  # noqa: F401  (fixture)
 from utils.concurrency import AdmissionLimiter
 
@@ -115,7 +115,7 @@ def answering(rag, intent="general"):
 
 
 def run_settings(**overrides):
-    return CoverageSettings(artifact_dir=None, upload_max_bytes=5242880, max_rows=10000,
+    return CoverageSettings(list_days=30, upload_max_bytes=5242880, max_rows=10000,
                             run=RunSettings(), combine_max=10, chunk_max_chars=4000,
                             model_max_tokens=300).run_values(RunSettings(**overrides))
 
@@ -390,8 +390,8 @@ def test_csv_rules():
 
 
 @pytest.mark.parametrize("key,value", [
-    ("KNOWLEDGE_COVERAGE_ENABLED", "maybe"), ("KNOWLEDGE_COVERAGE_ARTIFACT_DIR", "relative/dir"),
-    ("KNOWLEDGE_COVERAGE_ARTIFACT_DIR", "/tmp/coverage"), ("KNOWLEDGE_COVERAGE_ARTIFACT_DIR", os.getcwd() + "/x"),
+    ("KNOWLEDGE_COVERAGE_ENABLED", "maybe"), ("KNOWLEDGE_COVERAGE_LIST_DAYS", "0"),
+    ("KNOWLEDGE_COVERAGE_LIST_DAYS", "3651"), ("KNOWLEDGE_COVERAGE_LIST_DAYS", "abc"),
     ("KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", "1023"), ("KNOWLEDGE_COVERAGE_MAX_ROWS", "100001"),
     ("KNOWLEDGE_COVERAGE_DEPTH", "0"), ("KNOWLEDGE_COVERAGE_KEEP", "151"), ("KNOWLEDGE_COVERAGE_BATCH_SIZE", "21"),
     ("KNOWLEDGE_COVERAGE_BROADER_ENABLED", "yes"), ("KNOWLEDGE_COVERAGE_BROADER_DEPTH", "150"),
@@ -432,7 +432,7 @@ def api(setup, tmp_path, monkeypatch):
     monkeypatch.delenv("KNOWLEDGE_COVERAGE_ENABLED", raising=False)
     if not any(getattr(r, "path", None) == "/api/knowledge-coverage/checks" for r in main.app.routes):
         main.app.include_router(coverage_api.router)
-    settings = CoverageSettings(artifact_dir=tmp_path / "private", upload_max_bytes=5242880, max_rows=100,
+    settings = CoverageSettings(list_days=30, upload_max_bytes=5242880, max_rows=100,
                                 run=RunSettings(), combine_max=10, chunk_max_chars=4000, model_max_tokens=300)
     rag = Rag()
     service = answering(rag)
@@ -441,7 +441,7 @@ def api(setup, tmp_path, monkeypatch):
     monkeypatch.setattr(main.app.state, "blocking_runner", Runner(), raising=False)
     setup.get_available_documents = lambda: [{"title": "Synthetic_FAQ"}]
     monkeypatch.setattr(main.app.state, "db_manager", setup, raising=False)
-    runtime = coverage_api.CoverageRuntime(main.app, settings)
+    runtime = coverage_api.CoverageRuntime(main.app, settings, MemoryCheckStore())
     queued = []
     runtime.jobs.enqueue = queued.append
     monkeypatch.setattr(main.app.state, "coverage_check", runtime, raising=False)
@@ -490,10 +490,6 @@ def test_admin_starts_and_viewer_reads_another_users_run(api):
         assert meta["prompt_version"] == prompts.PROMPT_VERSION
         assert meta["settings"]["depth"] == 150 and meta["settings"]["model_max_tokens"] == 300
         assert "drop" not in json.dumps(stored.inputs(run_id))
-        folder = stored.root / run_id
-        assert stat.S_IMODE(folder.stat().st_mode) == 0o700
-        assert stat.S_IMODE((folder / "meta.json").stat().st_mode) == 0o600
-
         login(viewer, "bob")
         page = viewer.get("/knowledge-coverage")
         assert page.status_code == 200 and 'id="coverageForm"' not in page.text
@@ -534,7 +530,7 @@ def test_resume_with_a_different_prompt_version_returns_409(api, version):
         stored.pop("prompt_version")  # a run created before step 23
     else:
         stored["prompt_version"] = version
-    store._write(store.root / run_id / "meta.json", stored)
+    store.runs[run_id] = stored
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, "alice")
         listing = client.get("/api/knowledge-coverage/checks").json()
@@ -620,7 +616,7 @@ def test_delete_removes_a_finished_run_and_its_caches(api, state, caplog):
         with caplog.at_level("INFO", logger="coverage_check"):
             response = delete(client, run_id)
         assert response.status_code == 200 and response.json() == {"deleted": run_id}
-        assert not (store.root / run_id).exists() and (store.root / kept).is_dir()
+        assert run_id not in store.runs and store.meta(kept)
         assert run_id not in store._results and run_id not in store._suggestions
         for url in (f"/api/knowledge-coverage/checks/{run_id}", f"/api/knowledge-coverage/checks/{run_id}/rows",
                     f"/api/knowledge-coverage/checks/{run_id}/rows/1"):
@@ -641,7 +637,7 @@ def test_delete_refuses_a_queued_or_running_run(api, state):
         login(client, "alice")
         response = delete(client, run_id)
     assert response.status_code == 409 and response.json()["detail"] == "invalid_state"
-    assert (store.root / run_id / "meta.json").is_file() and store.meta(run_id)["state"] == state
+    assert store.meta(run_id)["state"] == state
 
 
 def test_delete_refuses_while_a_suggestion_is_queued(api):
@@ -653,28 +649,19 @@ def test_delete_refuses_while_a_suggestion_is_queued(api):
         login(client, "alice")
         response = delete(client, run_id)
     assert response.status_code == 409 and response.json()["detail"] == "suggestions_running"
-    assert (store.root / run_id / "meta.json").is_file()
+    assert store.meta(run_id)
 
 
-def test_delete_bad_id_or_symlinked_run_is_404_and_touches_nothing_outside(api, tmp_path):
+@pytest.mark.parametrize("run_id", ["not-a-run", "c_" + "A" * 32, "c_" + "a" * 32])
+def test_bad_run_id_is_404_for_get_export_and_delete(api, run_id):
     api.db.users[1]["role"] = "admin"
-    store = api.runtime.store
-    finished_run(store)
-    outside = tmp_path / "outside"
-    target_id = finished_run(CheckStore(outside))
-    target = outside / "checks" / target_id
-    link_id = "c_" + "b" * 32
-    os.symlink(target, store.root / link_id)
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, "alice")
-        for run_id in ("c_" + "a" * 32, "not-a-run", "c_" + "A" * 32, link_id):
-            response = delete(client, run_id)
-            assert response.status_code == 404 and response.json()["detail"] == "not_found", run_id
-    assert (store.root / link_id).is_symlink()
-    assert (target / "meta.json").is_file() and (target / "results" / "1.json").is_file()
-    with pytest.raises(StoreError):
-        store.delete(link_id)
-    assert target.is_dir()
+        for suffix in ("", "/export"):
+            response = client.get(f"/api/knowledge-coverage/checks/{run_id}{suffix}")
+            assert response.status_code == 404 and response.json()["detail"] == "not_found"
+        response = delete(client, run_id)
+        assert response.status_code == 404 and response.json()["detail"] == "not_found"
 
 
 @pytest.mark.parametrize("role", ["user", "dashboard_viewer"])
@@ -685,13 +672,13 @@ def test_delete_needs_coverage_run_start(api, role):
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, "alice")
         assert delete(client, run_id).status_code == 403
-    assert (store.root / run_id / "meta.json").is_file()
+    assert store.meta(run_id)
 
 
 # Export and restart ---------------------------------------------------
 
 def make_run(tmp_path, rows):
-    store = CheckStore(tmp_path / "private")
+    store = MemoryCheckStore()
     meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
                          prompt_version=VERSION, rows=rows)
     return store, meta["run_id"]
@@ -737,7 +724,7 @@ def test_restart_interrupts_and_resume_finishes_only_missing_rows(tmp_path):
             return {"result": "not_answered", "error_code": None, "model_calls": 10, "duration_ms": 1}
 
     async def scenario():
-        jobs = CheckJobs(CheckStore(tmp_path / "private"), lambda meta: Checker())
+        jobs = CheckJobs(store, lambda meta: Checker())
         assert await jobs.recover() == 1
         assert jobs.store.meta(run_id)["state"] == "interrupted"
         jobs.store.set_state(run_id, "queued")
@@ -756,7 +743,7 @@ def test_restart_interrupts_and_resume_finishes_only_missing_rows(tmp_path):
 
 
 def test_queue_runs_in_fifo_order_and_cancel_between_rows(tmp_path):
-    store = CheckStore(tmp_path / "private")
+    store = MemoryCheckStore()
     first = store.create(owner_id=1, file_name="a.csv", documents=DOCUMENTS, settings=run_settings(),
                          prompt_version=VERSION,
                          rows=[{"row": n, "id": "", "question": f"a{n}"} for n in (1, 2, 3)])["run_id"]
@@ -880,7 +867,7 @@ def test_stop_cancels_the_model_call_at_once_and_resume_rechecks_the_row(tmp_pat
         await jobs.cancel(run_id)
         assert await async_wait_until(lambda: store.meta(run_id)["state"] == "cancelled")
         assert gate.cancelled_at is not None and gate.cancelled_at - asked < 1.0
-        assert not (store.root / run_id / "results" / "2.json").exists()
+        assert store.result(run_id, 2) is None
         assert store.result_codes(run_id) == {1: "answered"}
         snapshot = limiter.snapshot()
         assert snapshot.active == 0 and snapshot.waiting == 0
@@ -923,12 +910,12 @@ def test_app_shutdown_reraises_and_leaves_the_run_to_recover(tmp_path, stop_pend
         assert worker.cancelled()
         assert store.meta(run_id)["state"] == "running"
         assert jobs.active is None
-        fresh = CheckJobs(CheckStore(tmp_path / "private"), lambda meta: Checker())
+        fresh = CheckJobs(store, lambda meta: Checker())
         assert await fresh.recover() == 1
 
     asyncio.run(scenario())
     assert store.meta(run_id)["state"] == "interrupted"
-    assert not (store.root / run_id / "results" / "2.json").exists()
+    assert store.result(run_id, 2) is None
 
 
 def test_shared_chunk_text_is_stored_once(tmp_path):
@@ -947,11 +934,7 @@ def test_shared_chunk_text_is_stored_once(tmp_path):
         await jobs.aclose()
 
     asyncio.run(scenario())
-    folder = store.root / run_id / "chunks"
-    files = sorted(folder.glob("*.json"))
-    assert len(files) == 3
-    assert stat.S_IMODE(folder.stat().st_mode) == 0o700
-    assert all(stat.S_IMODE(f.stat().st_mode) == 0o600 for f in files)
+    assert len(store.chunks[run_id]) == 3
     first, second = store.result(run_id, 1), store.result(run_id, 2)
     assert "texts" not in first and shared not in json.dumps(first)
     assert first["text_keys"]["k1"] == second["text_keys"]["k1"]
@@ -1084,10 +1067,10 @@ def compare_run(store, results, version, row_count=6, durations=None):
     return run_id
 
 
-def run_compare(tmp_path, argv):
+def run_compare(store, argv):
     from scripts import coverage_compare
     out = io.StringIO()
-    code = coverage_compare.main(argv, artifact_dir=tmp_path / "private", out=out)
+    code = coverage_compare.main(argv, store=store, out=out)
     text = out.getvalue()
     for secret in (*COMPARE_QUESTIONS, COMPARE_NOTE, "synthetic private title"):
         assert secret not in text
@@ -1095,7 +1078,7 @@ def run_compare(tmp_path, argv):
 
 
 def compare_pair(tmp_path):
-    store = CheckStore(tmp_path / "private")
+    store = MemoryCheckStore()
     before = compare_run(store, {1: ("answered", None), 2: ("partial", None), 3: ("error", "invalid_model_output"),
                                  4: ("not_answered", None), 5: ("chitchat", None), 6: ("answered", None)},
                          "aaaaaaaaaaaa")
@@ -1105,8 +1088,8 @@ def compare_pair(tmp_path):
 
 
 def test_compare_prints_runs_change_table_and_changed_rows(tmp_path):
-    _, before, after = compare_pair(tmp_path)
-    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after])
+    store, before, after = compare_pair(tmp_path)
+    code, lines, _ = run_compare(store, ["--before", before, "--after", after])
     assert code == 0
     first, second, table, changed = lines
     assert first["kind"] == "run" and first["side"] == "before" and first["run_id"] == before
@@ -1134,14 +1117,14 @@ def test_compare_prints_runs_change_table_and_changed_rows(tmp_path):
 
 
 def test_compare_with_expected_prints_agreement(tmp_path):
-    _, before, after = compare_pair(tmp_path)
+    store, before, after = compare_pair(tmp_path)
     expected = tmp_path / "expected.csv"
     labels = ["answered", "Answered ", "not_answered", "partial", "chitchat", "answered"]
     # A blank line after row 2 is skipped, as the upload's parse_csv does.
     body = "id,query,expected\n" + "".join(f"{n},{q},{label}\n" + (",,\n" if n == 2 else "")
                                            for n, (q, label) in enumerate(zip(COMPARE_QUESTIONS, labels), 1))
     expected.write_text("﻿" + body, encoding="utf-8")
-    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after, "--expected", str(expected)])
+    code, lines, _ = run_compare(store, ["--before", before, "--after", after, "--expected", str(expected)])
     assert code == 0
     agreement = [line for line in lines if line["kind"] == "agreement"]
     assert agreement == [
@@ -1152,23 +1135,195 @@ def test_compare_with_expected_prints_agreement(tmp_path):
 
 
 def test_compare_unknown_expected_value_exits_2(tmp_path):
-    _, before, after = compare_pair(tmp_path)
+    store, before, after = compare_pair(tmp_path)
     expected = tmp_path / "expected.csv"
     rows = "".join(f"{q},{'answered' if n != 4 else 'maybe'}\n" for n, q in enumerate(COMPARE_QUESTIONS, 1))
     expected.write_text("query,expected\n" + rows, encoding="utf-8")
-    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after, "--expected", str(expected)])
+    code, lines, _ = run_compare(store, ["--before", before, "--after", after, "--expected", str(expected)])
     assert code == 2 and lines == [{"error": "unknown_expected_value", "row": 4}]
     expected.write_text("query\n" + "".join(q + "\n" for q in COMPARE_QUESTIONS), encoding="utf-8")
-    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", after, "--expected", str(expected)])
+    code, lines, _ = run_compare(store, ["--before", before, "--after", after, "--expected", str(expected)])
     assert code == 2 and lines == [{"error": "missing_expected_column"}]
 
 
 def test_compare_mismatched_row_counts_exit_2(tmp_path):
-    store = CheckStore(tmp_path / "private")
+    store = MemoryCheckStore()
     before = compare_run(store, {1: ("answered", None)}, VERSION, row_count=6)
     after = compare_run(store, {1: ("answered", None)}, VERSION, row_count=5)
-    code, lines, text = run_compare(tmp_path, ["--before", before, "--after", after])
+    code, lines, text = run_compare(store, ["--before", before, "--after", after])
     assert code == 2 and "row_count_mismatch" in text
     assert lines == [{"error": "row_count_mismatch", "before": 6, "after": 5}]
-    code, lines, _ = run_compare(tmp_path, ["--before", before, "--after", "c_" + "0" * 32])
+    code, lines, _ = run_compare(store, ["--before", before, "--after", "c_" + "0" * 32])
     assert code == 2 and lines[0]["error"] == "not_found"
+
+
+@pytest.mark.parametrize("days", [1, 3650])
+def test_list_days_limits_and_legacy_storage_setting_ignored(days):
+    settings = load_settings({"KNOWLEDGE_COVERAGE_LIST_DAYS": str(days),
+                              "KNOWLEDGE_COVERAGE_ARTIFACT_DIR": "ignored"})
+    assert settings.list_days == days
+
+
+def test_list_window_all_and_custom_days(api):
+    from datetime import datetime, timedelta, timezone
+    api.db.users[1]["role"] = "dashboard_viewer"
+    store = api.runtime.store
+    old_finished = finished_run(store)
+    old_running = finished_run(store, "running")
+    old_time = (datetime.now(timezone.utc) - timedelta(days=45)).isoformat(timespec="milliseconds")
+    for run in (old_finished, old_running):
+        store.runs[run]["created_at"] = old_time
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        path = "/api/knowledge-coverage/checks"
+        assert [r["run_id"] for r in client.get(path).json()] == [old_running]
+        for suffix in ("?all=true", "?days=60"):
+            response = client.get(path + suffix)
+            assert response.status_code == 200
+            assert {r["run_id"] for r in response.json()} == {old_finished, old_running}
+        assert client.get(path + "?days=0").status_code == 422
+        assert 'data-days="30"' in client.get("/knowledge-coverage").text
+
+
+@pytest.mark.parametrize("role", ["user", "moderator", "analytics_viewer", "knowledge_editor"])
+def test_roles_without_coverage_cannot_view_page_list_or_export(api, role):
+    api.db.users[1]["role"] = role
+    run = finished_run(api.runtime.store)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        for path in ("/knowledge-coverage", "/api/knowledge-coverage/checks?all=true",
+                     f"/api/knowledge-coverage/checks/{run}/export"):
+            assert client.get(path).status_code == 403
+
+
+@pytest.mark.parametrize("method", ["list", "row_page"])
+def test_storage_unavailable_on_list_and_export_is_503(api, monkeypatch, method):
+    api.db.users[1]["role"] = "admin"
+    run = finished_run(api.runtime.store)
+    def unavailable(*args, **kwargs):
+        raise StoreError("storage_unavailable")
+    monkeypatch.setattr(api.runtime.store, method, unavailable)
+    path = "/api/knowledge-coverage/checks" if method == "list" else f"/api/knowledge-coverage/checks/{run}/export"
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = client.get(path)
+    assert response.status_code == 503 and response.json() == {"detail": "storage_unavailable"}
+    assert "SQL" not in response.text
+
+
+def test_schema_failure_keeps_health_and_disables_coverage(api, monkeypatch, caplog):
+    class UnavailableStore(MemoryCheckStore):
+        def ensure_schema(self):
+            raise StoreError("storage_unavailable")
+    store = UnavailableStore()
+    monkeypatch.delattr(main.app.state, "coverage_check")
+    with caplog.at_level("INFO", logger="coverage_check"):
+        assert asyncio.run(coverage_api.start(main.app, load_settings({}), store=store)) is None
+    assert store.closed and not hasattr(main.app.state, "coverage_check")
+    api.db.users[1]["role"] = "admin"
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        assert client.get("/api/health").status_code == 200
+        for path in ("/knowledge-coverage", "/api/knowledge-coverage/checks"):
+            response = client.get(path)
+            assert response.status_code == 503 and response.json()["detail"] == "coverage_unavailable"
+    events = [r.ragbot_event_data for r in caplog.records if hasattr(r, "ragbot_event_data")]
+    assert {"event": "coverage_storage_unavailable", "data": {"error_type": "StoreError"}} in events
+
+
+def test_start_initializes_schema_recovers_and_closes_store(api, monkeypatch):
+    store = MemoryCheckStore()
+    run = finished_run(store, "running")
+    ensured = []
+    monkeypatch.setattr(store, "ensure_schema", lambda: ensured.append(True))
+    async def scenario():
+        runtime = await coverage_api.start(main.app, api.runtime.settings, store=store)
+        assert runtime.store is store and ensured == [True]
+        assert store.meta(run)["state"] == "interrupted"
+        await runtime.aclose()
+        assert store.closed
+    asyncio.run(scenario())
+
+
+def test_export_bytes_match_captured_folder_export(api):
+    api.db.users[1]["role"] = "dashboard_viewer"
+    store = api.runtime.store
+    rows = [{"row": 1, "id": "-5", "question": "=cmd"}, {"row": 2, "id": "@x", "question": "+1"},
+            {"row": 3, "id": "3", "question": "synthetic suggested"}]
+    run = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings={},
+                       prompt_version=VERSION, rows=rows)["run_id"]
+    store.write_result(run, 1, {"result": "answered", "answer_batch": 2, "answer_phase": "initial",
+        "answer_chunk_ids": ["k7"], "combines": [],
+        "batches": [{"number": n, "phase": "initial", "verdict": v, "chunk_ids": ["k7"]}
+                    for n, v in ((1, "none"), (2, "complete"))],
+        "titles": {"k7": "=title"}, "broader_used": False, "model_calls": 2,
+        "duration_ms": 12, "error_code": None, "note": "-note"})
+    store.write_result(run, 3, {"result": "not_answered"})
+    store.write_suggestion(run, 3, {"status": "done", "faq_question": "=FAQ", "faq_answer": "synthetic answer",
+                                  "missing": ["limit"], "unverified_numbers": ["700"]})
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = client.get(f"/api/knowledge-coverage/checks/{run}/export")
+    # Captured from fb8e375's export_check and folder CheckStore before replacing storage.
+    expected = b"\xef\xbb\xbfrow,id,question,result,answer_batch,answer_phase,answer_chunk_ids,answer_faq_titles,batches_checked,broader_used,model_calls,duration_ms,error_code,note,suggested_question,suggested_answer,missing_facts,suggestion_unverified_numbers,suggestion_status\r\n1,'-5,'=cmd,answered,2,initial,k7,'=title,2,false,2,12,,'-note,,,,,\r\n2,'@x,'+1,waiting,,,,,,,,,,,,,,,\r\n3,3,synthetic suggested,not_answered,,,,,0,false,,,,,'=FAQ,synthetic answer,limit,700,done\r\n"
+    assert response.status_code == 200 and response.content == expected
+
+
+def test_export_uses_pages_of_500_without_per_row_reads(api, monkeypatch):
+    api.db.users[1]["role"] = "dashboard_viewer"
+    store = api.runtime.store
+    rows = [{"row": n, "id": "", "question": "synthetic"} for n in range(1, 10001)]
+    run = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings={},
+                       prompt_version=VERSION, rows=rows)["run_id"]
+    calls, original = [], store.row_page
+    def row_page(run_id, after_row, limit):
+        calls.append((after_row, limit))
+        return original(run_id, after_row, limit)
+    def per_row(*args):
+        raise AssertionError("export must use bulk reads")
+    monkeypatch.setattr(store, "row_page", row_page)
+    monkeypatch.setattr(store, "result", per_row)
+    monkeypatch.setattr(store, "suggestion", per_row)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = client.get(f"/api/knowledge-coverage/checks/{run}/export")
+    assert response.status_code == 200
+    assert calls == [(n, 500) for n in range(0, 10001, 500)]
+    assert len(list(csv.reader(io.StringIO(response.content.decode("utf-8-sig"))))) == 10001
+
+
+# Exercise the real HTTP routes and checker with both storage implementations.
+from tests.test_coverage_store import store as contract_store  # noqa: E402,F401
+
+
+def test_http_check_processing_export_and_delete_with_contract_store(api, contract_store, monkeypatch):
+    store = contract_store
+    api.db.users[1]["role"] = "admin"
+    runtime = asyncio.run(coverage_api.start(main.app, api.runtime.settings, store=store))
+    queued = []
+    runtime.jobs.enqueue = queued.append
+    monkeypatch.setattr(main.app.state, "coverage_check", runtime)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        response = client.post("/api/knowledge-coverage/checks", json=start_payload(), headers=csrf(client))
+        assert response.status_code == 201
+        run = response.json()["run_id"]
+        assert queued == [run]
+        # Run the real checker with the synthetic answering/model clients in api.
+        asyncio.run(runtime.jobs._run(run))
+        detail = client.get(f"/api/knowledge-coverage/checks/{run}").json()
+        assert detail["meta"]["state"] == "completed" and detail["done"] == 2
+        assert store.result(run, 1)["text_keys"]
+        store.write_suggestion(run, 1, {"status": "done", "faq_question": "synthetic draft", "faq_answer": "synthetic answer"})
+        api.db.users[1]["role"] = "dashboard_viewer"
+        listing = client.get("/api/knowledge-coverage/checks?all=true")
+        assert listing.status_code == 200 and listing.json()[0]["run_id"] == run
+        response = client.get(f"/api/knowledge-coverage/checks/{run}/export")
+        assert response.status_code == 200
+        rows = list(csv.DictReader(io.StringIO(response.content.decode("utf-8-sig"))))
+        assert len(rows) == 2 and rows[0]["suggested_question"] == "synthetic draft"
+        assert rows[1]["question"] == "'=SUM(1)"
+        assert delete(client, run).status_code == 403
+        api.db.users[1]["role"] = "admin"
+        assert delete(client, run).status_code == 200
+        assert client.get(f"/api/knowledge-coverage/checks/{run}").status_code == 404

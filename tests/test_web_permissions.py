@@ -321,7 +321,7 @@ def test_coverage_permissions_follow_the_flag_without_loading_settings(monkeypat
     from coverage_check import settings
     monkeypatch.setenv('KNOWLEDGE_COVERAGE_ENABLED', flag)
     monkeypatch.setenv('ENVIRONMENT', environment)
-    monkeypatch.setenv('KNOWLEDGE_COVERAGE_ARTIFACT_DIR', '/synthetic/coverage')
+    monkeypatch.setenv('KNOWLEDGE_COVERAGE_LIST_DAYS', '30')
     counter = Mock(side_effect=AssertionError('Settings must not load'))
     monkeypatch.setattr(settings, 'load_settings', counter)
     for _ in range(100):

@@ -360,8 +360,9 @@ def _specs() -> dict[str, VariableSpec]:
             kind="int", default="30", minimum=1,
             component="TEI reranker client", restart="FastAPI",
         ),
-        "KNOWLEDGE_COVERAGE_ARTIFACT_DIR": VariableSpec(
-            kind="path", default="/root/projects/faq-private/knowledge-coverage", component="Knowledge coverage", restart="FastAPI",
+        "KNOWLEDGE_COVERAGE_LIST_DAYS": VariableSpec(
+            kind="int", default="30", minimum=1, maximum=3650, component="Knowledge coverage", restart="FastAPI",
+            usage="coverage_check/api.py list_checks default window for the checks list",
         ),
         "KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES": VariableSpec(
             kind="int", default="5242880", minimum=1024, maximum=20971520, component="Knowledge coverage", restart="FastAPI",

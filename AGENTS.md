@@ -79,12 +79,12 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 
 #### Knowledge-coverage check routes
 
-`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit (`knowledge_audit/`) was deleted in step 25. Suggestions draft FAQ text only, into the run's private folder, and never change the knowledge base.
+`coverage_check.api.mount` includes these routes when `KNOWLEDGE_COVERAGE_ENABLED` is not `false`, whatever `ENVIRONMENT` says; `main.py` calls it. With the flag `false`, the `coverage_check_gate` middleware in `main.py` returns 404 for every coverage path. Access comes from `COVERAGE_ROLE_CAPABILITIES` in `web_permissions.py` (`admin`: `coverage_run_start`, `coverage_results_view`; `dashboard_viewer`: `coverage_results_view`). The old audit (`knowledge_audit/`) was deleted in step 25. Suggestions draft FAQ text only, into the run's PostgreSQL rows, and never change the knowledge base.
 
 - `GET /knowledge-coverage`
 - `GET /api/knowledge-coverage/documents`
 - `POST /api/knowledge-coverage/checks`
-- `GET /api/knowledge-coverage/checks`
+- `GET /api/knowledge-coverage/checks` (`?days`, `?all`)
 - `GET /api/knowledge-coverage/checks/{run_id}`
 - `GET /api/knowledge-coverage/checks/{run_id}/rows`
 - `GET /api/knowledge-coverage/checks/{run_id}/rows/{row}`
@@ -96,7 +96,7 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 - `GET /api/knowledge-coverage/checks/{run_id}/suggestions`
 - `POST /api/knowledge-coverage/checks/{run_id}/suggestions/cancel`
 
-Checks are stored on the server under `KNOWLEDGE_COVERAGE_ARTIFACT_DIR/checks/<run_id>/`, are kept until deleted from the page, and the CSV download is the copy to share.
+Checks are stored in PostgreSQL tables `coverage_runs`, `coverage_rows` and `coverage_chunks` (created by `scripts/create_coverage_tables.py` or at app start), are kept until deleted from the page, and the list shows the last `KNOWLEDGE_COVERAGE_LIST_DAYS` days unless "Show all checks" is pressed.
 
 #### Routes from `internal_evaluation_api.py`
 

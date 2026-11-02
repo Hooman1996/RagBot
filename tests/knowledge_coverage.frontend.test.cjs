@@ -34,6 +34,7 @@ function dom(canStart) {
     document.getElementById('coverageRoot').dataset = { canStart: String(canStart), uploadLimit: '5242880' };
     document.getElementById('coverageKeep').value = '50';
     document.getElementById('coverageBatchSize').value = '5';
+    document.getElementById('coverageListScope').dataset.days = '30';
     return document;
 }
 
@@ -67,8 +68,9 @@ function fixture() {
 }
 
 /* Boots the page against fixture data; returns helpers for the fake server and timers. */
-async function harness(canStart, data = fixture()) {
+async function harness(canStart, data = fixture(), withoutListControls = false) {
     const document = dom(canStart), $ = name => document.getElementById('coverage' + name);
+    if (withoutListControls) { document.ids.delete('coverageListScope'); document.ids.delete('coverageListAll'); }
     const requests = [], timers = [];
     const saved = { fetch: global.fetch, localStorage: global.localStorage, setInterval: global.setInterval, clearInterval: global.clearInterval };
     global.localStorage = { getItem() { return null; }, setItem() {} };
@@ -84,7 +86,7 @@ async function harness(canStart, data = fixture()) {
         if (options.method === 'DELETE') value = { deleted: path.replace('checks/', '') };
         else if (path === 'documents') value = d.documents;
         else if (path === 'checks' && options.method === 'POST') value = { run_id: RUN };
-        else if (path === 'checks') value = d.checks;
+        else if (path === 'checks' || path === 'checks?all=true') value = d.checks;
         else if (path.endsWith('/suggestions/cancel')) value = { cancelled: 1 };
         else if (path.endsWith('/suggestions') && options.method === 'POST') { value = { queued: 1 }; if (server.onSuggest) server.onSuggest(JSON.parse(options.body)); }
         else if (path.endsWith('/suggestions')) value = d.suggestions || { queued: 0, active_row: null, done: 0, errors: 0, eligible: 0 };
@@ -557,7 +559,7 @@ test('a cancelled confirm sends nothing; a confirmed delete sends DELETE and ref
         await h.booted.actions.delete(RUN);
         assert.deepEqual(deleteRequests(h).map(r => r.url), ['/api/knowledge-coverage/checks/' + RUN]);
         assert.ok(h.requests.slice(before).some(r => r.url === '/api/knowledge-coverage/checks' && !r.options.method));
-        assert.match(text(h.$('Checks')), /No checks yet\./);
+        assert.match(text(h.$('Checks')), /No checks in the last 30 days\./);
     } finally { global.confirm = savedConfirm; h.restore(); }
 });
 
@@ -581,4 +583,51 @@ test('deleting the open check hides the results and clears the expanded rows and
         assert.equal(state.details.size, 0);
         assert.equal($('Rows').children.length, 0);
     } finally { global.confirm = savedConfirm; h.restore(); }
+});
+
+
+test('the first list request uses the default window without all', async () => {
+    const h = await harness(false);
+    try {
+        assert.equal(h.booted.state.listAll, false);
+        const lists = h.requests.filter(r => /\/checks(?:\?|$)/.test(r.url));
+        assert.deepEqual(lists.map(r => r.url), ['/api/knowledge-coverage/checks']);
+    } finally { h.restore(); }
+});
+
+test('Show all checks toggles the URL, pressed state and scope without closing the open run', async () => {
+    const h = await harness(false), { $ } = h;
+    try {
+        await h.booted.actions.open(RUN);
+        await $('ListAll').dispatch('click');
+        assert.ok(h.requests.some(r => r.url === '/api/knowledge-coverage/checks?all=true'));
+        assert.equal($('ListAll').getAttribute('aria-pressed'), 'true');
+        assert.equal($('ListAll').textContent, 'Show last 30 days');
+        assert.equal($('ListScope').textContent, 'All checks');
+        h.server.data = { ...h.server.data, checks: [] };
+        await $('ListAll').dispatch('click');
+        assert.equal(h.requests.filter(r => /\/checks(?:\?|$)/.test(r.url)).pop().url, '/api/knowledge-coverage/checks');
+        assert.equal($('ListAll').getAttribute('aria-pressed'), 'false');
+        assert.equal($('ListAll').textContent, 'Show all checks');
+        assert.equal($('ListScope').textContent, 'Last 30 days');
+        assert.equal(h.booted.state.open, RUN);
+        assert.equal($('Results').hidden, false);
+    } finally { h.restore(); }
+});
+
+test('empty list text follows the selected scope', async () => {
+    const h = await harness(false, { ...fixture(), checks: [] });
+    try {
+        assert.match(text(h.$('Checks')), /No checks in the last 30 days\./);
+        await h.$('ListAll').dispatch('click');
+        assert.match(text(h.$('Checks')), /No checks yet\./);
+    } finally { h.restore(); }
+});
+
+test('a page without either list control still loads', async () => {
+    const h = await harness(false, fixture(), true);
+    try {
+        assert.ok(h.requests.some(r => r.url === '/api/knowledge-coverage/checks'));
+        assert.match(text(h.$('Checks')), /synthetic\.csv/);
+    } finally { h.restore(); }
 });

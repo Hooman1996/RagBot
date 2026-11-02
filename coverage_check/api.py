@@ -7,6 +7,7 @@ import csv
 import io
 import logging
 from collections import Counter
+from datetime import datetime, timedelta, timezone
 from typing import Annotated
 
 from fastapi import APIRouter, HTTPException, Query, Request
@@ -19,7 +20,7 @@ from coverage_check import prompts
 from coverage_check.checker import RESULTS, CoverageChecker
 from coverage_check.jobs import CheckJobs
 from coverage_check.settings import CoverageSettings, RunSettings, SettingsError, coverage_enabled, load_settings
-from coverage_check.store import CheckStore, StoreError, parse_csv
+from coverage_check.store import CheckStore, StoreError, parse_csv, postgres_connect_from_env
 from coverage_check.suggest_jobs import SuggestJobs
 from coverage_check.suggester import ELIGIBLE, Suggester
 from document_category import get_document_category
@@ -72,9 +73,9 @@ async def coverage_gate(request: Request, call_next):
 
 
 class CoverageRuntime:
-    def __init__(self, app, settings: CoverageSettings):
+    def __init__(self, app, settings: CoverageSettings, store):
         self.settings = settings
-        self.store = CheckStore(settings.artifact_dir)
+        self.store = store
 
         def factory(meta):
             return CoverageChecker(app.state.answering_service, app.state.request_limiter,
@@ -93,11 +94,20 @@ class CoverageRuntime:
     async def aclose(self) -> None:
         await self.suggest_jobs.aclose()
         await self.jobs.aclose()
+        await run_in_threadpool(self.store.close)
 
 
-async def start(app, settings: CoverageSettings) -> CoverageRuntime:
+async def start(app, settings: CoverageSettings, store=None) -> CoverageRuntime | None:
     """Called from the app lifespan once the answering service exists."""
-    runtime = CoverageRuntime(app, settings)
+    if store is None:
+        store = CheckStore(postgres_connect_from_env())
+    try:
+        await run_in_threadpool(store.ensure_schema)
+    except StoreError as exc:
+        log_event(logger, "coverage_storage_unavailable", {"error_type": type(exc).__name__})
+        await run_in_threadpool(store.close)
+        return None
+    runtime = CoverageRuntime(app, settings, store)
     await runtime.jobs.recover()
     app.state.coverage_check = runtime
     return runtime
@@ -119,7 +129,8 @@ async def store_call(fn, *args, **kwargs):
     try:
         return await run_in_threadpool(fn, *args, **kwargs)
     except StoreError as exc:
-        raise HTTPException(404 if exc.code == "not_found" else 422, detail=exc.code) from None
+        status = 503 if exc.code == "storage_unavailable" else 404 if exc.code == "not_found" else 422
+        raise HTTPException(status, detail=exc.code) from None
     except (OSError, ValueError, KeyError):
         raise HTTPException(500, detail="storage_failed") from None
 
@@ -156,7 +167,7 @@ def counts_for(meta: dict, codes: dict[int, str]) -> dict:
 def run_view(meta: dict, codes: dict[int, str], active_row: int | None = None) -> dict:
     keys = ("run_id", "created_at", "owner_id", "file_name", "documents", "settings", "state", "row_count")
     # Runs created before step 23 have no recorded version.
-    return {**{key: meta[key] for key in keys}, "prompt_version": meta.get("prompt_version"),
+    return {**{key: meta[key] for key in keys}, "prompt_version": meta.get("prompt_version") or None,
             "done": len(codes), "active_row": active_row}
 
 
@@ -241,7 +252,8 @@ async def page(request: Request, user: WebUser):
     settings = runtime_of(request).settings
     return templates.TemplateResponse(request=request, name="knowledge_coverage.html", context={
         "permissions": permissions_for_user(user.role, user.id), "defaults": settings.run.as_dict(),
-        "upload_max_bytes": settings.upload_max_bytes, "max_rows": settings.max_rows}, headers=NO_STORE)
+        "upload_max_bytes": settings.upload_max_bytes, "max_rows": settings.max_rows,
+        "list_days": getattr(settings, "list_days", 30)}, headers=NO_STORE)
 
 
 @router.get("/api/knowledge-coverage/documents")
@@ -297,11 +309,15 @@ async def start_check(request: Request, user: WebUser):
 
 
 @router.get("/api/knowledge-coverage/checks")
-async def list_checks(request: Request, user: WebUser):
+async def list_checks(request: Request, user: WebUser,
+                      days: Annotated[int | None, Query(ge=1, le=3650)] = None,
+                      all: bool = False):
     require(user, "coverage_results_view")
     runtime = runtime_of(request)
     store = runtime.store
-    metas = await store_call(store.list)
+    days = runtime.settings.list_days if days is None else days
+    since = None if all else datetime.now(timezone.utc) - timedelta(days=days)
+    metas = await store_call(store.list, since=since)
     views = []
     for meta in metas:
         codes = await store_call(store.result_codes, meta["run_id"])
@@ -415,23 +431,27 @@ async def export_check(run_id: str, request: Request, user: WebUser):
     require(user, "coverage_results_view")
     runtime = runtime_of(request)
     store = runtime.store
-    items = await store_call(store.inputs, run_id)
-    codes = await store_call(store.result_codes, run_id)
+    await store_call(store.meta, run_id)
     statuses = await store_call(store.suggestion_statuses, run_id)
+    first_page = await store_call(store.row_page, run_id, 0, 500)
 
     async def lines():
         buffer = io.StringIO()
         writer = csv.writer(buffer, lineterminator="\r\n")
         writer.writerow(EXPORT_COLUMNS)
         yield "﻿" + buffer.getvalue()
-        for item in items:
-            buffer.seek(0)
-            buffer.truncate()
-            row = item["row"]
-            found = await run_in_threadpool(store.result, run_id, row) if row in codes else None
-            suggestion = await run_in_threadpool(store.suggestion, run_id, row) if row in statuses else None
-            writer.writerow(export_line(item, found, suggestion, runtime.suggestion_status(run_id, row, statuses)))
-            yield buffer.getvalue()
+        page = first_page
+        while page:
+            for record in page:
+                buffer.seek(0)
+                buffer.truncate()
+                item, found, suggestion = record["input"], record["result"], record["suggestion"]
+                row = item["row"]
+                writer.writerow(export_line(item, found, suggestion, runtime.suggestion_status(run_id, row, statuses)))
+                yield buffer.getvalue()
+            if len(page) < 500:
+                break
+            page = await store_call(store.row_page, run_id, page[-1]["input"]["row"], 500)
 
     return StreamingResponse(lines(), media_type="text/csv; charset=utf-8", headers={
         **NO_STORE, "Content-Disposition": f'attachment; filename="coverage-{run_id}.csv"'})

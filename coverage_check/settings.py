@@ -3,10 +3,6 @@ from __future__ import annotations
 
 import os
 from dataclasses import asdict, dataclass
-from pathlib import Path
-
-REPO_ROOT = Path(__file__).resolve().parents[1]
-DEFAULT_ARTIFACT_DIR = "/root/projects/faq-private/knowledge-coverage"
 
 
 class SettingsError(ValueError):
@@ -73,7 +69,7 @@ class RunSettings:
 
 @dataclass(frozen=True)
 class CoverageSettings:
-    artifact_dir: Path
+    list_days: int
     upload_max_bytes: int
     max_rows: int
     run: RunSettings
@@ -88,19 +84,6 @@ class CoverageSettings:
         """Everything a run used, stored in its meta."""
         return {**run.as_dict(), "combine_max": self.combine_max,
                 "chunk_max_chars": self.chunk_max_chars, "model_max_tokens": self.model_max_tokens}
-
-
-def _artifact_dir(env) -> Path:
-    key = "KNOWLEDGE_COVERAGE_ARTIFACT_DIR"
-    raw = env.get(key, DEFAULT_ARTIFACT_DIR)
-    if not isinstance(raw, str) or not raw.strip():
-        raise SettingsError(key)
-    path = Path(raw.strip())
-    tmp = Path("/tmp")
-    if (not path.is_absolute() or path == REPO_ROOT or REPO_ROOT in path.parents
-            or path == tmp or tmp in path.parents):
-        raise SettingsError(key)
-    return path
 
 
 def load_settings(environ=None) -> CoverageSettings:
@@ -120,7 +103,7 @@ def load_settings(environ=None) -> CoverageSettings:
         # Each value was range-checked above; this only maps a field to its variable.
         raise SettingsError("KNOWLEDGE_COVERAGE_" + str(exc).upper()) from None
     return CoverageSettings(
-        artifact_dir=_artifact_dir(env),
+        list_days=_int(env, "KNOWLEDGE_COVERAGE_LIST_DAYS", 30, 1, 3650),
         upload_max_bytes=_int(env, "KNOWLEDGE_COVERAGE_UPLOAD_MAX_BYTES", 5242880, 1024, 20971520),
         max_rows=_int(env, "KNOWLEDGE_COVERAGE_MAX_ROWS", 10000, 1, 100000),
         run=run,

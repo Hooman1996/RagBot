@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""Compare two coverage checks, and optionally a labelled CSV, from their private run folders.
+"""Compare two coverage checks, and optionally a labelled CSV, from PostgreSQL.
 
     conda run --no-capture-output -n faq python scripts/coverage_compare.py \
         --before RUN_A --after RUN_B [--expected PATH.csv]
 
 Prints JSON lines with counts, codes, timings and row numbers only; never questions, notes,
-titles or chunk text. Contacts no service. Exit code 2 on a row-count mismatch, an unknown
+titles or chunk text. Contacts only the configured PostgreSQL database. Exit code 2 on a row-count mismatch, an unknown
 expected value or an unreadable run or CSV.
 """
 from __future__ import annotations
@@ -22,7 +22,7 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from coverage_check.settings import SettingsError, load_settings  # noqa: E402
-from coverage_check.store import CheckStore, StoreError, parse_csv  # noqa: E402
+from coverage_check.store import CheckStore, StoreError, parse_csv, postgres_connect_from_env  # noqa: E402
 
 EXPECTED = {"answered": {"answered", "answered_combined"}, "partial": {"partial"},
             "not_answered": {"not_answered"}, "chitchat": {"chitchat"}}
@@ -128,7 +128,7 @@ def compare(store: CheckStore, before_id: str, after_id: str, expected: Path | N
     return lines
 
 
-def main(argv=None, artifact_dir: Path | None = None, out=None) -> int:
+def main(argv=None, store=None, out=None) -> int:
     out = out or sys.stdout
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     parser.add_argument("--before", required=True, help="run id of the earlier check")
@@ -136,7 +136,8 @@ def main(argv=None, artifact_dir: Path | None = None, out=None) -> int:
     parser.add_argument("--expected", type=Path, help="the test CSV with an expected column")
     args = parser.parse_args(argv)
     max_rows = 100000
-    if artifact_dir is None:
+    owned_store = store is None
+    if owned_store:
         from dotenv import load_dotenv
         load_dotenv(ROOT / ".env", override=False)
         try:
@@ -144,12 +145,16 @@ def main(argv=None, artifact_dir: Path | None = None, out=None) -> int:
         except SettingsError as exc:
             print(json.dumps({"error": "invalid_setting", "variable": str(exc)}), file=out)
             return 2
-        artifact_dir, max_rows = settings.artifact_dir, settings.max_rows
+        max_rows = settings.max_rows
+        store = CheckStore(postgres_connect_from_env())
     try:
-        lines = compare(CheckStore(artifact_dir), args.before, args.after, args.expected, max_rows)
+        lines = compare(store, args.before, args.after, args.expected, max_rows)
     except CompareError as exc:
         print(json.dumps({"error": exc.code, **exc.facts}), file=out)
         return 2
+    finally:
+        if owned_store:
+            store.close()
     for line in lines:
         print(json.dumps(line, ensure_ascii=False), file=out)
     return 0

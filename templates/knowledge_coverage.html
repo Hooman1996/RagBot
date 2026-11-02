@@ -54,10 +54,13 @@
             </section>
             {% endif %}
             <section class="coverage-card" aria-labelledby="coverageChecksTitle">
-                <h2 id="coverageChecksTitle">Checks</h2>
+                <div class="coverage-heading"><h2 id="coverageChecksTitle">Checks</h2><div class="coverage-actions">
+                    <span id="coverageListScope" class="coverage-hint" data-days="{{ list_days }}">Last {{ list_days }} days</span>
+                    <button id="coverageListAll" type="button" class="coverage-secondary" aria-pressed="false">Show all checks</button>
+                </div></div>
                 <div class="coverage-table-scroll"><table>
                     <thead><tr><th scope="col">Started</th><th scope="col">File</th><th scope="col">Rows</th><th scope="col">Progress</th><th scope="col">State</th><th scope="col">Prompt</th><th scope="col"><span class="coverage-visually-hidden">Actions</span></th></tr></thead>
-                    <tbody id="coverageChecks"><tr><td colspan="6" class="coverage-empty">No checks yet.</td></tr></tbody>
+                    <tbody id="coverageChecks"><tr><td colspan="7" class="coverage-empty">No checks yet.</td></tr></tbody>
                 </table></div>
             </section>
             <section id="coverageResults" class="coverage-card" aria-labelledby="coverageResultsTitle" hidden>
