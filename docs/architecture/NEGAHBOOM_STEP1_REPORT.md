@@ -1,5 +1,7 @@
 # NegahBoom Step 1 review report
 
+> Historical report: platform restrictions and session binding described here are superseded by the [knowledge selection correction](KNOWLEDGE_SELECTION_CORRECTION_REPORT.md). Approved NegahBoom prompts remain in use.
+
 Implemented platform context and session binding only. No commit, push,
 ingestion, database reset, production change, or private environment-file edit
 was performed. Pre-existing unrelated work remains in place.

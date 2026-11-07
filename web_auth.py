@@ -47,7 +47,13 @@ def cookie_secure() -> bool:
         if not valid_origin or parsed.scheme != "http" or parsed.hostname not in {"localhost", "127.0.0.1"}:
             raise RuntimeError("local-http requires a localhost WEB_PUBLIC_ORIGIN")
         return False
-    raise RuntimeError("WEB_COOKIE_MODE must be https or development local-http")
+    if mode == "public-http" and environment == "development":
+        if not valid_origin or parsed.scheme != "http":
+            raise RuntimeError(
+                "public-http requires an HTTP WEB_PUBLIC_ORIGIN"
+            )
+        return False
+    raise RuntimeError("WEB_COOKIE_MODE must be https or development local-http/public-http")
 
 
 def session_seconds() -> int:

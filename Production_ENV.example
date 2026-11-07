@@ -12,6 +12,7 @@ API_PORT="8080"
 WEB_SESSION_SECRET=
 # Required: the exact external HTTPS origin users open, such as https://chat.example.com (no path). Startup fails without it.
 WEB_PUBLIC_ORIGIN=
+# Keep https here. public-http is development-only: it needs WEB_ENVIRONMENT=development and an exact HTTP WEB_PUBLIC_ORIGIN.
 WEB_COOKIE_MODE=https
 WEB_ENVIRONMENT=production
 WEB_SESSION_SECONDS=900

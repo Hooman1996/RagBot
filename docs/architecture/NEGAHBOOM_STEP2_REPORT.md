@@ -1,5 +1,7 @@
 # NegahBoom Step 2: isolated platform prompts
 
+> Historical report: platform restrictions and session binding described here are superseded by the [knowledge selection correction](KNOWLEDGE_SELECTION_CORRECTION_REPORT.md). Approved NegahBoom prompts remain in use.
+
 ## Scope and prompt selection
 
 `negahboom_prompts.py` contains separate `GENERAL_RAG_SYSTEM_PROMPT`,

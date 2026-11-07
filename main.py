@@ -1720,4 +1720,4 @@ if __name__ == "__main__":
     import uvicorn
 
 
-    uvicorn.run("main:app", host=os.getenv("API_HOST","0.0.0.0"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*", access_log=False)
+    uvicorn.run("main:app", host=os.getenv("API_HOST","185.50.38.120"), port=int(os.getenv("API_PORT", "7000")), reload=False,proxy_headers=True,forwarded_allow_ips="*", access_log=False)
