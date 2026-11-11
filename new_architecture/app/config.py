@@ -667,7 +667,7 @@ COMPANY_BACKGROUND = """نگاه بوم با هدف ساده‌تر کردن د�
 
 این مسیر با شناخت نیازهای واقعی بازار آغاز شده و با توسعه سرویس‌های جدید و همراهی با کسب‌وکارهای بیشتر ادامه دارد."""
 
-MISSING_INFORMATION = """اطلاعات موردنیاز برای پاسخ به این پرسش در مستندات فعلی نگاه بوم موجود نیست."""
+MISSING_INFORMATION = """با عرض پوزش، در این زمینه اطلاعاتی ندارم. در صورت نیاز به راهنمایی می‌توانید با شماره 02179468000 تماس بگیرید."""
 
 OUT_OF_SCOPE = """من در زمینه خدمات دیجیتال و بانکداری باز نگاه بوم به کسب‌وکارها و سازمان‌ها کمک می‌کنم. لطفاً پرسش خود را در این زمینه مطرح کنید."""
 
@@ -782,7 +782,7 @@ Apply the following rules in order:
 
 If the user asks for any non-banking information, advice, explanation, definition, location, recommendation, translation, or factual answer, output exactly:
 
-با عرض پوزش، در این زمینه اطلاعاتی ندارم. من Hibot، دستیار هوشمند NegahBoom هستم. چگونه می‌توانم در امور بانکی یا استفاده از پلتفرم NegahBoom به شما کمک کنم؟
+با عرض پوزش، در این زمینه اطلاعاتی ندارم. در صورت نیاز به راهنمایی می‌توانید با شماره 02179468000 تماس بگیرید.
 
 Do not add anything before or after this text.
 Do not answer any part of the non-banking question.
