@@ -102,6 +102,22 @@ test('HTTP, application, non-JSON and network errors render safely and recover c
   h.state.failure=null; await h.send();
   assert.equal(h.Chat.messagesContainer.children.at(-1).textContent,'synthetic answer');
 });
+test('model and dependency errors show service messages, never ask for a shorter question', async () => {
+  const h = await harness(); h.select('NegahBoom_FAQ');
+  const cases = [
+    [{status:502,data:{errorCode:'MODEL_CONTEXT_LIMIT',errorDesc:'Language model context limit exceeded'}}, 'سامانه نتوانست به این پرسش پاسخ دهد. لطفاً کمی بعد دوباره تلاش کنید.'],
+    [{status:502,data:{errorCode:'DEPENDENCY_INVALID_RESPONSE',errorDesc:'Language model rejected the request'}}, 'سرویس پاسخ‌گویی پاسخ معتبری برنگرداند. لطفاً دوباره تلاش کنید.'],
+    [{status:502,data:{detail:'Bad Gateway'}}, 'سرویس پاسخ‌گویی پاسخ معتبری برنگرداند. لطفاً دوباره تلاش کنید.'],
+  ];
+  for (const [failure, expected] of cases) {
+    h.state.failure=failure; await h.send();
+    const error=h.Chat.messagesContainer.children.at(-1);
+    assert.equal(error.role,'alert');
+    assert.equal(error.textContent, expected);
+    assert(!/کوتاه/.test(error.textContent));
+    assert.equal(h.Chat.isSending,false); assert.equal(h.Chat.sendBtn.disabled,false);
+  }
+});
 test('failed session creation clears pending promise and allows retry', async () => {
   const h=await harness(); h.select('NegahBoom_FAQ'); h.state.createFailure=true;
   await h.send();
