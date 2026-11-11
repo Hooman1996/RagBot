@@ -6,12 +6,17 @@ from copy import deepcopy
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 import internal_evaluation_api as internal_api
 from answering_service import AnswerResult
 from conversation_history import EVALUATION_EXECUTION_POLICY
-from evaluation_system.backend.app.services.history_state import (
-    exact_agent_state_from_turns,
-)
+
+# evaluation_system is a separate project and is absent from exported copies.
+exact_agent_state_from_turns = pytest.importorskip(
+    "evaluation_system.backend.app.services.history_state",
+    reason="evaluation_system is not part of this checkout",
+).exact_agent_state_from_turns
 from utils.performance_config import PERFORMANCE_SETTINGS
 
 

@@ -1,0 +1,2 @@
+# The evaluation system is a separate project; `git archive` exports leave it out.
+/evaluation_system export-ignore

@@ -320,6 +320,10 @@ class SearchAndHistoryTests(unittest.IsolatedAsyncioTestCase):
 
 
 class SharedPathAndEnvironmentTests(unittest.TestCase):
+    @unittest.skipUnless(
+        (ROOT / "evaluation_system").is_dir(),
+        "evaluation_system is a separate project, absent from exported copies",
+    )
     def test_chat_interfaces_share_service_while_eval_uses_http_boundary(self):
         main = (ROOT / "main.py").read_text(encoding="utf-8")
         mobile = (ROOT / "mobile_api.py").read_text(encoding="utf-8")
