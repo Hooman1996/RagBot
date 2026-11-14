@@ -1,7 +1,9 @@
 # ==========================================
 # APP SETTINGS (FastAPI / Uvicorn)
 # ==========================================
-ENVIRONMENT="development"
+# production turns on the guard in new_architecture/setup_dbs.py that refuses a PostgreSQL schema reset without --allow-production-reset.
+ENVIRONMENT="production"
+# Used only when started with `python main.py`; a uvicorn command line sets its own --host and --port.
 API_HOST="0.0.0.0"
 API_PORT="8080"
 
@@ -20,6 +22,7 @@ WEB_SESSION_SECONDS=900
 # ==========================================
 # VECTOR DATABASE (Qdrant)
 # ==========================================
+# The app builds the Qdrant address from QDRANT_HOST, QDRANT_PORT and QDRANT_HTTPS; QDRANT_URL is read only by legacy tools. Keep both pointing at the same server.
 QDRANT_URL="http://10.0.1.7:6333"
 QDRANT_HOST="10.0.1.7"
 QDRANT_PORT="6333"
@@ -51,20 +54,29 @@ MINIO_ACCESS_KEY=
 MINIO_SECRET_KEY=
 MINIO_SECURE="False"
 MINIO_BUCKET=
+# Optional object prefix for uploaded knowledge files (data-insertion tools only); empty means the bucket root.
+# MINIO_KNOWLEDGE_PREFIX=
 
 # ==========================================
 # MODEL AND DATA PATHS
 # ==========================================
 EMBEDDING_MODEL="/u01/models/hub/models--jinaai--jina-embeddings-v5-text-small-retrieval"
-QUERY_EMBEDDING_MODEL="/u01/models/hub/models--jinaai--jina-embeddings-v5-text-small-retrieval"
+# Label for diagnostics only. Chat requests always ask vLLM for the served model name "/app/model" (see the vLLM section below).
 LLM_MODEL="gemma-4-12B-it"
 RERANKER_MODEL="/u01/models/hub/BAAI--bge-reranker-v2-m3"
 KNOWLEDGE_BASE_CSV="/u01/chat-bot-data/General_FAQ.csv"
+# Optional default knowledge-source title for hihelp_knowledge_changer.py, e.g. General_FAQ or NegahBoom_FAQ.
+# KNOWLEDGE_SOURCE_NAME=
 DATA_INSERTION_DIRECTORY="/u01/chat-bot-data/data_insertion_chunks"
 
 # ==========================================
 # INFERENCE SERVICE ENDPOINTS
 # ==========================================
+# vLLM server requirements (vLLM's own flags; the app does not read them):
+#   - Serve the model under the name /app/model: mount it at /app/model, or pass --served-model-name /app/model.
+#   - --max-model-len 6144 or higher. Answer requests send up to 10 chunks plus RAG_MAX_NEW_TOKENS=500;
+#     the largest General_FAQ chunks need about 5400 tokens. 4000 returns MODEL_CONTEXT_LIMIT.
+#     8192 also fits, but halved throughput at 50 concurrent requests on staging (docs/performance/22-vllm-context-limit-repair.md).
 VLLM_URL="http://localhost:8000/v1"
 TEI_EMBED_URL="http://localhost:7997"
 INTENT_CLASSIFIER_MODEL_PATH="/u01/models/ragbot/intent_guardrail_jina_retrieval_query_v1.pt"

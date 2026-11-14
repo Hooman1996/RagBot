@@ -52,18 +52,19 @@ This is the hand-over list of every environment variable the RagBot application 
 
 ### Owner decisions
 
-- **`ENVIRONMENT`.** The template has `development`. The destructive reset tools (`new_architecture/setup_dbs.py`, `new_architecture/knowledge_reset.py`) refuse to run only when `ENVIRONMENT=production`, and default to `development` when it is unset. The code distinguishes three cases:
+- **`ENVIRONMENT`.** The template has `production`. The destructive reset tools (`new_architecture/setup_dbs.py`, `new_architecture/knowledge_reset.py`) refuse to run only when `ENVIRONMENT=production`, and default to `development` when it is unset. The code distinguishes three cases:
   - `staging` enables the evaluation tools;
   - `production` blocks resets;
   - any other value counts as neither.
 
-  Setting `production` is recommended.
+  Keep `production` on production servers.
 - **`LOG_REQUEST_BODY` and `LOG_RESPONSE_BODY`.** Both default to `true` and are `true` in the template. They log PII-scrubbed request and response bodies, which still contain the customer's free-text question and the answer. This applies on `/api/query`, `/api/sessions/{id}/message`, `/api/mobile/v1/talk` and `/api/internal/evaluation/v1/turn`. Decide whether this meets the bank's logging policy.
 
 ## Network requirements (no variable controls these)
 
 - **vLLM and TEI have no authentication.** The vLLM API key is hard-coded and no variable adds credentials, so both services must be reachable only from the application host.
 - **vLLM must serve the model name `/app/model`.** That name is hard-coded in `utils/RagSystem.py`; `LLM_MODEL` does not change it.
+- **vLLM needs `--max-model-len 6144` or higher.** An answer request carries up to 10 chunks plus `RAG_MAX_NEW_TOKENS=500`; the largest General_FAQ chunks need about 5400 tokens, and 4000 returns `MODEL_CONTEXT_LIMIT`. See `docs/performance/22-vllm-context-limit-repair.md`.
 - **The internal evaluation API is not protected by web login.** `/api/internal/evaluation/v1/*` is always mounted and no variable disables it. Block it at the ingress so it is not public.
 - **MinIO always uses plain HTTP from the app.** The FastAPI app hard-codes `MINIO_SECURE=False` in `new_architecture/app/config.py` and ignores the variable. Keep MinIO on a private network.
 - **Qdrant uses TLS only with `QDRANT_HTTPS=true`.** The template has `False`, so the Qdrant API key crosses the network unencrypted. Keep Qdrant on a private network or enable TLS.
@@ -76,7 +77,7 @@ Required means startup fails without the variable. A blank in the template colum
 
 | Variable | Required | Code default | Template | What it does |
 |---|---|---|---|---|
-| `ENVIRONMENT` | No | reset tools `development` | `development` | Deployment stage. Guards the reset tools and is the last fallback for the log `environment` field. The audit does not read it. See Owner decisions. |
+| `ENVIRONMENT` | No | reset tools `development` | `production` | Deployment stage. Guards the reset tools and is the last fallback for the log `environment` field. The audit does not read it. See Owner decisions. |
 | `API_HOST` | No | `0.0.0.0` | `0.0.0.0` | Bind address, used only by `python main.py`. Ignored under `uvicorn main:app` or gunicorn. |
 | `API_PORT` | No | `7000` | `8080` | Listen port, used only by `python main.py`. |
 
@@ -308,7 +309,6 @@ The six keys marked "page" are only defaults: the page shows them in editable fi
 
 | Key | Status |
 |---|---|
-| `QUERY_EMBEDDING_MODEL` | In the template, but nothing reads it. |
 | `EMBEDDING_MODEL_NAME` | Listed in `scripts/validate_environment.py`, but nothing reads it. |
 | `LLM_MODEL`, `RERANKER_MODEL` | Labels only; they select no model. |
 | `MOBILE_RELATED_QUESTIONS_RERANK_THRESHOLD` | Validated, but unused. |
