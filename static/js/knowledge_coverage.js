@@ -33,7 +33,10 @@
     const API_ERRORS = {
         prompt_changed: 'The prompts changed since this check started; start a new check.',
         not_eligible: 'Only Not answered or Partly answered rows can get a suggestion.',
-        suggestions_running: 'Stop the suggestions for this check before deleting it.'
+        suggestions_running: 'Stop the suggestions for this check before deleting it.',
+        invalid_state: 'This check is no longer running; the list now shows its current state.',
+        storage_unavailable: 'The results store did not answer; retrying.',
+        'Not authenticated': 'Your sign-in expired; sign in again.'
     };
     const FINISHED = ['completed', 'cancelled', 'interrupted'];
     const DELETE_CONFIRM = 'Delete this check, its results and its suggestions? This cannot be undone. Download the CSV first if you need it.';
@@ -325,6 +328,8 @@
         function stopFollowing() { if (follow) follow.checked = false; }
         async function call(path, options) {
             const response = await global.fetch(API + path, options);
+            // An expired sign-in: go to the sign-in page instead of showing a frozen view.
+            if (response.status === 401 && global.location && typeof global.location.assign === 'function') global.location.assign('/');
             let body = null; try { body = await response.json(); } catch (e) { body = null; }
             if (!response.ok) throw new Error(body && typeof body.detail === 'string' ? body.detail : 'request_failed');
             return body;
@@ -444,12 +449,21 @@
             if (active && !state.timer) state.timer = global.setInterval(() => refresh(), 3000);
             if (!active && state.timer) { global.clearInterval(state.timer); state.timer = null; }
         }
+        // The list and the open check load independently, so one failed request never freezes the other;
+        // an error from polling clears itself on the next good poll.
         async function refresh() {
-            try { await loadChecks(); await loadResults(); } catch (e) { showError(e.message); }
+            let failed = null;
+            try { await loadChecks(); } catch (e) { failed = e; }
+            try { await loadResults(); } catch (e) { failed = failed || e; }
+            if (failed) { showError(failed.message); state.pollError = true; }
+            else if (state.pollError) { showError(''); state.pollError = false; }
             updateTimer();
         }
         async function stopRun(id) {
-            try { await post('checks/' + id + '/cancel'); await refresh(); } catch (e) { showError(e.message); }
+            let failed = null;
+            try { await post('checks/' + id + '/cancel'); } catch (e) { failed = e; }
+            await refresh();
+            if (failed) showError(failed.message);
         }
         const actions = {
             open: async id => {

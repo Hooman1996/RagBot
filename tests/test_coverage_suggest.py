@@ -234,7 +234,7 @@ def test_unverified_numbers_are_stored_with_the_suggestion(tmp_path):
 
 # Store ------------------------------------------------------------------
 
-def test_suggestions_are_replaced_and_codes_reload(tmp_path):
+def test_suggestions_are_replaced_and_read_from_storage(tmp_path):
     store, run_id = new_store(tmp_path, rows=3)
     assert store.suggestion_statuses(run_id) == {} and store.suggestion(run_id, 1) is None
     store.write_suggestion(run_id, 1, {"status": "error", "error_code": "model_failed"})
@@ -242,9 +242,9 @@ def test_suggestions_are_replaced_and_codes_reload(tmp_path):
     store.write_suggestion(run_id, 1, {"status": "done", "faq_question": "synthetic"})
     assert store.suggestion(run_id, 1)["faq_question"] == "synthetic"
     assert store.suggested_rows(run_id) == {1, 2}
-    store._suggestions.clear()
-    fresh = store
-    assert fresh.suggestion_statuses(run_id) == {1: "done", 2: "done"}
+    assert store.suggestion_statuses(run_id) == {1: "done", 2: "done"}
+    store.rows[run_id][3]["suggestion"] = {"status": "error"}  # written by another process
+    assert store.suggestion_statuses(run_id) == {1: "done", 2: "done", 3: "error"}
 
 
 # Queue ------------------------------------------------------------------

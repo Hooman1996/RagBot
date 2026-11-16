@@ -15,6 +15,11 @@ CREATE TABLE IF NOT EXISTS coverage_runs (
     row_count       INTEGER      NOT NULL
 );
 CREATE INDEX IF NOT EXISTS coverage_runs_created_at_idx ON coverage_runs (created_at DESC, run_id DESC);
+-- Run progress shared by every app process: the row being checked, the running
+-- process's last heartbeat, and a Stop asked for from any process. Additive only.
+ALTER TABLE coverage_runs ADD COLUMN IF NOT EXISTS active_row INTEGER;
+ALTER TABLE coverage_runs ADD COLUMN IF NOT EXISTS heartbeat_at TIMESTAMPTZ;
+ALTER TABLE coverage_runs ADD COLUMN IF NOT EXISTS cancel_requested BOOLEAN NOT NULL DEFAULT FALSE;
 
 CREATE TABLE IF NOT EXISTS coverage_rows (
     run_id             VARCHAR(34) NOT NULL REFERENCES coverage_runs(run_id) ON DELETE CASCADE,

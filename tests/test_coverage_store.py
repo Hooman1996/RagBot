@@ -52,6 +52,18 @@ def create(store, count=2):
                         settings={"depth": 150}, rows=rows, prompt_version="synthetic")
 
 
+def write_elsewhere(store, run, row, column, value):
+    """A write by another app process: straight to storage, not through this store object."""
+    if isinstance(store, CheckStore):
+        code = value["result"] if column == "result" else value["status"]
+        code_column = "result_code" if column == "result" else "suggestion_status"
+        with store._transaction() as cursor:
+            cursor.execute(f"UPDATE coverage_rows SET {column} = %s, {code_column} = %s WHERE run_id = %s AND row_number = %s",
+                           (storage.Json(value), code, run, row))
+    else:
+        store.rows[run][row][column] = value
+
+
 def missing(call):
     with pytest.raises(StoreError, match="^not_found$"):
         call()
@@ -75,17 +87,17 @@ def test_state(store):
     missing(lambda: store.set_state("invalid", "running"))
 
 
-def test_results_and_cache_reload(store):
+def test_results_are_read_from_storage_every_time(store):
     run = create(store)["run_id"]
     assert store.result_codes(run) == {} and store.result(run, 1) is None
     data = {"result": "partial", "text_keys": {"k1": "a" * 64}, "note": "synthetic"}
     store.write_result(run, 1, data)
     assert store.result(run, 1) == data and store.result_codes(run) == {1: "partial"}
-    store._results.clear()
-    assert store.result_codes(run) == {1: "partial"}
+    write_elsewhere(store, run, 2, "result", {"result": "answered"})
+    assert store.result_codes(run) == {1: "partial", 2: "answered"}
     snapshot = store.result_codes(run)
     snapshot[2] = "error"
-    assert store.result_codes(run) == {1: "partial"}
+    assert store.result_codes(run) == {1: "partial", 2: "answered"}
     missing(lambda: store.write_result(run, 3, data))
 
 
@@ -105,15 +117,16 @@ def test_text_dedupe_and_bad_keys(store):
         assert len(store.chunks[run]) == 1
 
 
-def test_suggestions_replace_and_cache_reload(store):
+def test_suggestions_are_read_from_storage_every_time(store):
     run = create(store)["run_id"]
     assert store.suggestion_statuses(run) == {} and store.suggestion(run, 1) is None
     store.write_suggestion(run, 1, {"status": "error", "error_code": "model_failed"})
     data = {"status": "done", "faq_question": "synthetic"}
     store.write_suggestion(run, 1, data)
     assert store.suggestion(run, 1) == data and store.suggested_rows(run) == {1}
-    store._suggestions.clear()
     assert store.suggestion_statuses(run) == {1: "done"}
+    write_elsewhere(store, run, 2, "suggestion", {"status": "error"})
+    assert store.suggestion_statuses(run) == {1: "done", 2: "error"}
     missing(lambda: store.write_suggestion(run, 3, data))
 
 
@@ -149,7 +162,6 @@ def test_delete_cascades_and_second_delete_not_found(store):
     store.write_result(run, 1, {"result": "answered"})
     store.write_suggestion(run, 1, {"status": "done"})
     store.delete(run)
-    assert run not in store._results and run not in store._suggestions
     assert store.row_page(run, 0, 500) == []
     missing(lambda: store.meta(run))
     missing(lambda: store.chunk_text(run, key))
@@ -164,7 +176,10 @@ def test_delete_cascades_and_second_delete_not_found(store):
 
 
 def test_schema_and_commands_only_create_and_insert():
-    for source in (SCHEMA_SQL, (ROOT / "scripts/create_coverage_tables.py").read_text(),
+    # The one ALTER allowed adds a nullable or defaulted column, and only when it is missing.
+    additive = re.compile(r"ALTER TABLE coverage_runs ADD COLUMN IF NOT EXISTS \w+ [A-Z]+(?: NOT NULL DEFAULT FALSE)?;")
+    assert len(additive.findall(SCHEMA_SQL)) == 3
+    for source in (additive.sub("", SCHEMA_SQL), (ROOT / "scripts/create_coverage_tables.py").read_text(),
                    (ROOT / "scripts/coverage_import_folders.py").read_text()):
         assert not re.search(r"\b(?:DROP|TRUNCATE|ALTER)\b", source, re.I)
     statements = []
@@ -247,7 +262,7 @@ def test_owner_commands_use_isolated_tables_and_import_read_only(store, tmp_path
         if argv:
             missing(lambda: store.meta(run))
     assert all(p.read_bytes() == value for p, value in snapshot.items())
-    assert store.meta(run) == {**meta, "state": "interrupted", "prompt_version": ""}
+    assert store.meta(run) == {**meta, "state": "interrupted", "prompt_version": "", "active_row": None}
     assert store.result(run, 1) == files["results/1.json"]
     assert store.chunk_text(run, key) == "synthetic private text"
     assert store.chunk_text(run, "b" * 64) is None
@@ -265,3 +280,98 @@ def test_postgres_connection_reused_for_row_reads(store, monkeypatch):
         assert store.result(run, 1) is None
         assert store.meta(run)["run_id"] == run
     assert store._pool.minconn == 1 and store._pool.maxconn == 4
+
+
+def age_heartbeat(store, run, seconds):
+    if isinstance(store, CheckStore):
+        with store._transaction() as cursor:
+            cursor.execute("UPDATE coverage_runs SET heartbeat_at = now() - make_interval(secs => %s) WHERE run_id = %s",
+                           (seconds, run))
+    else:
+        store.heartbeats[run] -= seconds
+
+
+def test_active_row_heartbeat_and_stop_are_shared_through_storage(store):
+    run = create(store, 3)["run_id"]
+    store.set_state(run, "running")
+    store.set_active(run, 2)
+    assert store.meta(run)["active_row"] == 2
+    assert "heartbeat_at" not in store.meta(run) and "cancel_requested" not in store.meta(run)
+    assert store.heartbeat([run]) == set()
+    assert store.request_cancel(run) is True
+    assert store.heartbeat([run, "not-a-run"]) == {run}
+    meta = store.set_state(run, "cancelled")
+    assert meta["active_row"] is None and store.heartbeat([run]) == set()
+    missing(lambda: store.set_active("not-a-run", 1))
+
+
+def test_only_runs_without_a_live_owner_are_interrupted(store):
+    live, stale, done = (create(store)["run_id"] for _ in range(3))
+    store.set_state(live, "running")
+    store.set_state(stale, "running")
+    store.set_state(done, "completed")
+    age_heartbeat(store, stale, storage.STALE_SECONDS + 5)
+    age_heartbeat(store, done, storage.STALE_SECONDS + 5)
+    assert store.request_cancel(stale) is False
+    assert store.interrupt_stale() == 1
+    assert [store.meta(r)["state"] for r in (live, stale, done)] == ["running", "interrupted", "completed"]
+
+
+class _FakeCursor:
+    def __init__(self, conn):
+        self.conn = conn
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, *exc):
+        return False
+
+    def execute(self, sql, params=None):
+        import psycopg2
+        if self.conn.broken:
+            self.conn.closed = 2
+            raise psycopg2.OperationalError("synthetic: server closed the connection")
+        self.conn.executed.append(sql)
+
+    def fetchall(self):
+        return []
+
+
+class _FakeConn:
+    def __init__(self):
+        self.closed, self.broken, self.executed = 0, False, []
+        self.info = type("Info", (), {"transaction_status": 0})()
+
+    def cursor(self, **kwargs):
+        return _FakeCursor(self)
+
+    def commit(self):
+        pass
+
+    def rollback(self):
+        if self.closed:
+            import psycopg2
+            raise psycopg2.InterfaceError("synthetic: connection already closed")
+
+    def close(self):
+        self.closed = 1
+
+
+def test_a_pooled_connection_closed_while_idle_is_replaced(monkeypatch):
+    pytest.importorskip("psycopg2")
+    made = []
+    store = CheckStore(lambda: made.append(_FakeConn()) or made[-1])
+    clock = [1000.0]
+    monkeypatch.setattr(storage.time, "monotonic", lambda: clock[0])
+    assert store.list() == []
+    first = made[0]
+    # Dropped by a server, proxy or firewall while idle; psycopg2 does not know yet.
+    first.broken = True
+    clock[0] += storage.IDLE_CHECK_SECONDS + 1
+    assert store.list() == []
+    assert first.closed and len(made) == 2 and made[1].executed[-1].startswith("SELECT * FROM coverage_runs")
+    # Known closed: replaced without a check query.
+    made[1].closed = 1
+    assert store.list() == [] and len(made) == 3
+    store.close()

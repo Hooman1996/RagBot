@@ -1,4 +1,8 @@
-"""One background task at a time; later runs wait in a FIFO queue."""
+"""One background task at a time per process; later runs wait in a FIFO queue.
+
+PostgreSQL holds what every process must agree on: the run state, the row being
+checked, the owning process's heartbeat and a Stop asked for from any process.
+"""
 from __future__ import annotations
 
 import asyncio
@@ -14,6 +18,11 @@ from utils.structured_logging import log_event
 
 logger = logging.getLogger("coverage_check")
 
+# The owning process refreshes its runs' heartbeat and looks for a Stop this often.
+HEARTBEAT_SECONDS = 5
+# Every this many heartbeats, runs with no live owner anywhere become interrupted.
+SWEEP_EVERY = 6
+
 
 class CheckJobs:
     """``checker_factory(meta)`` builds the checker for one run's stored settings."""
@@ -26,21 +35,47 @@ class CheckJobs:
         self._cancel: set[str] = set()
         self._task: asyncio.Task | None = None
         self._row_task: asyncio.Task | None = None
+        self._heartbeat_task: asyncio.Task | None = None
         self._closed = False
         self.current: str | None = None
         # The row being checked; memory only.
         self.active: dict | None = None
 
     async def recover(self) -> int:
-        """Runs left running or queued by a previous process become interrupted."""
-        count = 0
-        for meta in await run_in_threadpool(self.store.list):
-            if meta["state"] in {"running", "queued"}:
-                await run_in_threadpool(self.store.set_state, meta["run_id"], "interrupted")
-                count += 1
+        """Queued or running runs whose owning process stopped heartbeating become interrupted.
+
+        A run another live process is checking keeps going, so starting or restarting
+        one process never interrupts another process's run.
+        """
+        count = await run_in_threadpool(self.store.interrupt_stale)
         if count:
             log_event(logger, "coverage_check_recovered", {"interrupted_runs": count})
         return count
+
+    def start_heartbeat(self) -> None:
+        if self._heartbeat_task is None or self._heartbeat_task.done():
+            self._heartbeat_task = asyncio.create_task(self._heartbeat(), name="coverage-check-heartbeat")
+
+    async def beat(self) -> None:
+        """One heartbeat: keep this process's runs alive and act on a Stop asked for elsewhere."""
+        owned = ([self.current] if self.current else []) + list(self._queue)
+        for run_id in await run_in_threadpool(self.store.heartbeat, owned):
+            await self.cancel(run_id)
+
+    async def _heartbeat(self) -> None:
+        tick = 0
+        while not self._closed:
+            await asyncio.sleep(HEARTBEAT_SECONDS)
+            tick += 1
+            try:
+                await self.beat()
+                if tick % SWEEP_EVERY == 0:
+                    await self.recover()
+            except asyncio.CancelledError:
+                raise
+            except Exception as exc:
+                log_event(logger, "coverage_check_heartbeat_failed",
+                          {"error_type": type(exc).__name__}, level=logging.WARNING)
 
     def _ensure_worker(self) -> None:
         if self._closed:
@@ -69,8 +104,14 @@ class CheckJobs:
             if self._row_task is not None:
                 self._row_task.cancel()
         else:
-            # Queued in storage but not in this process's queue; nothing is running it.
-            await run_in_threadpool(self.store.set_state, run_id, "cancelled")
+            # Owned by another process, or by none. A live owner gets the Stop through
+            # PostgreSQL on its next heartbeat; a run nobody is checking stops here.
+            meta = await run_in_threadpool(self.store.meta, run_id)
+            if meta["state"] == "running" and await run_in_threadpool(self.store.request_cancel, run_id):
+                log_event(logger, "coverage_check_cancel_requested", {"run_id": run_id})
+                return
+            if meta["state"] in {"queued", "running"}:
+                await run_in_threadpool(self.store.set_state, run_id, "cancelled")
 
     async def _worker(self) -> None:
         while not self._closed:
@@ -95,6 +136,12 @@ class CheckJobs:
                 self.current = None
                 self.active = None
                 self._cancel.discard(run_id)
+                try:
+                    await run_in_threadpool(self.store.set_active, run_id, None)
+                except asyncio.CancelledError:
+                    raise
+                except Exception:
+                    pass
 
     async def _run(self, run_id: str) -> None:
         meta = await run_in_threadpool(self.store.meta, run_id)
@@ -117,6 +164,7 @@ class CheckJobs:
                 if item["row"] in done:
                     continue
                 self.active = {"run_id": run_id, "row": item["row"]}
+                await run_in_threadpool(self.store.set_active, run_id, item["row"])
                 self._row_task = asyncio.create_task(checker.check(item["question"]),
                                                      name="coverage-check-row")
                 try:
@@ -151,6 +199,10 @@ class CheckJobs:
     async def aclose(self) -> None:
         self._closed = True
         self._queue.clear()
+        heartbeat, self._heartbeat_task = self._heartbeat_task, None
+        if heartbeat is not None:
+            heartbeat.cancel()
+            await asyncio.gather(heartbeat, return_exceptions=True)
         task, self._task = self._task, None
         if task is not None:
             task.cancel()

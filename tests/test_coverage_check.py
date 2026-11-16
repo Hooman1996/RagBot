@@ -17,6 +17,7 @@ from bs4 import BeautifulSoup
 from fastapi.testclient import TestClient
 
 import main
+from coverage_check.store import STALE_SECONDS
 from answering_service import AnswerRequestContext, AnsweringService
 from conversation_history import TurnExecutionPolicy
 from coverage_check import api as coverage_api
@@ -617,7 +618,6 @@ def test_delete_removes_a_finished_run_and_its_caches(api, state, caplog):
             response = delete(client, run_id)
         assert response.status_code == 200 and response.json() == {"deleted": run_id}
         assert run_id not in store.runs and store.meta(kept)
-        assert run_id not in store._results and run_id not in store._suggestions
         for url in (f"/api/knowledge-coverage/checks/{run_id}", f"/api/knowledge-coverage/checks/{run_id}/rows",
                     f"/api/knowledge-coverage/checks/{run_id}/rows/1"):
             assert client.get(url).status_code == 404, url
@@ -716,6 +716,7 @@ def test_restart_interrupts_and_resume_finishes_only_missing_rows(tmp_path):
     store, run_id = make_run(tmp_path, rows)
     store.set_state(run_id, "running")
     store.write_result(run_id, 1, {"result": "answered"})
+    store.heartbeats[run_id] -= STALE_SECONDS + 1  # its process died a minute ago
     checked = []
 
     class Checker:
@@ -885,6 +886,73 @@ def test_stop_cancels_the_model_call_at_once_and_resume_rechecks_the_row(tmp_pat
     assert limiter.snapshot().active == 0
 
 
+def test_stop_through_another_process_reaches_the_owner_on_its_heartbeat(tmp_path):
+    rows = [{"row": n, "id": str(n), "question": f"synthetic {n}"} for n in (1, 2, 3)]
+    store, run_id = make_run(tmp_path, rows)
+
+    async def scenario():
+        entered = asyncio.Event()
+
+        class Checker:
+            async def check(self, question):
+                if question == "synthetic 2":
+                    entered.set()
+                    await asyncio.Event().wait()
+                return plain_result()
+
+        owner = CheckJobs(store, lambda meta: Checker())   # the process running the check
+        other = CheckJobs(store, lambda meta: Checker())   # the process the Stop request reached
+        owner.enqueue(run_id)
+        await asyncio.wait_for(entered.wait(), 5)
+        assert store.meta(run_id)["active_row"] == 2
+        await other.cancel(run_id)
+        assert store.meta(run_id)["state"] == "running"  # still the owner's to stop
+        await owner.beat()
+        assert await async_wait_until(lambda: store.meta(run_id)["state"] == "cancelled")
+        assert store.meta(run_id)["active_row"] is None and store.result(run_id, 2) is None
+        assert await other.recover() == 0
+        await owner.aclose()
+
+    asyncio.run(scenario())
+
+
+def test_stop_of_a_run_no_live_process_owns_stops_it_at_once(tmp_path):
+    store, run_id = make_run(tmp_path, [{"row": 1, "id": "1", "question": "synthetic"}])
+    store.set_state(run_id, "running")
+    store.heartbeats[run_id] -= STALE_SECONDS + 1
+
+    async def scenario():
+        await CheckJobs(store, lambda meta: None).cancel(run_id)
+
+    asyncio.run(scenario())
+    assert store.meta(run_id)["state"] == "cancelled"
+
+
+def test_page_shows_progress_written_by_another_process(api):
+    api.db.users[1]["role"] = "admin"
+    store = api.runtime.store
+    meta = store.create(owner_id=1, file_name="q.csv", documents=DOCUMENTS, settings=run_settings(),
+                        prompt_version=VERSION, rows=[{"row": n, "id": "", "question": "synthetic"} for n in (1, 2, 3)])
+    run_id = meta["run_id"]
+    # Another process owns this run: nothing about it is in this process's memory.
+    store.set_state(run_id, "running")
+    store.write_result(run_id, 1, plain_result("answered"))
+    store.set_active(run_id, 2)
+    with TestClient(main.app, raise_server_exceptions=False) as client:
+        login(client, "alice")
+        detail = client.get(f"/api/knowledge-coverage/checks/{run_id}").json()
+        assert detail["active_row"] == 2 and detail["done"] == 1
+        rows = client.get(f"/api/knowledge-coverage/checks/{run_id}/rows").json()["rows"]
+        assert [(r["active"], r["result"]) for r in rows] == [(False, "answered"), (True, None), (False, None)]
+        store.write_result(run_id, 2, plain_result("partial"))
+        store.write_result(run_id, 3, plain_result("answered"))
+        store.set_state(run_id, "completed")
+        listed = next(c for c in client.get("/api/knowledge-coverage/checks").json() if c["run_id"] == run_id)
+        assert listed["state"] == "completed" and listed["done"] == 3 and listed["active_row"] is None
+        rows = client.get(f"/api/knowledge-coverage/checks/{run_id}/rows").json()["rows"]
+        assert [(r["active"], r["result"]) for r in rows] == [(False, "answered"), (False, "partial"), (False, "answered")]
+
+
 @pytest.mark.parametrize("stop_pending", [False, True])
 def test_app_shutdown_reraises_and_leaves_the_run_to_recover(tmp_path, stop_pending):
     rows = [{"row": n, "id": str(n), "question": f"synthetic {n}"} for n in (1, 2, 3)]
@@ -911,6 +979,8 @@ def test_app_shutdown_reraises_and_leaves_the_run_to_recover(tmp_path, stop_pend
         assert store.meta(run_id)["state"] == "running"
         assert jobs.active is None
         fresh = CheckJobs(store, lambda meta: Checker())
+        assert await fresh.recover() == 0  # a just-stopped owner may still be alive
+        store.heartbeats[run_id] -= STALE_SECONDS + 1
         assert await fresh.recover() == 1
 
     asyncio.run(scenario())
@@ -1234,6 +1304,7 @@ def test_schema_failure_keeps_health_and_disables_coverage(api, monkeypatch, cap
 def test_start_initializes_schema_recovers_and_closes_store(api, monkeypatch):
     store = MemoryCheckStore()
     run = finished_run(store, "running")
+    store.heartbeats[run] -= STALE_SECONDS + 1
     ensured = []
     monkeypatch.setattr(store, "ensure_schema", lambda: ensured.append(True))
     async def scenario():

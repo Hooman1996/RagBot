@@ -109,6 +109,7 @@ async def start(app, settings: CoverageSettings, store=None) -> CoverageRuntime 
         return None
     runtime = CoverageRuntime(app, settings, store)
     await runtime.jobs.recover()
+    runtime.jobs.start_heartbeat()
     app.state.coverage_check = runtime
     return runtime
 
@@ -162,6 +163,11 @@ def counts_for(meta: dict, codes: dict[int, str]) -> dict:
     view = {result: counts.get(result, 0) for result in RESULTS}
     view["waiting"] = max(0, meta["row_count"] - len(codes))
     return view
+
+
+def stored_active_row(meta: dict) -> int | None:
+    """The row being checked, as stored by whichever process runs the check."""
+    return meta.get("active_row") if meta.get("state") == "running" else None
 
 
 def run_view(meta: dict, codes: dict[int, str], active_row: int | None = None) -> dict:
@@ -321,7 +327,7 @@ async def list_checks(request: Request, user: WebUser,
     views = []
     for meta in metas:
         codes = await store_call(store.result_codes, meta["run_id"])
-        views.append(run_view(meta, codes, runtime.jobs.active_row(meta["run_id"])))
+        views.append(run_view(meta, codes, stored_active_row(meta)))
     return JSONResponse(views, headers=NO_STORE)
 
 
@@ -332,7 +338,7 @@ async def get_check(run_id: str, request: Request, user: WebUser):
     store = runtime.store
     meta = await store_call(store.meta, run_id)
     codes = await store_call(store.result_codes, run_id)
-    active_row = runtime.jobs.active_row(run_id)
+    active_row = stored_active_row(meta)
     return JSONResponse({"meta": run_view(meta, codes, active_row), "counts": counts_for(meta, codes),
                          "done": len(codes), "active_row": active_row}, headers=NO_STORE)
 
@@ -351,7 +357,7 @@ async def check_rows(run_id: str, request: Request, user: WebUser,
     items = await store_call(store.inputs, run_id)
     codes = await store_call(store.result_codes, run_id)
     statuses = await store_call(store.suggestion_statuses, run_id)
-    active_row = runtime.jobs.active_row(run_id)
+    active_row = stored_active_row(await store_call(store.meta, run_id))
     if result == "waiting":
         items = [item for item in items if item["row"] not in codes]
     elif result is not None:

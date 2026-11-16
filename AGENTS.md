@@ -96,7 +96,7 @@ Endpoints from `kb_manager.py`, whose router prefix is `/knowledge-base`:
 - `GET /api/knowledge-coverage/checks/{run_id}/suggestions`
 - `POST /api/knowledge-coverage/checks/{run_id}/suggestions/cancel`
 
-Checks are stored in PostgreSQL tables `coverage_runs`, `coverage_rows` and `coverage_chunks` (created by `scripts/create_coverage_tables.py` or at app start), are kept until deleted from the page, and the list shows the last `KNOWLEDGE_COVERAGE_LIST_DAYS` days unless "Show all checks" is pressed.
+Checks are stored in PostgreSQL tables `coverage_runs`, `coverage_rows` and `coverage_chunks` (created by `scripts/create_coverage_tables.py` or at app start), are kept until deleted from the page, and the list shows the last `KNOWLEDGE_COVERAGE_LIST_DAYS` days unless "Show all checks" is pressed. Run progress (row results, `active_row`, the owner's `heartbeat_at`, `cancel_requested`) is read from PostgreSQL, never from process memory, so every app process shows the same state and a Stop reaches the owning process on its next 5-second heartbeat; a queued or running run whose owner has not heartbeated for 60 seconds becomes `interrupted`. Suggestion queue status is still per process.
 
 #### Routes from `internal_evaluation_api.py`
 
