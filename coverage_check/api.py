@@ -132,7 +132,9 @@ async def store_call(fn, *args, **kwargs):
     except StoreError as exc:
         status = 503 if exc.code == "storage_unavailable" else 404 if exc.code == "not_found" else 422
         raise HTTPException(status, detail=exc.code) from None
-    except (OSError, ValueError, KeyError):
+    except (OSError, ValueError, KeyError) as exc:
+        log_event(logger, "coverage_storage_failed", {"operation": getattr(fn, "__name__", "unknown"),
+                                                       "error_type": type(exc).__name__}, level=logging.WARNING)
         raise HTTPException(500, detail="storage_failed") from None
 
 

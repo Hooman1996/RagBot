@@ -5,6 +5,7 @@ import csv
 from contextlib import contextmanager
 import hashlib
 import io
+import logging
 import os
 import re
 import secrets
@@ -18,6 +19,9 @@ from psycopg2.extras import Json, RealDictCursor, execute_values
 from psycopg2.pool import ThreadedConnectionPool
 
 from coverage_check.schema import SCHEMA_SQL
+from utils.structured_logging import log_event
+
+logger = logging.getLogger("coverage_check")
 
 RUN_ID = re.compile(r"^c_[0-9a-f]{32}$")
 CHUNK_KEY = re.compile(r"[0-9a-f]{64}")
@@ -30,6 +34,17 @@ STALE_SECONDS = 60
 IDLE_CHECK_SECONDS = 30
 # Columns kept for coordination between processes, not shown by the API.
 INTERNAL_COLUMNS = ("heartbeat_at", "cancel_requested")
+
+
+def log_storage_error(operation: str, exc: BaseException) -> None:
+    """Why a storage call failed: the error class and PostgreSQL's SQLSTATE code only.
+
+    Never the message, SQL, parameters or row data. process.pid and the request id
+    are added by the log envelope, so failures can be matched to one app process.
+    """
+    log_event(logger, "coverage_storage_error", {
+        "operation": operation, "error_type": type(exc).__name__,
+        "sqlstate": getattr(exc, "pgcode", None)}, level=logging.WARNING)
 
 
 class StoreError(Exception):
@@ -146,7 +161,7 @@ class CheckStore:
         self._pool_lock = threading.Lock()
 
     @contextmanager
-    def _transaction(self):
+    def _transaction(self, operation: str = "unknown"):
         connection = None
         try:
             with self._pool_lock:
@@ -164,13 +179,15 @@ class CheckStore:
                 except psycopg2.Error:
                     pass
             if isinstance(exc, psycopg2.Error):
+                log_storage_error(operation, exc)
                 raise StoreError("storage_unavailable") from None
             raise
         finally:
             if connection is not None:
                 try:
                     pool.release(connection)
-                except psycopg2.Error:
+                except psycopg2.Error as exc:
+                    log_storage_error(operation + ".release", exc)
                     raise StoreError("storage_unavailable") from None
 
     def close(self):
@@ -178,12 +195,13 @@ class CheckStore:
             if self._pool is not None:
                 try:
                     self._pool.closeall()
-                except psycopg2.Error:
+                except psycopg2.Error as exc:
+                    log_storage_error("close", exc)
                     raise StoreError("storage_unavailable") from None
                 self._pool = None
 
     def ensure_schema(self):
-        with self._transaction() as cursor:
+        with self._transaction("ensure_schema") as cursor:
             cursor.execute(SCHEMA_SQL)
 
     @staticmethod
@@ -214,7 +232,7 @@ class CheckStore:
                 "file_name": safe_file_name(file_name), "documents": list(documents),
                 "settings": dict(settings), "prompt_version": str(prompt_version),
                 "state": "queued", "row_count": len(rows), "active_row": None}
-        with self._transaction() as cursor:
+        with self._transaction("create") as cursor:
             cursor.execute("""INSERT INTO coverage_runs
                 (run_id, created_at, owner_id, file_name, documents, settings, prompt_version, state, row_count,
                  heartbeat_at)
@@ -227,14 +245,14 @@ class CheckStore:
 
     def meta(self, run_id: str) -> dict:
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("meta") as cursor:
             return self._meta(cursor, run_id)
 
     def set_state(self, run_id: str, state: str) -> dict:
         if state not in STATES:
             raise StoreError("invalid_state")
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("set_state") as cursor:
             # Queued or running: a live owner, no Stop yet. Any other state: nothing is being checked.
             cursor.execute("""UPDATE coverage_runs SET state = %s,
                     active_row = CASE WHEN %s IN ('queued', 'running') THEN active_row END,
@@ -246,7 +264,7 @@ class CheckStore:
     def set_active(self, run_id: str, row: int | None) -> None:
         """The row being checked (None between rows), visible to every process."""
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("set_active") as cursor:
             cursor.execute("UPDATE coverage_runs SET active_row = %s, heartbeat_at = now() WHERE run_id = %s",
                            (None if row is None else int(row), run_id))
 
@@ -255,7 +273,7 @@ class CheckStore:
         run_ids = [run_id for run_id in run_ids if isinstance(run_id, str) and RUN_ID.match(run_id)]
         if not run_ids:
             return set()
-        with self._transaction() as cursor:
+        with self._transaction("heartbeat") as cursor:
             cursor.execute("""UPDATE coverage_runs SET heartbeat_at = now()
                 WHERE run_id = ANY(%s) AND state IN ('queued', 'running')
                 RETURNING run_id, cancel_requested""", (run_ids,))
@@ -264,7 +282,7 @@ class CheckStore:
     def request_cancel(self, run_id: str) -> bool:
         """Asks the owning process to stop a running run; False when no live process owns it."""
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("request_cancel") as cursor:
             cursor.execute("""UPDATE coverage_runs SET cancel_requested = TRUE
                 WHERE run_id = %s AND state = 'running' AND heartbeat_at > now() - make_interval(secs => %s)
                 RETURNING run_id""", (run_id, STALE_SECONDS))
@@ -272,7 +290,7 @@ class CheckStore:
 
     def interrupt_stale(self, seconds: int = STALE_SECONDS) -> int:
         """Queued or running runs with no live owning process become interrupted."""
-        with self._transaction() as cursor:
+        with self._transaction("interrupt_stale") as cursor:
             cursor.execute("""UPDATE coverage_runs SET state = 'interrupted', active_row = NULL,
                     cancel_requested = FALSE
                 WHERE state IN ('queued', 'running')
@@ -281,7 +299,7 @@ class CheckStore:
             return len(cursor.fetchall())
 
     def list(self, since: datetime | None = None) -> list[dict]:
-        with self._transaction() as cursor:
+        with self._transaction("list") as cursor:
             if since is None:
                 cursor.execute("SELECT * FROM coverage_runs ORDER BY created_at DESC, run_id DESC")
             else:
@@ -292,14 +310,14 @@ class CheckStore:
 
     def delete(self, run_id: str) -> None:
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("delete") as cursor:
             cursor.execute("DELETE FROM coverage_runs WHERE run_id = %s", (run_id,))
             if not cursor.rowcount:
                 raise StoreError("not_found")
 
     def inputs(self, run_id: str) -> list[dict]:
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("inputs") as cursor:
             self._meta(cursor, run_id)
             cursor.execute("SELECT input FROM coverage_rows WHERE run_id = %s ORDER BY row_number", (run_id,))
             return [record["input"] for record in cursor.fetchall()]
@@ -314,12 +332,12 @@ class CheckStore:
 
     def result_codes(self, run_id: str) -> dict[int, str]:
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("result_codes") as cursor:
             return self._codes(cursor, run_id, "result_code")
 
     def _row_value(self, run_id, row, column):
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("_row_value") as cursor:
             self._meta(cursor, run_id)
             cursor.execute(f"SELECT {column} FROM coverage_rows WHERE run_id = %s AND row_number = %s",
                            (run_id, int(row)))
@@ -331,7 +349,7 @@ class CheckStore:
 
     def write_result(self, run_id: str, row: int, data: dict) -> None:
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("write_result") as cursor:
             cursor.execute("""UPDATE coverage_rows SET result = %s, result_code = %s
                               WHERE run_id = %s AND row_number = %s""",
                            (Json(data), data["result"], run_id, int(row)))
@@ -346,7 +364,7 @@ class CheckStore:
             key = hashlib.sha256(str(text).encode("utf-8")).hexdigest()
             keys[str(chunk_id)] = key
             values[key] = str(text)
-        with self._transaction() as cursor:
+        with self._transaction("write_texts") as cursor:
             self._meta(cursor, run_id)
             execute_values(cursor, """INSERT INTO coverage_chunks (run_id, text_key, text) VALUES %s
                                       ON CONFLICT (run_id, text_key) DO NOTHING""",
@@ -357,7 +375,7 @@ class CheckStore:
         if not isinstance(key, str) or not CHUNK_KEY.fullmatch(key):
             return None
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("chunk_text") as cursor:
             self._meta(cursor, run_id)
             cursor.execute("SELECT text FROM coverage_chunks WHERE run_id = %s AND text_key = %s", (run_id, key))
             record = cursor.fetchone()
@@ -365,7 +383,7 @@ class CheckStore:
 
     def suggestion_statuses(self, run_id: str) -> dict[int, str]:
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("suggestion_statuses") as cursor:
             return self._codes(cursor, run_id, "suggestion_status")
 
     def suggested_rows(self, run_id: str) -> set[int]:
@@ -377,7 +395,7 @@ class CheckStore:
     def write_suggestion(self, run_id: str, row: int, data: dict) -> None:
         """A new suggestion for a row replaces the old one."""
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("write_suggestion") as cursor:
             cursor.execute("""UPDATE coverage_rows SET suggestion = %s, suggestion_status = %s
                               WHERE run_id = %s AND row_number = %s""",
                            (Json(data), data["status"], run_id, int(row)))
@@ -387,7 +405,7 @@ class CheckStore:
     def row_page(self, run_id: str, after_row: int, limit: int) -> list[dict]:
         """Ordered input, result and suggestion for up to limit rows after after_row."""
         self._validate(run_id)
-        with self._transaction() as cursor:
+        with self._transaction("row_page") as cursor:
             cursor.execute("""SELECT input, result, suggestion FROM coverage_rows
                 WHERE run_id = %s AND row_number > %s ORDER BY row_number LIMIT %s""",
                            (run_id, after_row, limit))

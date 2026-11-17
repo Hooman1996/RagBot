@@ -204,6 +204,26 @@ def test_postgres_errors_are_fixed_codes():
     store.close()
 
 
+def test_storage_errors_log_operation_class_and_sqlstate_only(monkeypatch, caplog):
+    import psycopg2
+
+    class Lost(psycopg2.OperationalError):
+        pgcode = "57P01"  # admin_shutdown: the server ended the connection
+
+    def connect():
+        raise Lost("synthetic secret SQL text and parameters")
+
+    store = CheckStore(connect)
+    with caplog.at_level("WARNING", logger="coverage_check"):
+        with pytest.raises(StoreError, match="^storage_unavailable$"):
+            store.list()
+    events = [r.ragbot_event_data for r in caplog.records if hasattr(r, "ragbot_event_data")]
+    assert events == [{"event": "coverage_storage_error",
+                       "data": {"operation": "list", "error_type": "Lost", "sqlstate": "57P01"}}]
+    assert "synthetic secret" not in caplog.text
+    store.close()
+
+
 def test_owner_commands_use_isolated_tables_and_import_read_only(store, tmp_path, monkeypatch, capsys):
     if not isinstance(store, CheckStore):
         return
