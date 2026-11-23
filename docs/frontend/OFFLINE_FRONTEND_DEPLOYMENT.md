@@ -82,8 +82,9 @@ final staging check before promotion:
    temporary test client/network namespace (do not change the host firewall
    permanently).
 3. Visit `/`, `/app`, `/analytics`, and `/knowledge-base/`.
-4. Filter Network by `scheme:http`/`scheme:https` and confirm every automatic
-   request uses the RagBot origin; user-clicked documentation links are exempt.
+4. Filter Network by `scheme:http`/`scheme:https` and confirm automatic
+   requests use the RagBot origin and, when configured, the deployment's ASR
+   origin for dictation readiness. User-clicked documentation links are exempt.
 5. Confirm all CSS, JavaScript, WOFF2 fonts, and icons return 200; there must be
    no required 404, DNS failure, CSP failure, or JavaScript exception.
 6. Verify login controls, theme/language toggles, sidebar/navigation, datasource
@@ -141,6 +142,25 @@ nonces/hashes. A target local-only policy can use `default-src 'self'`,
 `connect-src 'self'`, `font-src 'self'`, and `img-src 'self' data:`, with the
 minimum temporary inline allowances required during migration. Validate every
 page for CSP console errors before production rollout.
+
+## Optional web dictation
+
+Set `ASR_URL` to the ASR address that users' browsers can reach. Include the
+scheme, a hostname or IP address, and any non-default port. The composer adds
+the API paths. Leave `ASR_URL` blank to disable dictation.
+
+The existing staging ASR service listens on the staging host at port `9081`.
+For an HTTPS chat deployment, use the ASR HTTPS address, such as
+`https://speech.example.test`. If an HTTPS gateway forwards to an internal
+HTTP ASR service, use the gateway's HTTPS address. For local development, an
+ASR service on the same machine as the browser can use
+`http://localhost:9081`.
+
+The ASR deployment must allow the RagBot web origin via CORS on
+`GET /api/health` and `POST /api/transcribe`, including error responses.
+Browser requests omit credentials. If the deployment applies a CSP, allow the
+browser-facing ASR origin in `connect-src`. Microphone access requires a secure
+chat page, such as HTTPS or a supported localhost development origin.
 
 ## Updating a dependency later
 

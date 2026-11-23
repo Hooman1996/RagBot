@@ -21,7 +21,7 @@ VERSIONED_ASSETS = frozenset({
     "css/base.css", "css/app.css", "css/analytics.css", "css/web_controls.css",
     "css/login.css", "css/kb_manager.css", "icons.svg", "negah-bank-icon.jpg",
     "js/web_auth.js", "js/analytics.js", "js/i18n.js", "js/api.js",
-    "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/app.js",
+    "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/chat_dictation.js", "js/app.js",
     "js/kb_manager.js",
     "css/knowledge_coverage.css", "js/knowledge_coverage.js",
     "css/admin_users.css", "js/admin_users.js",

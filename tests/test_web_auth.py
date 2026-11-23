@@ -149,6 +149,22 @@ def test_two_users_redaction_ownership_and_csrf(setup):
         assert bob.delete("/api/mass-answer/jobs/test-job", headers={**csrf(bob), "X-Job-Access": job_access}).status_code == 404
 
 
+def test_only_browser_asr_origin_is_rendered_in_signed_in_composer(setup, monkeypatch):
+    monkeypatch.setenv("ASR_URL", "https://speech.example.test:9443/")
+    with TestClient(main.app) as client:
+        assert 'data-asr-origin' not in client.get("/").text
+        assert client.get("/app", follow_redirects=False).status_code == 303
+        login(client, "alice")
+        page = client.get("/app")
+        assert page.status_code == 200
+        assert 'data-asr-origin="https://speech.example.test:9443"' in page.text
+        assert 'id="dictationMic" class="btn-dictation" disabled' in page.text
+        assert "no-store" in page.headers["cache-control"]
+        for invalid_url in ("", "https://speech.example.test/invalid-path"):
+            monkeypatch.setenv("ASR_URL", invalid_url)
+            assert 'data-asr-origin=""' in client.get("/app").text
+
+
 def test_expiry_inactive_user_logout_and_copied_cookie_limit(setup, monkeypatch):
     with TestClient(main.app, raise_server_exceptions=False) as client:
         login(client, "alice")

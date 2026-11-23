@@ -35,6 +35,8 @@ const Chat = {
     this.sendBtn.addEventListener("click", () => this.send());
 
     this._initUpload();
+    const mic = document.getElementById("dictationMic");
+    if (mic) this.dictation = new ChatDictation(this, mic);
 
     if (typeof CategoryFilter !== 'undefined') {
       if (CategoryFilter.allDocuments.length) {
@@ -93,6 +95,8 @@ const Chat = {
       this.sendBtn.disabled = false;
       this.textarea.placeholder = I18N.t('input_placeholder');
     }
+    if (this.isLocked) this.dictation?.cancel();
+    else this.dictation?.render();
   },
 
   clearInvalidSelectedDocs(validDocNames) {
@@ -518,6 +522,7 @@ const Chat = {
     }
 
     this.setSendingState(true);
+    this.dictation?.cancel();
     try {
       await Sessions.ensureSession();
 

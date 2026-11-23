@@ -14,6 +14,10 @@ API_PORT="8080"
 WEB_SESSION_SECRET=
 # Required: the exact external HTTPS origin users open, such as https://chat.example.com (no path). Startup fails without it.
 WEB_PUBLIC_ORIGIN=
+# Optional web dictation. Set the ASR HTTPS URL reachable from users' browsers.
+# Allow WEB_PUBLIC_ORIGIN via CORS on both ASR routes, including error responses.
+# Leave blank to disable dictation. The staging ASR upstream listens on port 9081.
+ASR_URL=
 # Keep https here. public-http is development-only: it needs WEB_ENVIRONMENT=development and an exact HTTP WEB_PUBLIC_ORIGIN.
 WEB_COOKIE_MODE=https
 WEB_ENVIRONMENT=production

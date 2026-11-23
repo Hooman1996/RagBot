@@ -254,6 +254,7 @@ const Sessions = {
     // Create a new session
     async create() {
         if (this.createPromise) return this.createPromise;
+        Chat.dictation?.cancel();
         this.createPromise = (async () => {
             const res = await API.request('/api/sessions', {
                 method: 'POST',
@@ -261,6 +262,7 @@ const Sessions = {
                 body: JSON.stringify({title: 'New Chat'})
             });
             const session = await API.readJSON(res);
+            Chat.dictation?.cancel();
             this.currentSessionId = parseInt(session.id);
             await this.load();          // refresh sidebar list (will re-apply filter)
             return session;
@@ -279,7 +281,9 @@ const Sessions = {
     },
 
     async select(sessionId) {
-        this.currentSessionId = parseInt(sessionId);
+        const selectedId = parseInt(sessionId);
+        if (this.currentSessionId !== selectedId) Chat.dictation?.cancel();
+        this.currentSessionId = selectedId;
         await this.load();            // re-render with active highlight
         try {
             const res = await API.request(`/api/sessions/${sessionId}/messages`);
@@ -358,8 +362,11 @@ const Sessions = {
     async deleteSession(event, sessionId) {
         event.stopPropagation();
         if (!confirm(I18N.t('session_delete_confirm'))) return;
+        const selectedId = parseInt(sessionId);
+        if (this.currentSessionId === selectedId) Chat.dictation?.cancel();
         try {
             await API.deleteSession(sessionId);
+            if (this.currentSessionId === selectedId) Chat.dictation?.cancel();
             if (this.currentSessionId === sessionId) {
                 this.currentSessionId = null;
                 const chatMessages = document.querySelector('.chat__messages');

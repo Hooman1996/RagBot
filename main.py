@@ -69,6 +69,7 @@ from utils.structured_logging import log_event, start_logging
 from frontend_paths import STATIC_DIR, TEMPLATE_DIR
 from versioned_assets import VersionedStaticFiles, asset_integrity, vendor_integrity, versioned_asset
 from analytics_metrics import ANALYTICS_CONTRACT_VERSION, aggregate_analytics
+from web_asr import browser_asr_origin
 from web_permissions import ROLE_PERMISSIONS, permissions_for, permissions_for_user
 from coverage_check import api as coverage_check_api
 from coverage_check.settings import coverage_enabled as coverage_check_enabled
@@ -630,9 +631,16 @@ async def home(request: Request):
 
 @app.get("/app", response_class=HTMLResponse)
 async def app_page(request: Request):
-    return templates.TemplateResponse("index.html", {"request": request,
-                                                      "permissions": permissions_for_user(request.state.web_user.role, request.state.web_user.id)},
-                                      headers={"Cache-Control": "no-store"})
+    user = request.state.web_user
+    return templates.TemplateResponse(
+        request=request,
+        name="index.html",
+        context={
+            "permissions": permissions_for_user(user.role, user.id),
+            "asr_origin": browser_asr_origin(),
+        },
+        headers={"Cache-Control": "no-store"},
+    )
 
 
 @app.get("/analytics", response_class=HTMLResponse)

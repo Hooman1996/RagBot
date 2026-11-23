@@ -1064,6 +1064,7 @@ body.light-mode .message--user .message__avatar {
 
 .chat-textarea {
   flex: 1;
+  min-width: 0;
   background: none;
   border: none;
   outline: none;
@@ -2319,7 +2320,8 @@ body.light-mode .sidebar__chat-item--active {
 }
 
 /* Upload button */
-.btn-upload {
+.btn-upload,
+.btn-dictation {
   width: 38px;
   height: 38px;
   background: var(--color-bg-elevated);
@@ -2334,10 +2336,64 @@ body.light-mode .sidebar__chat-item--active {
   flex-shrink: 0;
 }
 
-.btn-upload:hover {
+.btn-upload:hover,
+.btn-dictation:not(:disabled):hover {
   background: var(--color-bg-overlay);
   border-color: var(--color-accent-primary);
   color: var(--color-accent-primary);
+}
+
+.btn-dictation:not(:disabled) {
+  color: var(--text-primary);
+}
+
+.btn-dictation:disabled {
+  cursor: default;
+  color: var(--text-muted);
+}
+
+.dictation-icon {
+  width: 19px;
+  height: 19px;
+}
+
+.dictation-feedback {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  column-gap: var(--space-sm);
+}
+
+.dictation-status {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  overflow-wrap: anywhere;
+}
+
+.dictation-status:empty {
+  width: 0;
+}
+
+.dictation-status:not(:empty),
+.dictation-action:not([hidden]) {
+  margin-block-start: var(--space-xs);
+}
+
+.dictation-action {
+  background: var(--color-bg-elevated);
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  cursor: pointer;
+  font: inherit;
+  font-size: 0.85rem;
+  padding: 4px 10px;
+}
+
+.btn-dictation:focus-visible,
+.dictation-action:focus-visible {
+  outline: 2px solid var(--color-accent-primary);
+  outline-offset: 2px;
 }
 
 /* Uploaded document tag */

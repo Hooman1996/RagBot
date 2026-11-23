@@ -8,6 +8,8 @@
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/base.css') }}" integrity="{{ asset_integrity('css/base.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/app.css') }}" integrity="{{ asset_integrity('css/app.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
+    <!-- Dictation captures native fetch before web_auth installs the RagBot API wrapper. -->
+    <script src="{{ versioned_asset(request, 'js/chat_dictation.js') }}" integrity="{{ asset_integrity('js/chat_dictation.js') }}" crossorigin="anonymous"></script>
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
 <body data-icons-url="{{ versioned_asset(request, 'icons.svg') }}">
@@ -118,8 +120,18 @@
                         <textarea id="chatInput" class="chat-textarea" data-i18n-placeholder="input_placeholder"
                                   placeholder="..." dir="auto"></textarea>
                         <div class="chat-input-actions">
+                            <button type="button" id="dictationMic" class="btn-dictation" disabled
+                                    data-asr-origin="{{ asr_origin|default('') }}"
+                                    aria-label="Dictate in Persian" aria-describedby="dictationStatus">
+                                <svg class="dictation-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#microphone"></use></svg>
+                            </button>
                             <button id="sendBtn" class="btn-send">➤</button>
                         </div>
+                    </div>
+                    <div class="dictation-feedback">
+                        <p id="dictationStatus" class="dictation-status" role="status" aria-live="polite" aria-atomic="true"></p>
+                        <button type="button" id="dictationStop" class="dictation-action" data-i18n="dictation_stop" hidden>Stop</button>
+                        <button type="button" id="dictationCancel" class="dictation-action" data-i18n="dictation_cancel" hidden>Cancel</button>
                     </div>
 
                     {% if 'batch' in permissions %}<div class="batch-processing-container"
