@@ -8,6 +8,14 @@ class ChatDictation {
   };
   static #healthInterval = 30_000;
   static #recordingLimit = 45_000;
+  static #recordingFinalizeTimeout = 3_000;
+  static #microphoneErrors = new Map([
+    ['NotAllowedError', 'dictation_denied'],
+    ['SecurityError', 'dictation_denied'],
+    ['NotFoundError', 'dictation_microphone_missing'],
+    ['NotReadableError', 'dictation_microphone_unavailable'],
+    ['AbortError', 'dictation_microphone_unavailable'],
+  ]);
 
   constructor(chat, mic) {
     this.chat = chat;
@@ -37,7 +45,7 @@ class ChatDictation {
     document.addEventListener('visibilitychange', () => {
       if (document.visibilityState === 'visible') {
         this.checkHealth();
-      } else if (['permission', 'recording'].includes(this.operation?.phase)) {
+      } else if (this.operation?.phase === 'permission' || this.operation?.stream) {
         this.cancel();
       }
     });
@@ -124,13 +132,22 @@ class ChatDictation {
     this.render();
     if (restoreFocus) this.cancelButton.focus();
 
+    let stream;
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({audio: true});
-      if (this.operation !== operation) {
-        stream.getTracks().forEach(track => track.stop());
-        return;
+      stream = await navigator.mediaDevices.getUserMedia({audio: true});
+    } catch (error) {
+      if (this.operation === operation) {
+        const message = ChatDictation.#microphoneErrors.get(error?.name) || 'dictation_capture_error';
+        this.finish(message, true);
       }
-      operation.stream = stream;
+      return;
+    }
+    if (this.operation !== operation) {
+      stream.getTracks().forEach(track => track.stop());
+      return;
+    }
+    operation.stream = stream;
+    try {
       const recorder = new MediaRecorder(stream, {mimeType: this.mimeType});
       operation.recorder = recorder;
       recorder.addEventListener('dataavailable', ({data}) => {
@@ -146,10 +163,8 @@ class ChatDictation {
       operation.recordingTimer = setTimeout(() => this.stop(), ChatDictation.#recordingLimit);
       this.message = 'dictation_recording';
       this.render();
-    } catch (error) {
-      if (this.operation !== operation) return;
-      const denied = ['NotAllowedError', 'SecurityError'].includes(error.name);
-      this.finish(denied ? 'dictation_denied' : 'dictation_capture_error', true);
+    } catch {
+      this.finish('dictation_capture_error', true);
     }
   }
 
@@ -163,14 +178,24 @@ class ChatDictation {
     operation.phase = 'transcribing';
     this.message = 'dictation_transcribing';
     const moveFocus = document.activeElement === this.stopButton;
-    this.releaseMicrophone(operation);
+    clearTimeout(operation.recordingTimer);
+    try {
+      // Keep the audio track live until the recorder has flushed its final data.
+      operation.recorder.stop();
+    } catch {
+      this.finish('dictation_capture_error', true);
+      return;
+    }
+    operation.finalizationTimer = setTimeout(() => {
+      if (this.operation === operation) this.finish('dictation_capture_error', true);
+    }, ChatDictation.#recordingFinalizeTimeout);
     this.render();
     if (moveFocus) this.cancelButton.focus();
   }
 
   releaseMicrophone(operation) {
     clearTimeout(operation.recordingTimer);
-    if (operation.recorder && operation.recorder.state !== 'inactive') operation.recorder.stop();
+    clearTimeout(operation.finalizationTimer);
     operation.stream?.getTracks().forEach(track => track.stop());
     operation.stream = null;
   }
@@ -181,9 +206,14 @@ class ChatDictation {
       this.finish('dictation_capture_error', true);
       return;
     }
+    this.releaseMicrophone(operation);
     const mimeType = operation.chunks[0]?.type || operation.recorder.mimeType;
     const extension = ChatDictation.#formats[mimeType.split(';')[0].trim().toLowerCase()];
-    if (!operation.chunks.length || !extension) {
+    if (!operation.chunks.length) {
+      this.finish('dictation_empty_recording', true);
+      return;
+    }
+    if (!extension) {
       this.finish('dictation_capture_error', true);
       return;
     }

@@ -54,9 +54,11 @@ function mockMedia(supportedType) {
     start() { this.state = 'recording'; }
     stop() {
       this.state = 'inactive';
+      if (this.suppressFinalEvents) return;
       queueMicrotask(() => {
         const event = new Event('dataavailable');
-        event.data = new Blob(['test audio'], {type: this.recordedType ?? this.mimeType});
+        const audio = this.stream.track.stopped || this.emptyAudio ? [] : ['test audio'];
+        event.data = new Blob(audio, {type: this.recordedType ?? this.mimeType});
         this.dispatchEvent(event);
         this.dispatchEvent(new Event('stop'));
       });
@@ -284,8 +286,9 @@ test('readiness and composer lock gate recording; Persian text is editable befor
   const recording = await startRecording(h);
   recording.recordedType = 'audio/mp4;codecs=mp4a.40.2';
   h.stop.click();
-  assert.equal(recording.stream.track.stopped, true);
+  assert.equal(recording.stream.track.stopped, false);
   await tick();
+  assert.equal(recording.stream.track.stopped, true);
   assert.equal(h.status.textContent, 'dictation_transcribing');
   assert.equal(h.Chat.textarea.disabled, false);
   h.Chat.textarea.value += ' و ادامه';
@@ -444,6 +447,45 @@ test('recording automatically stops at 45 seconds and uploads a clip once', asyn
   assert.equal(recording.stream.track.stopped, true);
   assert.equal(h.Chat.textarea.value, 'پرسش بانکی');
   assert.equal(h.provider.filter(r => r.url.endsWith('/transcribe')).length, 1);
+});
+
+test('missing and unavailable microphones give different feedback while leaving the draft editable', async () => {
+  const h = await harness({});
+  h.select('NegahBoom_FAQ');
+  h.Chat.textarea.value = 'پیش‌نویس';
+  for (const [error, message] of [
+    ['NotFoundError', 'dictation_microphone_missing'],
+    ['NotReadableError', 'dictation_microphone_unavailable'],
+    ['AbortError', 'dictation_microphone_unavailable'],
+  ]) {
+    h.state.getPermission = async () => { throw new DOMException('local device', error); };
+    h.mic.click();
+    await tick();
+    assert.equal(h.status.textContent, message);
+    assert.equal(h.Chat.textarea.value, 'پیش‌نویس');
+    assert.equal(h.Chat.sendBtn.disabled, false);
+    assert.equal(h.mic.disabled, false);
+  }
+  assert.equal(h.provider.filter(r => r.url.endsWith('/transcribe')).length, 0);
+});
+
+test('empty audio and a recorder that never flushes both release the microphone and skip upload', async () => {
+  const h = await harness({});
+  h.select('NegahBoom_FAQ');
+  const empty = await startRecording(h);
+  empty.emptyAudio = true;
+  h.stop.click();
+  await tick();
+  assert.equal(empty.stream.track.stopped, true);
+  assert.equal(h.status.textContent, 'dictation_empty_recording');
+  const stalled = await startRecording(h);
+  stalled.suppressFinalEvents = true;
+  h.stop.click();
+  await h.clock.advance(3_000);
+  assert.equal(stalled.stream.track.stopped, true);
+  assert.equal(h.status.textContent, 'dictation_capture_error');
+  assert.equal(h.mic.disabled, false);
+  assert.equal(h.provider.filter(r => r.url.endsWith('/transcribe')).length, 0);
 });
 
 test('late provider responses cannot change the draft after cancel, chat change, or send', async () => {
