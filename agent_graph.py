@@ -17,6 +17,7 @@ from typing import TypedDict, List, Dict, Any, Optional, Annotated
 import operator
 from utils.rag_utils import clean_llm_answer
 from langgraph.graph import StateGraph, END
+from langchain_core.runnables import RunnableConfig
 from utils.rag_utils import aggregate_results
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.service_errors import InvalidRequestError
@@ -161,7 +162,7 @@ def make_handle_general(rag_system):
             )
         return aggregated, related, recent_history_to_text(recent)
 
-    async def node(state: AgentState) -> AgentState:
+    async def node(state: AgentState, config: RunnableConfig = None) -> AgentState:
         original_query = state["messages"][-1]["content"]
         query = state.get("retrieval_query") or original_query
 
@@ -297,6 +298,7 @@ def make_handle_general(rag_system):
             current_summary="", tone="friendly", response_type="normal",
             enable_history=False, category=category,
             prompt_context=select_prompt_context(state.get("allowed_docs", [])),
+            **(config or {}).get("configurable", {}).get("answer_stream", {}),
         )
         fallback = select_prompt_context(allowed).faq_fallback
         if fallback in (answer or ""):
@@ -328,7 +330,7 @@ def make_handle_chitchat(rag_system):
     Handles conversational intents bypassing RAG retrieval.
     Passes an empty context and a specific 'chitchat' category to the RAG System.
     """
-    async def node(state: AgentState) -> AgentState:
+    async def node(state: AgentState, config: RunnableConfig = None) -> AgentState:
         query = state["messages"][-1]["content"]
         # recent = state["messages"][-6:]
         recent = select_answer_prompt_history(state["messages"])
@@ -344,6 +346,7 @@ def make_handle_chitchat(rag_system):
             enable_history=False,
             category="chitchat",  # Used by RAGSystem to apply a conversational prompt
             prompt_context=select_prompt_context(state.get("allowed_docs", [])),
+            **(config or {}).get("configurable", {}).get("answer_stream", {}),
         )
 
         state["last_answer"] = answer

@@ -109,8 +109,11 @@ class AnsweringService:
         history_provider: ConversationHistoryProvider | None = None,
         observer: PipelineObserver | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
+        on_answer_delta=None,
     ) -> AnswerResult:
-        terminal_observer = self._terminal_observer(request)
+        terminal_observer = (
+            self._terminal_observer(request) if on_answer_delta is None else None
+        )
         active_observer = combine_pipeline_observers(observer, terminal_observer)
         try:
             with bind_pipeline_observer(active_observer):
@@ -118,6 +121,7 @@ class AnsweringService:
                     request,
                     history_provider=history_provider,
                     execution_policy=execution_policy,
+                    on_answer_delta=on_answer_delta,
                 )
                 if request.timeout_seconds is None:
                     result = await operation
@@ -162,6 +166,7 @@ class AnsweringService:
         *,
         history_provider: ConversationHistoryProvider | None,
         execution_policy: TurnExecutionPolicy,
+        on_answer_delta=None,
     ) -> AnswerResult:
         timings: dict[str, float] = {}
         total_started = time.perf_counter()
@@ -183,6 +188,8 @@ class AnsweringService:
             duration_ms=(time.perf_counter() - normalization_started) * 1000,
         ))
         if not normalized_query:
+            if on_answer_delta is not None:
+                raise InvalidRequestError("Query is empty after normalization")
             raise ValueError("query is empty after normalization")
 
         trace = current_trace()
@@ -421,6 +428,7 @@ class AnsweringService:
                 doc_category=category,
                 history_provider=provider,
                 execution_policy=execution_policy,
+                **({"on_answer_delta": on_answer_delta} if on_answer_delta is not None else {}),
             )
         else:
             turn = await self.agent_service.process_stateless_message(

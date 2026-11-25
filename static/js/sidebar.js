@@ -114,6 +114,7 @@ const Sessions = {
     },
     currentSessionId: null,
     createPromise: null,
+    loadingMessages: null,
     rawSessions: [],           // store unfiltered sessions
     currentFilter: "today",    // default filter
 
@@ -208,7 +209,7 @@ const Sessions = {
            data-id="${s.id}">
         <div class="sidebar__chat-item__icon">${`<svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#${s.is_pinned ? 'pin' : 'chat'}"></use></svg>`}</div>
         <div class="sidebar__chat-item__content" onclick="Sessions.select('${s.id}')">
-          <div class="sidebar__chat-item__title">${s.title || 'Untitled Chat'}</div>
+          <div class="sidebar__chat-item__title"></div>
           <div class="sidebar__chat-item__meta">
             <span>${this.formatTime(s.updated_at)}</span>
           </div>
@@ -234,6 +235,19 @@ const Sessions = {
         </div>
       </div>
     `).join('');
+        list.querySelectorAll('.sidebar__chat-item__title').forEach((title, index) => {
+            title.textContent = sessions[index].title || 'Untitled Chat';
+        });
+    },
+
+    activate(sessionId, loadingMessages = null) {
+        if (this.currentSessionId !== sessionId) {
+            Chat.dictation?.cancel();
+            Chat.sessionChanged();
+        }
+        this.currentSessionId = sessionId;
+        this.loadingMessages = loadingMessages;
+        if (Chat.sendBtn) Chat.setSendingState(Chat.isSending);
     },
 
     // Load messages for a session
@@ -252,7 +266,7 @@ const Sessions = {
     },
 
     // Create a new session
-    async create() {
+    async create({onlyIfNone = false} = {}) {
         if (this.createPromise) return this.createPromise;
         Chat.dictation?.cancel();
         this.createPromise = (async () => {
@@ -262,8 +276,7 @@ const Sessions = {
                 body: JSON.stringify({title: 'New Chat'})
             });
             const session = await API.readJSON(res);
-            Chat.dictation?.cancel();
-            this.currentSessionId = parseInt(session.id);
+            if (!onlyIfNone || !this.currentSessionId) this.activate(Number(session.id));
             await this.load();          // refresh sidebar list (will re-apply filter)
             return session;
         })();
@@ -276,22 +289,25 @@ const Sessions = {
 
     async ensureSession() {
         if (this.currentSessionId) return this.currentSessionId;
-        const session = await this.create();
+        const session = await this.create({onlyIfNone: true});
         return session.id;
     },
 
     async select(sessionId) {
         const selectedId = parseInt(sessionId);
-        if (this.currentSessionId !== selectedId) Chat.dictation?.cancel();
-        this.currentSessionId = selectedId;
-        await this.load();            // re-render with active highlight
+        if (this.currentSessionId === selectedId && Chat.isSending) return;
+        const loading = {};
+        this.activate(selectedId, loading);
+        this.applyFilterAndRender();
         try {
             const res = await API.request(`/api/sessions/${sessionId}/messages`);
             const data = await API.readJSON(res);
             const messages = Array.isArray(data) ? data : (data.messages || []);
-            Chat.loadMessages(messages);
+            if (this.loadingMessages === loading) Chat.loadMessages(messages);
         } catch (err) {
-            this.showError(err);
+            if (this.loadingMessages === loading) this.showError(err);
+        } finally {
+            if (this.loadingMessages === loading) this.activate(selectedId);
         }
     },
 
@@ -366,12 +382,7 @@ const Sessions = {
         if (this.currentSessionId === selectedId) Chat.dictation?.cancel();
         try {
             await API.deleteSession(sessionId);
-            if (this.currentSessionId === selectedId) Chat.dictation?.cancel();
-            if (this.currentSessionId === sessionId) {
-                this.currentSessionId = null;
-                const chatMessages = document.querySelector('.chat__messages');
-                if (chatMessages) chatMessages.innerHTML = '<p class="chat__empty">Select a chat or start a new one</p>';
-            }
+            if (this.currentSessionId === selectedId) this.activate(null);
             await this.load();
         } catch (err) {
             this.showError(err);

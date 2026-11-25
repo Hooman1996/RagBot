@@ -77,6 +77,7 @@ ROUTES = (
     ("POST", r"/api/knowledge-coverage/checks/[^/]+/suggestions/cancel", "coverage_run_start"),
     ("GET", r"/app", "chat"),
     ("POST", r"/api/query", "chat"),
+    ("POST", r"/api/query/stream", "chat"),
     ("GET", r"/api/sessions", "sessions"),
     ("POST", r"/api/sessions", "sessions"),
     ("GET", r"/api/sessions/[^/]+", "sessions"),

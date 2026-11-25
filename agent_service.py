@@ -91,6 +91,8 @@ class AgentService:
         doc_category: Optional[str] = None,
         history_provider: ConversationHistoryProvider | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
+        *,
+        on_answer_delta=None,
     ) -> AgentTurnResult:
         provider = history_provider or self.history_provider
         enforce_history_policy(provider, execution_policy)
@@ -112,6 +114,7 @@ class AgentService:
                 doc_category=doc_category,
                 history_provider=provider,
                 execution_policy=execution_policy,
+                on_answer_delta=on_answer_delta,
             )
 
     async def _process_message(
@@ -124,6 +127,8 @@ class AgentService:
         doc_category: Optional[str] = None,
         history_provider: ConversationHistoryProvider | None = None,
         execution_policy: TurnExecutionPolicy = PRODUCTION_EXECUTION_POLICY,
+        *,
+        on_answer_delta=None,
     ) -> AgentTurnResult:
         if not user_message.strip():
             return AgentTurnResult(answer=None, state={})
@@ -158,7 +163,15 @@ class AgentService:
         state["fallback_reason"] = None
 
         # 5. Run the graph (modifies the state dict)
-        final_state = await self.graph.ainvoke(state)   # was: self.graph.invoke(state)
+        if on_answer_delta is None:
+            final_state = await self.graph.ainvoke(state)
+        else:
+            # The turn callback belongs to the invocation, outside conversation state.
+            final_state = await self.graph.ainvoke(
+                state, config={"configurable": {"answer_stream": {
+                    "on_answer_delta": on_answer_delta,
+                }}}
+            )
 
         # 6. Extract assistant reply
         answer = None

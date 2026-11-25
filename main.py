@@ -62,7 +62,8 @@ from utils.request_instrumentation import (
     background_operation_context, current_trace, mark_event, trace_span,
 )
 from utils.http_logging_middleware import HttpLoggingMiddleware
-from utils.service_errors import ServiceError, ServiceUnavailableError
+from utils.service_errors import InvalidRequestError, ServiceError, ServiceUnavailableError
+from utils.rag_utils import EMPTY_WEB_ANSWER
 from utils.client_lifecycle import SerializedClient
 from utils.performance_config import PERFORMANCE_SETTINGS
 from utils.structured_logging import log_event, start_logging
@@ -80,6 +81,7 @@ from web_auth import (WebUser, current_web_user, create_session as create_web_se
 from web_user_accounts import (AccountValidationError, DuplicateAccountError,
                                validate_creation, create_browser_account)
 from document_category import get_document_category
+from web_answer_stream import WebAnswerStream, WebStreamHistoryProvider
 
 class Config:
     """Configuration"""
@@ -756,7 +758,32 @@ async def query_documents(query_req: QueryRequest, request: Request, user: WebUs
         ) from exc
 
 
-async def _query_documents(query_req: QueryRequest):
+@app.post("/api/query/stream", response_class=WebAnswerStream, status_code=200)
+async def stream_query_documents(query_req: QueryRequest, request: Request, user: WebUser):
+    await require_owned_session(query_req.session_id, user)
+    if not query_req.query.strip():
+        raise InvalidRequestError("Query is empty")
+    deadline = time.monotonic() + REQUEST_TIMEOUT_SECONDS
+
+    async def stream_turn(on_answer_delta):
+        async def operation():
+            async with trace_span("pipeline"):
+                return await _query_documents(
+                    query_req, on_answer_delta=on_answer_delta, deadline=deadline
+                )
+
+        mark_event("pre_admission_start")
+        mark_event("pre_admission_end")
+        return await run_with_limit(
+            request.app.state.request_limiter,
+            operation,
+            acquire_timeout=REQUEST_ADMISSION_TIMEOUT_SECONDS,
+        )
+
+    return WebAnswerStream(stream_turn, deadline=deadline)
+
+
+async def _query_documents(query_req: QueryRequest, *, on_answer_delta=None, deadline=None):
     global answering_service, chat_manager
     if agent_service is None:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Agent not initialized")
@@ -780,6 +807,14 @@ async def _query_documents(query_req: QueryRequest):
         raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
                             detail="Failed to save user transaction message")
 
+    stream_history = None
+    answer_options = {}
+    if on_answer_delta is not None:
+        stream_history = WebStreamHistoryProvider(
+            db_manager, blocking_runner, int(user_msg["id"]), deadline
+        )
+        answer_options = {"history_provider": stream_history, "on_answer_delta": on_answer_delta}
+
     # Send optimized state to LangGraph engine turn layer
     result = await answering_service.answer(
         AnswerRequestContext(
@@ -790,27 +825,32 @@ async def _query_documents(query_req: QueryRequest):
             use_history=True,
             persist_agent_state=True,
             include_related_questions=True,
-        )
+        ),
+        **answer_options,
     )
     normalized_query = result.normalized_query
     answer = result.answer
 
     if answer is None:
-        answer = "متاسفانه پاسخی دریافت نشد. لطفاً دوباره تلاش کنید."
+        answer = EMPTY_WEB_ANSWER
 
     mark_event("answer_generation_finished")
     post_generation_started = time.perf_counter_ns()
-    async with trace_span("persistence"):
-        ai_msg = await blocking_runner.run(
-            chat_manager.add_message,
-            session_id,
-            "assistant",
-            answer,
-            query_id=int(user_msg["id"]),
-            wait_for_completion_on_cancel=True,
-        )
-
-    query_id = ai_msg["id"] if ai_msg else None
+    if stream_history is not None:
+        query_id = stream_history.completed_query_id
+        if query_id is None:
+            raise ServiceUnavailableError("Failed to save the assistant response")
+    else:
+        async with trace_span("persistence"):
+            ai_msg = await blocking_runner.run(
+                chat_manager.add_message,
+                session_id,
+                "assistant",
+                answer,
+                query_id=int(user_msg["id"]),
+                wait_for_completion_on_cancel=True,
+            )
+        query_id = ai_msg["id"] if ai_msg else None
 
     # Sync and build updated frontend notification states from conversation context metadata
     current_category = get_document_category(query_req.documents[0]) if query_req.documents else "general"

@@ -30,7 +30,7 @@ from utils.service_errors import (
 )
 from utils.request_instrumentation import current_trace, trace_span
 from new_architecture.app.config import Config
-from .rag_utils import clean_llm_answer
+from .rag_utils import EMPTY_WEB_ANSWER, StreamingAnswerCleaner, clean_llm_answer
 from pipeline_observer import (
     PipelineStage,
     PipelineStageResult,
@@ -205,7 +205,7 @@ class RAGSystem:
         if self._owns_client:
             await self.client.close()
 
-    async def _completion(self, **kwargs):
+    async def _completion(self, *, on_answer_delta=None, **kwargs):
         self._ensure_open()
         trace = current_trace()
         if trace is not None:
@@ -217,8 +217,14 @@ class RAGSystem:
         self._vllm_active += 1
         try:
             async with trace_span("vllm"):
+                if on_answer_delta is not None:
+                    stream = await self.client.chat.completions.create(
+                        **kwargs, stream=True
+                    )
+                    async with stream:
+                        return await self._read_answer_stream(stream, on_answer_delta)
                 return await self.client.chat.completions.create(**kwargs)
-        except APITimeoutError as exc:
+        except (APITimeoutError, httpx.TimeoutException) as exc:
             self._vllm_timeout_total += 1
             raise ServiceTimeoutError("Language model service timed out") from exc
         except APIStatusError as exc:
@@ -234,12 +240,35 @@ class RAGSystem:
             raise ServiceUnavailableError(
                 "Language model service is unavailable"
             ) from exc
-        except APIConnectionError as exc:
+        except (APIConnectionError, httpx.TransportError) as exc:
             raise ServiceUnavailableError(
                 "Language model service is unavailable"
             ) from exc
         finally:
             self._vllm_active -= 1
+
+    @staticmethod
+    async def _read_answer_stream(stream, on_answer_delta):
+        cleaner = StreamingAnswerCleaner()
+        parts = []
+        finished = False
+        async for chunk in stream:
+            if not chunk.choices:
+                continue
+            choice = chunk.choices[0]
+            text = cleaner.feed(choice.delta.content or "")
+            if not parts:
+                text = text.lstrip()
+            if text:
+                parts.append(text)
+                await on_answer_delta(text)
+            if choice.finish_reason is not None:
+                if choice.finish_reason not in {"stop", "length"}:
+                    raise ServiceProtocolError("Language model did not complete an answer")
+                finished = True
+        if not finished:
+            raise ServiceProtocolError("Language model stream ended early")
+        return "".join(parts).rstrip()
 
     def metrics_snapshot(self) -> dict[str, int]:
         return {
@@ -307,7 +336,8 @@ class RAGSystem:
 
     async def answer(self, user_question, context, recent_history, current_summary, tone, response_type,
                max_new_tokens=None,
-               enable_history=True, category=None, *, prompt_context=None):
+               enable_history=True, category=None, *, prompt_context=None,
+               on_answer_delta=None):
 
         # Workflow categories retain their established templates.
         from prompt_selection import prompt_templates
@@ -404,8 +434,12 @@ class RAGSystem:
                 temperature=generation_temperature,
                 top_p=generation_top_p,
                 seed=generation_seed,
+                **({"on_answer_delta": on_answer_delta} if on_answer_delta is not None else {}),
             )
-            answer = clean_llm_answer(response.choices[0].message.content)
+            answer = (
+                (response or EMPTY_WEB_ANSWER) if on_answer_delta is not None
+                else clean_llm_answer(response.choices[0].message.content)
+            )
         except Exception as exc:
             emit_pipeline_stage_lazy(lambda: PipelineStageResult(
                 stage=PipelineStage.GENERATION,

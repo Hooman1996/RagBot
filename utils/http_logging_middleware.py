@@ -51,7 +51,7 @@ def route_log_policy(path: str) -> RouteLogPolicy:
         return RouteLogPolicy(True, False, False)
     if path.startswith("/api/sessions/") and path.endswith("/download"):
         return RouteLogPolicy(True, False, False)
-    if path in {"/api/ocr/extract", "/api/mass-answer"}:
+    if path in {"/api/ocr/extract", "/api/mass-answer", "/api/query/stream"}:
         return RouteLogPolicy(True, False, False)
     return RouteLogPolicy()
 

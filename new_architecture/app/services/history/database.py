@@ -1,6 +1,7 @@
 # new_architecture/app/services/history/database.py
 
 import json
+import time
 import psycopg2
 import psycopg2.extras
 from datetime import datetime
@@ -8,7 +9,7 @@ import uuid
 
 import os
 from dotenv import load_dotenv
-from utils.service_errors import ServiceError, ServiceUnavailableError
+from utils.service_errors import ServiceError, ServiceTimeoutError, ServiceUnavailableError
 
 # Load variables from .env into os.environ
 load_dotenv()
@@ -55,7 +56,7 @@ class DatabaseManager:
         conn.autocommit = False
         return conn
 
-    def _execute(self, query: str, params=None, fetch: str = None):
+    def _execute(self, query: str, params=None, fetch: str = None, *, deadline=None):
         """
         fetch=None   → write operation, commits, returns True/False
         fetch="one"  → SELECT … RETURNING, commits, returns dict | None
@@ -65,9 +66,21 @@ class DatabaseManager:
         try:
             conn = self.get_connection()
             with conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor) as cur:
+                if deadline is not None:
+                    remaining_ms = int((deadline - time.monotonic()) * 1000)
+                    if remaining_ms <= 0:
+                        raise ServiceTimeoutError("Answer persistence exceeded the request deadline")
+                    cur.execute(
+                        "SELECT set_config('statement_timeout', LEAST("
+                        "%s, COALESCE(NULLIF(setting::integer, 0), %s))::text, true) "
+                        "FROM pg_settings WHERE name = 'statement_timeout'",
+                        (remaining_ms, remaining_ms),
+                    )
                 cur.execute(query, params)
                 if fetch == "one":
                     result = cur.fetchone()
+                    if deadline is not None and time.monotonic() >= deadline:
+                        raise ServiceTimeoutError("Answer persistence exceeded the request deadline")
                     conn.commit()
                     return dict(result) if result else None
                 if fetch == "all":
@@ -80,6 +93,8 @@ class DatabaseManager:
         except psycopg2.Error as e:
             if conn:
                 conn.rollback()
+            if deadline is not None and isinstance(e, psycopg2.errors.QueryCanceled):
+                raise ServiceTimeoutError("Answer persistence timed out") from e
             raise ServiceUnavailableError(
                 "PostgreSQL operation failed"
             ) from e
@@ -579,6 +594,33 @@ class DatabaseManager:
             )
             if session_row and session_row.get("chat_session_id"):
                 self.update_session_tokens(session_row["chat_session_id"], token_count)
+
+    def complete_web_turn(self, session_id, user_id, query_id, answer, metadata, *, deadline):
+        """Complete the pending query and advance chat history in one transaction."""
+        now = datetime.utcnow()
+        return self._execute("""
+        WITH owned_session AS (
+            SELECT id FROM chat_sessions WHERE id = %s AND user_id = %s
+            FOR NO KEY UPDATE
+        ), completed AS (
+            UPDATE queries
+            SET response_text = %s, status = 'completed',
+                completed_at = %s, updated_at = %s
+            WHERE id = %s AND chat_session_id = (SELECT id FROM owned_session)
+              AND user_id = %s
+              AND response_text IS NULL AND status = 'pending'
+            RETURNING id, chat_session_id, user_id
+        )
+        UPDATE chat_sessions AS session
+        SET meta_data = (COALESCE(session.meta_data::jsonb, '{}'::jsonb) || %s::jsonb)::json,
+            last_activity_at = %s, updated_at = %s
+        FROM completed
+        WHERE session.id = completed.chat_session_id AND session.user_id = completed.user_id
+        RETURNING completed.id
+        """, (
+            session_id, user_id, answer, now, now, query_id, user_id,
+            json.dumps(metadata, ensure_ascii=False), now, now,
+        ), fetch="one", deadline=deadline)
 
     def get_session_queries(self, session_id: int) -> list:
         return self._execute("""

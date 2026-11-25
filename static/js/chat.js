@@ -91,8 +91,7 @@ const Chat = {
       this.textarea.placeholder = I18N.t('lock_placeholder') || 'برای پرسش، ابتدا یک سند انتخاب یا آپلود کنید';
     } else {
       this.lockNotice.style.display = 'none';
-      this.textarea.disabled = false;
-      this.sendBtn.disabled = false;
+      this.setSendingState(this.isSending);
       this.textarea.placeholder = I18N.t('input_placeholder');
     }
     if (this.isLocked) this.dictation?.cancel();
@@ -294,9 +293,10 @@ const Chat = {
     commentPanel.className = "feedback-comment-panel";
     commentPanel.style.display = "none";
     commentPanel.innerHTML = `
-      <textarea class="feedback-comment-input" placeholder="${I18N.t('feedback_comment_placeholder')}" rows="2">${existingComment}</textarea>
+      <textarea class="feedback-comment-input" placeholder="${I18N.t('feedback_comment_placeholder')}" rows="2"></textarea>
       <button class="feedback-comment-submit">${I18N.t('feedback_comment_submit')}</button>
     `;
+    commentPanel.querySelector(".feedback-comment-input").value = existingComment;
 
     // Like/dislike handlers
     const setFeedback = async (value) => {
@@ -368,7 +368,7 @@ const Chat = {
   /* ── Build a message element ── */
   _buildMessage(role, text, timeStr = null, queryId = null,
                 isHelpful = null, metaData = {}, satisfactionNeeded = false,
-                relatedQuestions = []) {
+                relatedQuestions = [], pending = false) {
     const isUser = role === "user";
     const msg = document.createElement("div");
     msg.className = `message ${isUser ? "message--user" : "message--ai"}`;
@@ -378,7 +378,7 @@ const Chat = {
       <div class="message__avatar">${isUser ? "U" : "AI"}</div>
       <div class="message__body">
         <div class="message__sender">${isUser ? I18N.t('You') : I18N.t('AI')}</div>
-        <div class="message__bubble" dir="auto">${text}</div>
+        <div class="message__bubble" dir="auto"></div>
         <div class="message__meta">
           <span class="message__time">${time}</span>
         </div>
@@ -386,19 +386,22 @@ const Chat = {
     `;
 
     const body = msg.querySelector(".message__body");
-
-    // Feedback bar (with optional ticket button) – only for AI messages
-    if (!isUser) {
-      const comment = metaData?.user_comment || "";
-      const feedbackBar = this._buildFeedbackBar(
-        queryId, isHelpful, comment,
-        satisfactionNeeded, Sessions.currentSessionId
-      );
-      body.appendChild(feedbackBar);
+    msg.querySelector(".message__bubble").textContent = text;
+    if (!isUser && !pending) {
+      this._addAnswerControls(body, queryId, isHelpful, metaData, satisfactionNeeded, relatedQuestions);
     }
+    return msg;
+  },
+
+  _addAnswerControls(body, queryId, isHelpful, metaData, satisfactionNeeded, relatedQuestions) {
+    const comment = metaData?.user_comment || "";
+    const feedbackBar = this._buildFeedbackBar(
+      queryId, isHelpful, comment, satisfactionNeeded, Sessions.currentSessionId
+    );
+    body.appendChild(feedbackBar);
 
     // Most Related Questions collapsible section
-    if (!isUser && relatedQuestions.length > 0) {
+    if (relatedQuestions.length > 0) {
       const questionsContainer = document.createElement("div");
       questionsContainer.className = "message__related-questions";
 
@@ -447,7 +450,6 @@ const Chat = {
       });
     }
 
-    return msg;
   },
 
   addUserMessage(text, timeStr = null) {
@@ -490,17 +492,19 @@ const Chat = {
     `;
     this.messagesContainer.appendChild(el);
     this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+    return el;
   },
 
-  removeTyping() {
-    const el = document.getElementById("typing");
-    if (el) el.remove();
+  sessionChanged() {
+    this.activeStream?.abort();
+    this.messagesContainer?.replaceChildren();
   },
 
   setSendingState(isSending) {
     this.isSending = isSending;
-    this.sendBtn.disabled = isSending || this.isLocked;
-    this.textarea.disabled = isSending || this.isLocked;
+    const disabled = isSending || this.isLocked || Sessions.loadingMessages;
+    this.sendBtn.disabled = !!disabled;
+    this.textarea.disabled = !!disabled;
   },
 
   showError(error) {
@@ -512,7 +516,7 @@ const Chat = {
   },
 
   async send() {
-    if (this.isSending || this.isLocked) return;
+    if (this.isSending || this.isLocked || Sessions.loadingMessages) return;
     this.isSending = true;
 
     const text = this.textarea.value.trim();
@@ -523,8 +527,14 @@ const Chat = {
 
     this.setSendingState(true);
     this.dictation?.cancel();
+    let sessionId, indicator, reply, bubble, controller;
+    const isCurrent = () => !controller?.signal.aborted &&
+      sessionId === Number(Sessions.currentSessionId);
     try {
-      await Sessions.ensureSession();
+      sessionId = Number(await Sessions.ensureSession());
+      if (!isCurrent()) return;
+      controller = new AbortController();
+      this.activeStream = controller;
 
       // Remove any pending satisfaction prompts
       document.querySelectorAll(".feedback-satisfaction").forEach(el => el.remove());
@@ -538,31 +548,42 @@ const Chat = {
 
       this.addUserMessage(text);
       this.textarea.value = "";
-      this.typing();
-
-      const res = await API.query(finalQuery, this.selectedDocs, Sessions.currentSessionId, 10, 0.5, uploadedTextToSend);
-      this.removeTyping();
-
-      if (res.status === "success") {
-        const queryId = res.query_id || null;
-        const satisfactionNeeded = res.feedback_needed === true;
-        this.addAIMessage(
-          res.answer,
-          null,
-          queryId,
-          null,
-          {},
-          satisfactionNeeded,
-          res.related_questions || []
-        );
-        Sessions.load();
+      indicator = this.typing();
+      const res = await API.streamQuery({
+        query: finalQuery, documents: this.selectedDocs, session_id: sessionId,
+        top_k: 10, alpha: 0.5, uploaded_text: uploadedTextToSend,
+      }, {
+        signal: controller.signal,
+        onDelta: (text) => {
+          if (!isCurrent() || (!bubble && !text.trim())) return;
+          if (!bubble) {
+            indicator.remove();
+            reply = this._buildMessage("assistant", "", null, null, null, {}, false, [], true);
+            bubble = reply.querySelector(".message__bubble");
+            this.messagesContainer.appendChild(reply);
+          }
+          bubble.append(document.createTextNode(text));
+          this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
+        },
+      });
+      if (!isCurrent()) return;
+      if (bubble) {
+        bubble.textContent = res.answer;
+        this._addAnswerControls(reply.querySelector(".message__body"), res.query_id,
+          null, {}, res.feedback_needed === true, res.related_questions || []);
+        this.messagesContainer.scrollTop = this.messagesContainer.scrollHeight;
       } else {
-        this.showError();
+        indicator.remove();
+        this.addAIMessage(res.answer, null, res.query_id, null, {},
+          res.feedback_needed === true, res.related_questions || []);
       }
+      Sessions.load();
     } catch (err) {
-      this.showError(err);
+      reply?.remove();
+      if (sessionId === undefined || isCurrent()) this.showError(err);
     } finally {
-      this.removeTyping();
+      indicator?.remove();
+      if (this.activeStream === controller) this.activeStream = null;
       this.isSending = false;
       this._updateLockState();
     }

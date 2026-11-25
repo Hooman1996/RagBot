@@ -9,6 +9,9 @@ from typing import List, Dict
 from utils.persian_normalization import normalize_persian_text
 
 
+EMPTY_WEB_ANSWER = "متاسفانه پاسخی دریافت نشد. لطفاً دوباره تلاش کنید."
+
+
 _QUESTION_PATTERN = re.compile(
     r"(?:^|\n)\s*question\s*:\s*"
     r"(.+?)(?=(?:\n\s*)?answer\s*\d*\s*:|"
@@ -132,3 +135,42 @@ def clean_llm_answer(answer: str) -> str:
     answer = re.sub(r"<thought_process>.*?</thought_process>", "", answer, flags=re.DOTALL)
     answer = re.sub(r"<think>.*?</think>", "", answer, flags=re.DOTALL)
     return answer.strip()
+
+
+class StreamingAnswerCleaner:
+    """Filter reasoning before yielding any user-visible text."""
+
+    _tags = ("<think>", "</think>", "<thought_process>", "</thought_process>")
+
+    def __init__(self):
+        self._pending = ""
+        self._hidden = []
+
+    def feed(self, text: str) -> str:
+        remaining = self._pending + text
+        self._pending = ""
+        visible = []
+        while remaining:
+            before, marker, after = remaining.partition("<")
+            if not self._hidden:
+                visible.append(before)
+            if not marker:
+                break
+
+            remaining = marker + after
+            candidate = remaining[:max(map(len, self._tags))].lower()
+            tag = next((tag for tag in self._tags if candidate.startswith(tag)), None)
+            if tag is not None:
+                if not tag.startswith("</"):
+                    self._hidden.append(tag)
+                elif self._hidden and self._hidden[-1] == "<" + tag[2:]:
+                    self._hidden.pop()
+                remaining = remaining[len(tag):]
+            elif any(tag.startswith(candidate) for tag in self._tags):
+                self._pending = remaining
+                break
+            else:
+                if not self._hidden:
+                    visible.append(marker)
+                remaining = after
+        return "".join(visible)
