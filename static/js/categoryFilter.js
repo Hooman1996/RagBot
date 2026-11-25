@@ -1,5 +1,4 @@
 const CategoryFilter = {
-    categories: [],
     selectedCategories: new Set(),
     allDocuments: [],
     filteredDocuments: [],
@@ -8,112 +7,94 @@ const CategoryFilter = {
     init() {
         this.container = document.getElementById('category-filters');
         this.activeSourcesList = document.getElementById('active-sources-list');
-        this.searchInput = document.getElementById('doc-search-input');
-
-        if (this.searchInput) {
-            this.searchInput.addEventListener('input', (e) => {
-                this.searchTerm = e.target.value.trim().toLowerCase();
-                this.applyFilter();
-            });
-        }
-
+        this.status = document.getElementById('document-status');
+        document.getElementById('doc-search-input').addEventListener('input', event => {
+            this.searchTerm = event.target.value.trim().toLowerCase();
+            this.applyFilter();
+        });
         this.loadCategories();
     },
 
+    setStatus(key, error = false) {
+        if (key) this.status.dataset.i18n = key;
+        else delete this.status.dataset.i18n;
+        this.status.textContent = key ? I18N.t(key) : '';
+        this.status.classList.toggle('error', error);
+    },
+
     async loadCategories() {
+        this.setStatus('chat_documents_loading');
+        this.activeSourcesList.setAttribute('aria-busy', 'true');
         try {
             const data = await API.getDocuments();
             this.allDocuments = data.documents || [];
-            const catSet = new Set(this.allDocuments.map(d => d.category));
-            this.categories = Array.from(catSet);
-
-            // ✅ Add all categories to selected set BEFORE rendering
-            this.categories.forEach(cat => this.selectedCategories.add(cat));
-
+            this.selectedCategories = new Set(this.allDocuments.map(doc => doc.category));
             this.renderCategoryFilters();
             this.applyFilter();
-
-            window.dispatchEvent(new Event('categoryFilterLoaded'));
-        } catch (e) {
-            if (typeof Chat !== 'undefined') Chat.showError(e);
-            else alert(API.errorMessage(e));
+        } catch (_) {
+            this.setStatus('chat_documents_error', true);
+        } finally {
+            this.activeSourcesList.setAttribute('aria-busy', 'false');
         }
     },
 
     renderCategoryFilters() {
-        if (!this.container) return;
-        this.container.innerHTML = '';
-        const counts = {};
-        this.allDocuments.forEach(doc => {
-            counts[doc.category] = (counts[doc.category] || 0) + 1;
-        });
-
-        this.categories.forEach(cat => {
-            const div = document.createElement('div');
-            div.className = `category-filter-item ${this.selectedCategories.has(cat) ? 'selected' : ''}`;
-            div.innerHTML = `
-                <input type="checkbox" id="cat-${cat}" value="${cat}" ${this.selectedCategories.has(cat) ? 'checked' : ''}>
-                <label for="cat-${cat}">${cat}</label>
-                <span class="doc-count">${counts[cat] || 0}</span>
-            `;
-            const checkbox = div.querySelector('input');
-            checkbox.addEventListener('change', (e) => {
-                if (e.target.checked) {
-                    this.selectedCategories.add(cat);
-                } else {
-                    this.selectedCategories.delete(cat);
-                }
-                div.classList.toggle('selected', e.target.checked);
+        this.container.replaceChildren();
+        for (const category of this.selectedCategories) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'category-filter-item';
+            button.dir = 'auto';
+            button.textContent = category;
+            button.setAttribute('aria-pressed', 'true');
+            button.addEventListener('click', () => {
+                if (!this.selectedCategories.delete(category)) this.selectedCategories.add(category);
+                button.setAttribute('aria-pressed', String(this.selectedCategories.has(category)));
                 this.applyFilter();
             });
-            this.container.appendChild(div);
-        });
+            this.container.appendChild(button);
+        }
     },
 
     applyFilter() {
-        // Filter by categories
-        let docs = this.allDocuments;
-
-        // Only apply category filter if at least one category is selected
-        if (this.selectedCategories.size > 0) {
-            docs = docs.filter(doc => this.selectedCategories.has(doc.category));
-        }
-
-        // Apply text search
-        if (this.searchTerm) {
-            docs = docs.filter(doc =>
-                doc.name.toLowerCase().includes(this.searchTerm)
-                // Add number search later: doc.number?.toLowerCase().includes(this.searchTerm)
-            );
-        }
-
-        this.filteredDocuments = docs;
+        this.filteredDocuments = this.allDocuments.filter(doc =>
+            (!this.selectedCategories.size || this.selectedCategories.has(doc.category)) &&
+            doc.name.toLowerCase().includes(this.searchTerm)
+        );
+        Chat.clearInvalidSelectedDocs(this.filteredDocuments.map(doc => doc.name));
         this.renderActiveSources();
-
-        // Notify Chat module to update its document tags and clear invalid selections
-        if (typeof Chat !== 'undefined') {
-            if (Chat.updateDocumentTags) {
-                Chat.updateDocumentTags(this.filteredDocuments);
-            }
-            if (Chat.clearInvalidSelectedDocs) {
-                Chat.clearInvalidSelectedDocs(this.filteredDocuments.map(d => d.name));
-            }
-        }
+        if (this.status) this.setStatus(this.filteredDocuments.length ? '' : 'chat_no_documents');
     },
 
     renderActiveSources() {
         if (!this.activeSourcesList) return;
-        if (this.filteredDocuments.length === 0) {
-            this.activeSourcesList.innerHTML = '<div class="kp-doc-item-small">No documents match</div>';
-            return;
+        this.activeSourcesList.replaceChildren();
+        for (const doc of this.filteredDocuments) {
+            const button = document.createElement('button');
+            button.type = 'button';
+            button.className = 'doc-row';
+            button.dataset.document = doc.name;
+            button.innerHTML = Chat.icon('documents');
+            const labels = document.createElement('span');
+            labels.className = 'doc-row__labels';
+            const name = document.createElement('bdi');
+            name.className = 'doc-row__name';
+            name.dir = 'auto';
+            name.textContent = doc.name;
+            const category = document.createElement('bdi');
+            category.className = 'doc-row__category';
+            category.dir = 'auto';
+            category.textContent = doc.category;
+            labels.appendChild(name);
+            labels.appendChild(category);
+            button.appendChild(labels);
+            button.setAttribute('aria-pressed', String(Chat.selectedDocs.includes(doc.name)));
+            button.addEventListener('click', () => {
+                if (!Chat.toggleDocument(doc, this.allDocuments)) return;
+                button.setAttribute('aria-pressed', String(Chat.selectedDocs.includes(doc.name)));
+                if (this.status) this.setStatus('');
+            });
+            this.activeSourcesList.appendChild(button);
         }
-        const html = this.filteredDocuments.map(doc =>
-            `<div class="kp-doc-item-small" title="${doc.name}">📄 ${doc.name}</div>`
-        ).join('');
-        this.activeSourcesList.innerHTML = html;
     },
-
-    getFilteredDocuments() {
-        return this.filteredDocuments;
-    }
 };

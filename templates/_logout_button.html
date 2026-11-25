@@ -1,4 +1,4 @@
-<button type="button" class="web-logout" onclick="webLogout()" title="{{ logout_label }}" aria-label="{{ logout_label }}">
+<button type="button" class="web-logout" onclick="webLogout()" title="{{ logout_label }}" aria-label="{{ logout_label }}"{% if logout_localized|default(false) %} data-i18n-label="logout" data-i18n-title="logout"{% endif %}>
   <svg aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#logout"></use></svg>
   <span{% if logout_localized|default(false) %} data-i18n="logout"{% endif %}>{{ logout_label }}</span>
 </button>

@@ -1,104 +1,96 @@
 <!DOCTYPE html>
-<html lang="fa" dir="rtl">
+<html class="workspace-page" lang="fa" dir="rtl">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Negah Yar AI - مدیریت پایگاه دانش</title>
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind/3.4.17/tailwind.min.css') }}" integrity="{{ vendor_integrity('vendor/tailwind/3.4.17/tailwind.min.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/workspace.css') }}" integrity="{{ asset_integrity('css/workspace.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/kb_manager.css') }}" integrity="{{ asset_integrity('css/kb_manager.css') }}" crossorigin="anonymous">
-    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
-<body data-can-write="{{ 'true' if 'kb_write' in permissions else 'false' }}" class="bg-slate-900 text-slate-100 min-h-screen flex flex-col font-sans select-none">
-
-    <header class="kb-header bg-slate-950 border-b border-slate-800 px-6 py-4 flex justify-between items-center shadow-lg">
-        <div class="flex items-center gap-3">
-            <div class="w-10 h-10 rounded-xl bg-blue-600 flex items-center justify-center font-bold text-lg text-white shadow-md shadow-blue-500/20">N</div>
-            <div>
-                <h1 class="text-md font-bold tracking-wide">سامانه هوشمند نگاه یار</h1>
-                <p class="text-xs text-slate-400">{% if 'kb_write' in permissions %}پنل مدیریت پیشرفته پایگاه دانش و همگام‌سازی برداری{% else %}مرور و جستجوی پایگاه دانش{% endif %}</p>
-            </div>
-        </div>
-        <div class="web-header-controls web-header-controls--kb">
-            {% if 'chat' in permissions %}<a href="/app" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all"><svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#back"></use></svg> بازگشت به میز کار چت</a>{% endif %}
-            {% if 'analytics' in permissions %}<a href="/analytics" class="text-xs bg-slate-800 border border-slate-700 hover:bg-slate-700 text-slate-200 px-4 py-2 rounded-lg font-medium transition-all">تحلیل‌ها</a>{% endif %}
-            {% if 'users_manage' in permissions %}<a href="/admin/users" class="text-xs bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg"><svg class="control-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#users"></use></svg> کاربران</a>{% endif %}
-            {% if 'coverage_results_view' in permissions %}<a href="/knowledge-coverage" class="text-xs bg-slate-800 border border-slate-700 text-slate-200 px-4 py-2 rounded-lg">پوشش دانش</a>{% endif %}
-            {% set logout_label = "خروج" %}{% include "_logout_button.html" %}
-        </div>
-    </header>
-
-    <div class="flex flex-1 overflow-hidden">
-
-        <aside class="w-80 bg-slate-950/50 border-l border-slate-800 p-4 flex flex-col">
-            <div class="mb-4">
-                <h3 class="text-xs uppercase tracking-wider font-bold text-slate-400 mb-1">فهرست اسناد فعال</h3>
-                <p class="text-[11px] text-slate-500">سند مورد نظر خود را برای مشاهده تکه‌ها انتخاب کنید.</p>
-            </div>
-            <div id="document-sidebar-list" class="flex-1 space-y-1.5 overflow-y-auto pr-1">
-                <div class="text-center py-8 text-slate-500 text-xs animate-pulse">در حال بارگذاری لیست اسناد...</div>
-            </div>
-        </aside>
-
-        <main class="flex-1 p-6 flex flex-col bg-slate-900 overflow-y-auto">
-            {% if 'kb_write' not in permissions %}<p id="kb-read-only-indicator" role="status" class="mb-4 rounded-lg border border-blue-700 bg-blue-950/60 px-4 py-3 text-sm text-blue-100">دسترسی فقط خواندنی: می‌توانید اسناد، تکه‌ها و تاریخچه تغییرات را مشاهده و جستجو کنید.</p>{% endif %}
-
-            <div class="bg-slate-950 p-4 rounded-xl border border-slate-800 shadow-md mb-6 flex gap-3 items-center">
-                <div class="flex-1 relative">
-                    <input type="text" id="kb-search-input" placeholder="جستجو در محتوا یا سوالات موجود در تکه‌های این سند..."
-                           class="w-full bg-slate-900 border border-slate-700 rounded-lg px-4 py-2.5 text-sm text-slate-100 placeholder-slate-500 focus:outline-none focus:border-blue-500 transition-all">
-                </div>
-                <button id="kb-search-trigger" class="bg-blue-600 hover:bg-blue-500 text-white px-5 py-2.5 text-sm font-semibold rounded-lg shadow-md transition-all">
-                    جستجوی هوشمند
-                </button>
-            </div>
-
-            <div id="chunks-workspace-wrapper" class="space-y-4">
-                <div class="flex flex-col items-center justify-center py-24 text-slate-500 border border-dashed border-slate-800 rounded-xl bg-slate-950/20">
-                    <span class="text-4xl mb-3">📂</span>
-                    <p class="text-sm">برای مشاهده تکه‌های اطلاعاتی، ابتدا یک سند را از پنل کناری انتخاب کنید.</p>
+<body data-can-write="{{ 'true' if 'kb_write' in permissions else 'false' }}" class="workspace-body kb-workspace" data-icons-url="{{ versioned_asset(request, 'icons.svg') }}">
+{% set workspace_page = 'knowledge' %}
+{% set workspace_title = 'پایگاه دانش' %}
+{% set workspace_theme_id = 'kbTheme' %}
+<div class="app-shell workspace-shell">
+    {% include "_workspace_rail.html" %}
+    <main class="main-content workspace-main">
+        {% include "_workspace_header.html" %}
+        <div class="kb-layout">
+            <div class="kb-content workspace-scroll" dir="rtl" data-workspace-content>
+                <div class="workspace-content">
+                    <h1 class="workspace-heading kb-page-title">تکه‌های دانش</h1>
+                    {% if 'kb_write' not in permissions %}<p id="kb-read-only-indicator" role="status" class="kb-read-only">دسترسی فقط خواندنی. می‌توانید اسناد، تکه‌ها و تاریخچه تغییرات را مشاهده و جستجو کنید.</p>{% endif %}
+                    <div class="kb-search workspace-surface">
+                        <div>
+                            <label for="kb-search-input">جستجو در سند</label>
+                            <input type="search" id="kb-search-input" dir="auto" placeholder="جستجو در محتوا یا سوالات" disabled>
+                        </div>
+                        <button id="kb-search-trigger" class="workspace-primary" type="button" disabled>جستجو</button>
+                    </div>
+                    <div id="chunks-workspace-wrapper">
+                        <div class="kb-empty workspace-surface">
+                            <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#documents"></use></svg>
+                            <p>برای مشاهده تکه‌ها، یک سند از فهرست اسناد انتخاب کنید.</p>
+                        </div>
+                    </div>
                 </div>
             </div>
+            <aside id="knowledge-documents" class="kb-documents" aria-labelledby="kb-documents-title" data-workspace-panel="documents">
+                <div class="kb-documents-head">
+                    <button class="workspace-icon-button kb-documents-close" type="button" data-workspace-close="documents" aria-label="بستن فهرست اسناد">
+                        <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg>
+                    </button>
+                    <h2 id="kb-documents-title" dir="rtl">اسناد فعال</h2>
+                </div>
+                <div id="document-sidebar-list" class="kb-documents-list" aria-busy="true">
+                    <p class="kb-message" dir="rtl">در حال بارگیری اسناد…</p>
+                </div>
+            </aside>
+        </div>
+    </main>
+    <div class="workspace-scrim" hidden></div>
+</div>
 
-        </main>
-    </div>
-
-    <div id="history-modal-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
-        <div class="bg-slate-950 w-full max-w-4xl max-h-[85vh] rounded-2xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+    <dialog id="history-modal-overlay" class="kb-dialog" aria-labelledby="kb-history-title">
+        <div class="kb-dialog-layout">
+            <div class="kb-dialog-header">
                 <div>
-                    <h3 class="text-sm font-bold text-slate-200">تاریخچه تغییرات تکه</h3>
-                    <p class="text-[11px] text-slate-400 mt-0.5">{% if 'kb_write' in permissions %}مشاهده نسخه‌های گذشته و بازگردانی محتوا{% else %}مشاهده نسخه‌های گذشته محتوا{% endif %}</p>
+                    <h2 id="kb-history-title">تاریخچه تغییرات تکه</h2>
+                    <p class="kb-dialog-hint">{% if 'kb_write' in permissions %}مشاهده نسخه‌های گذشته و بازگردانی محتوا{% else %}مشاهده نسخه‌های گذشته محتوا{% endif %}</p>
                 </div>
-                <button id="close-history-modal" class="text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800 transition-all text-sm font-bold">✕</button>
+                <button id="close-history-modal" class="workspace-icon-button" type="button" aria-label="بستن"><svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg></button>
             </div>
-            <div id="history-versions-stack" class="p-6 overflow-y-auto flex-1 space-y-4 max-h-[60vh]">
+            <p class="kb-dialog-notice" dir="auto" role="status" hidden></p>
+            <div id="history-versions-stack" class="kb-dialog-body kb-versions">
                 </div>
         </div>
-    </div>
+    </dialog>
 
-    {% if 'kb_write' in permissions %}<div id="add-chunk-modal-overlay" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-50 hidden items-center justify-center p-4">
-        <div class="bg-slate-950 w-full max-w-2xl rounded-2xl border border-slate-800 shadow-2xl flex flex-col overflow-hidden">
-            <div class="px-6 py-4 border-b border-slate-800 bg-slate-950 flex justify-between items-center">
+    {% if 'kb_write' in permissions %}<dialog id="add-chunk-modal-overlay" class="kb-dialog kb-dialog--edit" aria-labelledby="kb-add-title">
+        <div class="kb-dialog-layout">
+            <div class="kb-dialog-header">
                 <div>
-                    <h3 class="text-sm font-bold text-slate-200">افزودن تکه داده (Chunk) جدید به سند فعال</h3>
-                    <p class="text-[11px] text-slate-400 mt-0.5">متن ورودی جدید پس از نرمال‌سازی بلافاصله وکتورایز شده و به دیتابیس ترکیبی افزوده خواهد شد.</p>
+                    <h2 id="kb-add-title">افزودن تکه به سند</h2>
+                    <p class="kb-dialog-hint">نوع تکه و متن آن را مشخص کنید.</p>
                 </div>
-                <button id="close-add-modal" class="text-slate-400 hover:text-white bg-slate-900 hover:bg-slate-800 w-8 h-8 rounded-lg flex items-center justify-center border border-slate-800 transition-all text-sm font-bold">✕</button>
+                <button id="close-add-modal" class="workspace-icon-button" type="button" aria-label="بستن"><svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg></button>
             </div>
-            <div class="p-6 space-y-4">
+            <p class="kb-dialog-notice" dir="auto" role="status" hidden></p>
+            <div class="kb-dialog-body kb-edit-fields">
                 <div>
-                    <label class="block text-[11px] font-bold text-slate-400 mb-1.5">نوع بافت تکه داده:</label>
-                    <select id="new-chunk-is-qa" class="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2.5 text-xs text-slate-200 focus:outline-none transition-all">
+                    <label class="kb-field-label" for="new-chunk-is-qa">نوع بافت تکه داده:</label>
+                    <select id="new-chunk-is-qa" class="kb-input" autofocus>
                         <option value="false">تکه متن خام بدون ساختار مستنداتی (Standard Raw Text)</option>
                         <option value="true">پیکربندی پرسش و پاسخ ساختاریافته (Structured FAQ Link)</option>
                     </select>
                 </div>
                 <div id="new-chunk-qa-fields-wrapper" class="hidden">
-                    <label for="new-chunk-question" class="block text-[11px] font-bold text-slate-400 mb-1.5">🔒 متن سوال متصل:</label>
+                    <label for="new-chunk-question" class="kb-field-label">متن پرسش:</label>
                     <input type="text" id="new-chunk-question" placeholder="عنوان سوال مرتبط را وارد کنید..."
-                           class="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-2.5 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-all text-right" style="direction: rtl;">
+                           class="kb-input" dir="auto">
                     <div class="kb-taxonomy-fields">
                         <div><label for="new-chunk-main-category">دسته‌بندی</label><input id="new-chunk-main-category" type="text" dir="auto" aria-describedby="new-taxonomy-help"></div>
                         <div><label for="new-chunk-sub-category">زیردسته</label><input id="new-chunk-sub-category" type="text" dir="auto" aria-describedby="new-taxonomy-help"></div>
@@ -106,30 +98,31 @@
                     </div>
                 </div>
                 <div>
-                    <label for="new-chunk-answer" id="content-label-context" class="block text-[11px] font-bold text-blue-400 mb-1.5">✍ متن اصلی چانک / پاسخ الحاقی:</label>
+                    <label for="new-chunk-answer" id="content-label-context" class="kb-field-label">متن تکه یا پاسخ:</label>
                     <textarea id="new-chunk-answer" placeholder="محتوای متنی یا پاسخ متصل را با دقت بالا وارد کنید..."
-                              class="w-full bg-slate-900 border border-slate-800 focus:border-blue-500 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-all h-32 resize-none leading-relaxed text-right" style="direction: rtl;"></textarea>
+                              class="kb-input kb-input--text" dir="auto"></textarea>
                 </div>
-                <div class="grid grid-cols-2 gap-4 border-t border-slate-900 pt-3">
+                <div class="kb-edit-footer">
                     <div>
-                        <label class="block text-[10px] text-slate-500 mb-1">شناسه اپراتور تغییرات:</label>
-                        <input type="text" id="new-chunk-operator-name" value="Hooman (AI Engineer)" class="w-full bg-slate-900 border border-slate-800 rounded px-2 py-1 text-[11px] text-slate-300 focus:outline-none" />
+                        <label for="new-chunk-operator-name" class="kb-field-label">شناسه اپراتور تغییرات:</label>
+                        <input type="text" id="new-chunk-operator-name" value="Hooman (AI Engineer)" class="kb-input" dir="auto" />
                     </div>
                     <div class="flex items-end justify-end">
-                        <button id="submit-new-chunk-btn" class="w-full bg-blue-600 hover:bg-blue-500 active:scale-95 text-white font-bold py-2 px-4 rounded-lg text-xs transition-all shadow-md shadow-blue-600/10">
-                            ✓ ثبت و ایجاد چانک برداری جدید
+                        <button id="submit-new-chunk-btn" class="workspace-primary" type="button">
+                            ذخیره تکه
                         </button>
                     </div>
                 </div>
             </div>
         </div>
-    </div>
+    </dialog>
 
     {% endif %}
-    <div id="global-toast" role="status" aria-live="polite" class="fixed bottom-6 left-6 z-50 transform translate-y-12 opacity-0 transition-all duration-300 pointer-events-none bg-emerald-500 text-slate-950 font-bold text-xs px-5 py-3 rounded-lg shadow-xl shadow-emerald-500/10 flex items-center gap-2">
+    <div id="global-toast" role="status" aria-live="polite" class="kb-toast" hidden>
         <span>✓</span> <span id="toast-text">تغییرات با موفقیت اعمال شد.</span>
     </div>
 
+    <script src="{{ versioned_asset(request, 'js/workspace.js') }}" integrity="{{ asset_integrity('js/workspace.js') }}" crossorigin="anonymous"></script>
     <script src="{{ versioned_asset(request, 'js/kb_manager.js') }}" integrity="{{ asset_integrity('js/kb_manager.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

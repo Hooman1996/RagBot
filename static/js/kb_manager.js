@@ -2,6 +2,8 @@
 document.addEventListener('DOMContentLoaded', () => {
     const canWrite = document.body.dataset.canWrite === 'true';
     let activeDocId = null;
+    let activeDocTitle = "";
+    let chunkLoad = 0;
     let currentOffset = 0;
     const BATCH_LIMIT = 20;
     let isLoadLocked = false;
@@ -78,14 +80,12 @@ document.addEventListener('DOMContentLoaded', () => {
     });
 
     UI.closeHistoryBtn.addEventListener('click', () => {
-        UI.historyModal.classList.add('hidden');
-        UI.historyModal.classList.remove('flex');
+        UI.historyModal.close();
     });
 
     if (canWrite) {
         UI.closeAddModalBtn.addEventListener('click', () => {
-            UI.addChunkModal.classList.add('hidden');
-            UI.addChunkModal.classList.remove('flex');
+            UI.addChunkModal.close();
         });
 
         UI.addChunkForm.isQa.addEventListener('change', (e) => {
@@ -99,48 +99,59 @@ document.addEventListener('DOMContentLoaded', () => {
     async function loadAvailableDocuments() {
         try {
             const res = await fetch('/knowledge-base/api/documents');
+            if (!res.ok) throw new Error();
             const data = await res.json();
             renderSidebarNodes(data.documents);
         } catch (err) {
-            UI.sidebar.innerHTML = `<div class="text-red-400 text-xs p-2">خطا در بارگذاری اطلاعات پیش آمد.</div>`;
+            UI.sidebar.innerHTML = '<p class="kb-message kb-message--error" dir="rtl">بارگیری اسناد انجام نشد. صفحه را تازه‌سازی کنید.</p>';
+        } finally {
+            UI.sidebar.setAttribute('aria-busy', 'false');
         }
     }
 
     function renderSidebarNodes(documents) {
         UI.sidebar.innerHTML = '';
         if (!documents || documents.length === 0) {
-            UI.sidebar.innerHTML = `<div class="text-slate-500 text-xs p-2">هیچ سندی یافت نشد.</div>`;
+            UI.sidebar.innerHTML = '<p class="kb-message" dir="rtl">هیچ سندی یافت نشد.</p>';
             return;
         }
 
         documents.forEach(doc => {
             const button = document.createElement('button');
-            button.className = 'sidebar-doc-node w-full text-right text-xs px-3 py-2.5 rounded-lg bg-slate-900 hover:bg-slate-800/80 border border-slate-800 text-slate-300 transition-all truncate block';
-            button.innerHTML = `📄 <span class="mr-1">${escapeHTML(doc.title)}</span>`;
+            button.className = 'sidebar-doc-node';
+            button.type = 'button';
+            button.setAttribute('aria-pressed', 'false');
+            button.innerHTML = `<bdi>${escapeHTML(doc.title)}</bdi><svg aria-hidden="true"><use href="${document.body.dataset.iconsUrl}#documents"></use></svg>`;
 
             button.addEventListener('click', () => {
-                document.querySelectorAll('.sidebar-doc-node').forEach(el => el.classList.remove('is-active'));
-                button.classList.add('is-active');
+                document.querySelectorAll('.sidebar-doc-node').forEach(el => {
+                    el.classList.toggle('is-active', el === button);
+                    el.setAttribute('aria-pressed', String(el === button));
+                });
                 activeDocId = doc.id;
+                activeDocTitle = doc.title;
+                UI.searchBar.disabled = false;
+                UI.searchBtn.disabled = false;
+                button.dispatchEvent(new Event('workspace-document-selected', {bubbles: true}));
 
                 currentOffset = 0;
                 UI.searchBar.value = '';
                 UI.workspace.innerHTML = '';
 
-                injectActionActionBarHeaderRow();
+                renderDocumentHeading();
                 fetchAndAppendChunks(doc.id, true);
             });
             UI.sidebar.appendChild(button);
         });
     }
 
-    function injectActionActionBarHeaderRow() {
+    function renderDocumentHeading() {
         const actionRow = document.createElement('div');
-        actionRow.className = 'flex justify-between items-center bg-slate-950/60 p-4 border border-slate-800 rounded-xl mb-4';
-        actionRow.innerHTML = canWrite ? `
-            <div class="text-xs font-semibold text-slate-400">عملیات جاری سند:</div>
-            <button id="global-add-chunk-trigger" class="kb-write-action bg-blue-600 hover:bg-blue-500 active:scale-95 text-white text-xs font-bold px-4 py-2 rounded-lg transition-all flex items-center gap-1.5 shadow-md shadow-blue-600/10">➕ افزودن تکه داده جدید به سند</button>
-        ` : `<div class="text-xs font-semibold text-slate-400">تکه‌های سند (فقط خواندنی)</div>`;
+        actionRow.className = 'kb-action-row workspace-surface';
+        actionRow.innerHTML = `
+            <div><h2 dir="auto">${escapeHTML(activeDocTitle)}</h2>${canWrite ? '' : '<p>فقط خواندنی</p>'}</div>
+            ${canWrite ? '<button id="global-add-chunk-trigger" class="kb-write-action workspace-primary" type="button">افزودن تکه</button>' : ''}
+        `;
         UI.workspace.appendChild(actionRow);
 
         if (canWrite) document.getElementById('global-add-chunk-trigger').addEventListener('click', () => {
@@ -148,8 +159,8 @@ document.addEventListener('DOMContentLoaded', () => {
             UI.addChunkForm.answer.value = '';
             UI.addChunkForm.mainCategory.value = '';
             UI.addChunkForm.subCategory.value = '';
-            UI.addChunkModal.classList.remove('hidden');
-            UI.addChunkModal.classList.add('flex');
+            UI.addChunkModal.querySelector('.kb-dialog-notice').hidden = true;
+            UI.addChunkModal.showModal();
         });
     }
 
@@ -157,20 +168,22 @@ document.addEventListener('DOMContentLoaded', () => {
         if (activeDocId) {
             currentOffset = 0;
             UI.workspace.innerHTML = '';
-            injectActionActionBarHeaderRow();
+            renderDocumentHeading();
             fetchAndAppendChunks(activeDocId, true);
         }
     }
 
     async function fetchAndAppendChunks(docId, isFirstBatch = false) {
-        if (isLoadLocked) return;
+        if (isLoadLocked && !isFirstBatch) return;
+        const loadId = ++chunkLoad;
         isLoadLocked = true;
 
         removeLoadMoreButtonElement();
         const loadIndicator = document.createElement('div');
         loadIndicator.id = "kb-loading-indicator";
-        loadIndicator.className = 'text-center py-8 text-slate-400 text-xs animate-pulse';
-        loadIndicator.textContent = 'در حال فراخوانی پایگاه داده برداری...';
+        loadIndicator.className = 'kb-message';
+        loadIndicator.setAttribute('role', 'status');
+        loadIndicator.textContent = 'در حال بارگیری تکه‌ها…';
         UI.workspace.appendChild(loadIndicator);
 
         try {
@@ -182,17 +195,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const res = await fetch(endpoint);
             const data = await res.json();
-
-            if (document.getElementById("kb-loading-indicator")) {
-                document.getElementById("kb-loading-indicator").remove();
-            }
+            if (loadId !== chunkLoad) return;
+            loadIndicator.remove();
+            if (!res.ok) throw new Error();
 
             if (isFirstBatch && (!data.chunks || data.chunks.length === 0)) {
                 const emptyMsg = document.createElement('div');
-                emptyMsg.className = 'text-center py-20 text-slate-500 text-xs';
+                emptyMsg.className = 'kb-message';
                 emptyMsg.textContent = 'هیچ موجودیتی منطبق با فیلتر جستجو یافت نشد.';
                 UI.workspace.appendChild(emptyMsg);
-                isLoadLocked = false;
                 return;
             }
 
@@ -204,12 +215,12 @@ document.addEventListener('DOMContentLoaded', () => {
             }
 
         } catch (err) {
-            if (document.getElementById("kb-loading-indicator")) {
-                document.getElementById("kb-loading-indicator").remove();
+            if (loadId === chunkLoad) {
+                loadIndicator.remove();
+                displayToastNotify('بارگیری تکه‌ها انجام نشد. دوباره تلاش کنید.', 'error');
             }
-            displayToastNotify("بارگذاری ناموفق اطلاعات شبکه ای رخ داد.", "error");
         } finally {
-            isLoadLocked = false;
+            if (loadId === chunkLoad) isLoadLocked = false;
         }
     }
 
@@ -217,35 +228,33 @@ document.addEventListener('DOMContentLoaded', () => {
         chunks.forEach(chunk => {
             const card = document.createElement('div');
             card.id = `chunk-card-wrapper-${chunk.id}`;
-            card.className = 'bg-slate-950 p-5 rounded-xl border border-slate-800/80 shadow-md flex flex-col gap-4 mb-4 relative group';
+            card.className = 'kb-chunk workspace-surface';
 
             let dynamicBodyLayout = '';
             if (!canWrite) {
                 dynamicBodyLayout = chunk.is_qa ? `
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><span class="block text-[11px] font-bold text-slate-400 mb-1.5">سوال</span><div class="kb-readable-content question-readonly-panel p-3 rounded-lg border border-slate-800 text-xs text-slate-300">${escapeHTML(chunk.question)}</div></div>
-                        <div><span class="block text-[11px] font-bold text-blue-400 mb-1.5">پاسخ</span><div class="kb-readable-content p-3 rounded-lg border border-slate-800 text-xs text-slate-300">${escapeHTML(chunk.answer)}</div></div>
-                    </div>` : `<div><span class="block text-[11px] font-bold text-amber-500 mb-1.5">متن تکه</span><div class="kb-readable-content p-3 rounded-lg border border-slate-800 text-xs text-slate-300">${escapeHTML(chunk.answer)}</div></div>`;
+                        <div><span class="kb-field-label">سوال</span><div class="kb-readable-content question-readonly-panel" dir="auto">${escapeHTML(chunk.question)}</div></div>
+                        <div><span class="kb-field-label">پاسخ</span><div class="kb-readable-content" dir="auto">${escapeHTML(chunk.answer)}</div></div>
+                    </div>` : `<div><span class="kb-field-label">متن تکه</span><div class="kb-readable-content" dir="auto">${escapeHTML(chunk.answer)}</div></div>`;
             } else if (chunk.is_qa) {
                 dynamicBodyLayout = `
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <span class="block text-[11px] font-bold text-slate-400 mb-1.5">🔒 متن سوال متصل (غیرقابل ویرایش جهت حفظ بافت بردار):</span>
-                            <div class="question-readonly-panel p-3 rounded-lg border border-slate-800 text-xs text-slate-300 min-h-[110px] max-h-[150px] overflow-y-auto leading-relaxed text-right" style="direction: rtl;">
-                                ${escapeHTML(chunk.question)}
-                            </div>
+                            <span class="kb-field-label">پرسش (فقط خواندنی)</span>
+                            <div class="kb-readable-content question-readonly-panel" dir="auto">${escapeHTML(chunk.question)}</div>
                         </div>
                         <div>
-                            <span class="block text-[11px] font-bold text-blue-400 mb-1.5">✍ پاسخ الحاقی (قابل ویرایش):</span>
-                            <textarea id="target-field-${chunk.id}" class="w-full bg-slate-900 border border-blue-900/60 focus:border-blue-500 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-all h-[110px] resize-none leading-relaxed text-right" style="direction: rtl;">${escapeHTML(chunk.answer)}</textarea>
+                            <label for="target-field-${chunk.id}" class="kb-field-label">پاسخ</label>
+                            <textarea id="target-field-${chunk.id}" class="kb-input kb-input--text" dir="auto">${escapeHTML(chunk.answer)}</textarea>
                         </div>
                     </div>
                 `;
             } else {
                 dynamicBodyLayout = `
                     <div>
-                        <span class="block text-[11px] font-bold text-amber-500 mb-1.5">📝 متن تکه خام مستندات (بدون ساختار FAQ):</span>
-                        <textarea id="target-field-${chunk.id}" class="w-full bg-slate-900 border border-slate-800 focus:border-amber-500 rounded-lg p-3 text-xs text-slate-100 placeholder-slate-600 focus:outline-none transition-all h-[110px] resize-none leading-relaxed text-right" style="direction: rtl;">${escapeHTML(chunk.answer)}</textarea>
+                        <label for="target-field-${chunk.id}" class="kb-field-label">متن تکه</label>
+                        <textarea id="target-field-${chunk.id}" class="kb-input kb-input--text" dir="auto">${escapeHTML(chunk.answer)}</textarea>
                     </div>
                 `;
             }
@@ -254,27 +263,27 @@ document.addEventListener('DOMContentLoaded', () => {
                 dynamicBodyLayout += canWrite ? taxonomyControls(chunk) : `<div class="kb-taxonomy-summary" dir="auto">دسته‌بندی: ${escapeHTML(chunk.main_category || 'ثبت نشده')}؛ زیردسته: ${escapeHTML(chunk.sub_category || 'ثبت نشده')}</div>`;
             }
             card.innerHTML = `
-                <div class="flex justify-between items-center border-b border-slate-800/60 pb-3">
-                    <div class="flex items-center gap-2">
-                        <span class="bg-slate-900 border border-slate-800 px-2.5 py-1 rounded-md text-[10px] font-mono tracking-wider text-slate-400">تکه شماره #${chunk.chunk_index}</span>
-                        <span class="text-[10px] text-slate-600 font-mono">شناسه چانک: ${escapeHTML(String(chunk.id))}</span>
+                <div class="kb-chunk-head">
+                    <div class="kb-chunk-meta">
+                        <strong>تکه ${chunk.chunk_index}</strong>
+                        <span>شناسه <bdi>${escapeHTML(String(chunk.id))}</bdi></span>
                     </div>
-                    <div class="flex items-center gap-2">
-                        <button id="history-btn-${chunk.id}" class="bg-slate-800 hover:bg-slate-700 text-slate-300 px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
-                            ⏳ تاریخچه نسخ
+                    <div class="kb-chunk-actions">
+                        <button type="button" id="history-btn-${chunk.id}" class="workspace-secondary">
+                            تاریخچه
                         </button>
-                        ${canWrite ? `<button id="delete-btn-${chunk.id}" class="kb-write-action bg-red-950/40 hover:bg-red-600 border border-red-900 text-red-400 hover:text-white px-3 py-1.5 rounded-lg text-[11px] font-medium transition-all flex items-center gap-1">
-                            🗑 حذف قطعی
+                        ${canWrite ? `<button id="delete-btn-${chunk.id}" class="kb-write-action workspace-secondary kb-danger">
+                            حذف
                         </button>
-                        <button id="sync-btn-${chunk.id}" class="kb-write-action bg-emerald-600 hover:bg-emerald-500 active:scale-95 text-slate-950 font-bold px-4 py-1.5 rounded-lg text-xs transition-all shadow-lg shadow-emerald-600/10 flex items-center gap-1.5">
-                            💾 همگام‌سازی برداری
+                        <button id="sync-btn-${chunk.id}" class="kb-write-action workspace-primary">
+                            ذخیره تکه
                         </button>` : ''}
                     </div>
                 </div>
                 ${dynamicBodyLayout}
-                ${canWrite ? `<div class="flex items-center gap-2 border-t border-slate-900 pt-2">
-                    <span class="text-[10px] text-slate-500">تغییر دهنده نهایی:</span>
-                    <input type="text" id="operator-field-${chunk.id}" value="Hooman (AI Engineer)" class="bg-slate-900 text-[10px] text-slate-300 px-2 py-0.5 rounded border border-slate-800 focus:outline-none focus:border-blue-500 w-44" />
+                ${canWrite ? `<div class="kb-chunk-footer">
+                    <label for="operator-field-${chunk.id}">شناسه اپراتور</label>
+                    <input type="text" id="operator-field-${chunk.id}" value="Hooman (AI Engineer)" class="kb-input" dir="auto" />
                 </div>` : ''}
             `;
 
@@ -331,9 +340,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const data = await response.json();
             if (response.ok) {
-                displayToastNotify("تکه داده جدید با موفقیت ایجاد و ایندکس برداری شد.", "success");
-                UI.addChunkModal.classList.add('hidden');
-                UI.addChunkModal.classList.remove('flex');
+                UI.addChunkModal.close();
+                displayToastNotify("تکه ذخیره شد.", "success");
                 triggerWorkspaceResetQuery();
             } else {
                 throw new Error(apiErrorMessage(data, "Error injecting item."));
@@ -342,7 +350,7 @@ document.addEventListener('DOMContentLoaded', () => {
             displayToastNotify(`خطا: ${err.message}`, "error");
         } finally {
             UI.saveNewChunkBtn.disabled = false;
-            UI.saveNewChunkBtn.innerHTML = "✓ ثبت و ایجاد چانک برداری جدید";
+            UI.saveNewChunkBtn.innerHTML = "ذخیره تکه";
         }
     }
 
@@ -371,29 +379,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
     async function launchHistoryTrackingModal(chunkId) {
         dynamicCurrentChunkIdForModal = chunkId;
-        UI.historyList.innerHTML = `<div class="text-center py-6 text-slate-400 text-xs animate-pulse">در حال بازیابی تاریخچه نسخ ثبت شده...</div>`;
-        UI.historyModal.classList.remove('hidden');
-        UI.historyModal.classList.add('flex');
+        UI.historyList.innerHTML = `<div class="kb-message">در حال بازیابی تاریخچه نسخ ثبت شده...</div>`;
+        UI.historyModal.querySelector('.kb-dialog-notice').hidden = true;
+        UI.historyModal.showModal();
 
         try {
             const res = await fetch(`/knowledge-base/api/chunks/${chunkId}/versions`);
             const data = await res.json();
             renderHistoryVersionRows(data.versions);
         } catch (err) {
-            UI.historyList.innerHTML = `<div class="text-red-400 text-xs text-center">خطا در بارگذاری تاریخچه دیتابیس.</div>`;
+            UI.historyList.innerHTML = `<div class="kb-message kb-message--error">خطا در بارگذاری تاریخچه دیتابیس.</div>`;
         }
     }
 
     function renderHistoryVersionRows(versions) {
         UI.historyList.innerHTML = '';
         if (!versions || versions.length === 0) {
-            UI.historyList.innerHTML = `<div class="text-slate-500 text-xs text-center py-4">هیچ نسخه قدیمی تری برای این چانک یافت نشد.</div>`;
+            UI.historyList.innerHTML = `<div class="kb-message">هیچ نسخه قدیمی تری برای این چانک یافت نشد.</div>`;
             return;
         }
 
         versions.forEach((ver, index) => {
             const row = document.createElement('div');
-            row.className = 'bg-slate-900 p-4 rounded-lg border border-slate-800 flex flex-col gap-2 justify-between items-start md:flex-row md:items-center transition-all hover:border-slate-700';
+            row.className = 'kb-version';
 
             const textSnippet = ver.is_qa
                 ? `<strong>سوال:</strong> ${escapeHTML(ver.question)}<br><strong>پاسخ:</strong> ${escapeHTML(ver.answer)}<br><strong>دسته‌بندی:</strong> ${escapeHTML(ver.main_category || 'ثبت نشده')}؛ <strong>زیردسته:</strong> ${escapeHTML(ver.sub_category || 'ثبت نشده')}`
@@ -402,17 +410,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
             row.innerHTML = `
                 <div class="flex-1 text-right">
-                    <div class="flex items-center gap-2 mb-1">
-                        <span class="bg-blue-950 text-blue-400 font-mono text-[10px] px-2 py-0.5 rounded border border-blue-900">نسخه #${versions.length - index}</span>
-                        <span class="text-[11px] text-slate-400 font-medium">توسط: ${escapeHTML(ver.changed_by)}</span>
-                        <span class="text-[10px] text-slate-500" dir="ltr">${dateParsed}</span>
+                    <div class="kb-version-head">
+                        <span class="kb-version-index">نسخه #${versions.length - index}</span>
+                        <span dir="auto">توسط: ${escapeHTML(ver.changed_by)}</span>
+                        <span dir="ltr">${dateParsed}</span>
                     </div>
-                    <div class="kb-readable-content text-xs text-slate-300 bg-slate-950 p-2.5 rounded border border-slate-800 max-h-24 overflow-y-auto leading-relaxed">
-                        ${textSnippet}
-                    </div>
+                    <div class="kb-readable-content" dir="auto">${textSnippet}</div>
                 </div>
-                ${canWrite ? `<button id="revert-btn-${ver.id}" class="kb-write-action bg-amber-600 hover:bg-amber-500 text-slate-950 text-xs font-bold px-3 py-1.5 rounded-md mt-2 md:mt-0 transition-all active:scale-95 whitespace-nowrap">
-                    ◄ بازگردانی به این نسخه
+                ${canWrite ? `<button id="revert-btn-${ver.id}" class="kb-write-action workspace-secondary">
+                    بازگردانی این نسخه
                 </button>` : ''}
             `;
             UI.historyList.appendChild(row);
@@ -437,9 +443,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
             const result = await response.json();
             if (response.ok) {
-                displayToastNotify("تکه با موفقیت به ساختار محتوایی نسخه هدف بازگردانی شد.", "success");
-                UI.historyModal.classList.add('hidden');
-                UI.historyModal.classList.remove('flex');
+                UI.historyModal.close();
+                displayToastNotify("نسخه بازگردانی شد.", "success");
                 triggerWorkspaceResetQuery(); // Refresh tracking workspace grid nodes
             } else {
                 throw new Error(apiErrorMessage(result, "Reversion pipeline execution error."));
@@ -452,11 +457,8 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderLoadMoreRow(docId) {
         const btnRow = document.createElement('button');
         btnRow.id = "kb-load-more-row-btn";
-        btnRow.className = "w-full py-4 my-2 border border-dashed border-slate-700 hover:border-blue-500 text-slate-400 hover:text-blue-400 text-xs font-semibold rounded-xl bg-slate-950/40 transition-all flex flex-col items-center justify-center gap-1 group";
-        btnRow.innerHTML = `
-            <span class="text-base group-hover:scale-110 transition-transform">•••</span>
-            <span>مشاهده تکه‌های بیشتر این سند اطلاعاتی</span>
-        `;
+        btnRow.className = "workspace-secondary kb-more";
+        btnRow.textContent = 'نمایش تکه‌های بیشتر';
         btnRow.addEventListener('click', () => fetchAndAppendChunks(docId, false));
         UI.workspace.appendChild(btnRow);
     }
@@ -527,18 +529,19 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     }
 
-    function displayToastNotify(msg, mode) {
-        UI.toastText.textContent = msg;
-        if (mode === "success") {
-            UI.toast.className = "fixed bottom-6 left-6 z-50 transform transition-all duration-300 bg-emerald-500 text-slate-950 font-bold text-xs px-5 py-3 rounded-lg shadow-xl shadow-emerald-500/10 flex items-center gap-2";
-        } else {
-            UI.toast.className = "fixed bottom-6 left-6 z-50 transform transition-all duration-300 bg-red-500 text-white font-bold text-xs px-5 py-3 rounded-lg shadow-xl shadow-red-500/10 flex items-center gap-2";
-        }
-
-        UI.toast.classList.remove('translate-y-12', 'opacity-0');
+    let noticeNumber = 0;
+    function displayToastNotify(message, mode) {
+        const modal = [UI.addChunkModal, UI.historyModal].find(dialog => dialog?.open);
+        const inline = modal?.querySelector('.kb-dialog-notice');
+        const notice = inline || UI.toast;
+        const text = inline || UI.toastText;
+        const id = ++noticeNumber;
+        text.textContent = message;
+        notice.dataset.error = String(mode === 'error');
+        notice.hidden = false;
         setTimeout(() => {
-            UI.toast.classList.add('translate-y-12', 'opacity-0');
-        }, 4000);
+            if (id === noticeNumber) notice.hidden = true;
+        }, 3500);
     }
 
     function escapeHTML(str) {

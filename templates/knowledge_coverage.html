@@ -1,38 +1,31 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html class="workspace-page" lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Knowledge coverage · Negah Bank AI</title>
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
-    {% for css in ['css/base.css','css/app.css','css/web_controls.css','css/knowledge_coverage.css'] %}
+    {% for css in ['css/workspace.css','css/knowledge_coverage.css'] %}
     <link rel="stylesheet" href="{{ versioned_asset(request, css) }}" integrity="{{ asset_integrity(css) }}" crossorigin="anonymous">
     {% endfor %}
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
-<body>
+<body class="workspace-body coverage-workspace">
 {% set d = defaults or {} %}
 <a class="coverage-skip" href="#coverageMain">Skip to coverage check</a>
-<div class="app-shell">
-    <aside class="sidebar" aria-label="Main navigation">
-        <div class="sidebar__brand"><div class="sidebar__logo">N</div><div class="sidebar__brand-text"><div class="sidebar__brand-name">Negah Bank AI</div><div class="sidebar__brand-sub">Knowledge workspace</div></div></div>
-        <nav class="sidebar__nav">
-            {% if 'chat' in permissions %}<a href="/app" class="sidebar__nav-item">Chat</a>{% endif %}
-            {% if 'kb_page' in permissions %}<a href="/knowledge-base/" class="sidebar__nav-item">Knowledge base</a>{% endif %}
-            {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">Analytics</a>{% endif %}
-            {% include "_users_nav_link.html" %}
-            {% set coverage_active = true %}{% include "_coverage_nav_link.html" %}
-        </nav>
-    </aside>
-    <main id="coverageMain" class="main-content" tabindex="-1">
-        <header class="topbar"><div class="topbar__title">Knowledge coverage</div><div class="web-header-controls coverage-header-controls">
-            <button id="coverageTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode">Theme</button>
-            {% set logout_label = 'Log out' %}{% include "_logout_button.html" %}
-        </div></header>
-        <div id="coverageRoot" class="coverage-page" data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}" data-upload-limit="{{ upload_max_bytes }}">
+{% set workspace_page = 'coverage' %}
+{% set workspace_title = 'Knowledge coverage' %}
+{% set workspace_theme_id = 'coverageTheme' %}
+<div class="app-shell workspace-shell">
+    {% include "_workspace_rail.html" %}
+    <main id="coverageMain" class="main-content workspace-main" tabindex="-1">
+        {% include "_workspace_header.html" %}
+        <div class="workspace-scroll" data-workspace-content>
+        <div id="coverageRoot" class="coverage-page workspace-content" data-can-start="{{ 'true' if 'coverage_run_start' in permissions else 'false' }}" data-upload-limit="{{ upload_max_bytes }}">
+            <h1 class="workspace-heading coverage-page-title">Coverage checks</h1>
             <p id="coverageError" class="coverage-error" role="alert" hidden></p>
             {% if 'coverage_run_start' in permissions %}
-            <section class="coverage-card" aria-labelledby="coverageNewTitle">
+            <section class="coverage-card workspace-surface" aria-labelledby="coverageNewTitle">
                 <h2 id="coverageNewTitle">New check</h2>
                 <form id="coverageForm">
                     <label class="coverage-file">CSV file<input id="coverageFile" type="file" accept=".csv,text/csv" required>
@@ -49,27 +42,27 @@
                         <label>Wider depth<input id="coverageBroaderDepth" type="number" min="2" max="1000" value="{{ d.broader_depth }}" required></label>
                         <label>Wider keep<input id="coverageBroaderKeep" type="number" min="1" max="1000" value="{{ d.broader_keep }}" required></label>
                     </div>
-                    <button id="coverageStart" class="coverage-primary" type="submit">Start check</button>
+                    <button id="coverageStart" class="coverage-primary workspace-primary" type="submit">Start check</button>
                 </form>
             </section>
             {% endif %}
-            <section class="coverage-card" aria-labelledby="coverageChecksTitle">
+            <section class="coverage-card workspace-surface" aria-labelledby="coverageChecksTitle">
                 <div class="coverage-heading"><h2 id="coverageChecksTitle">Checks</h2><div class="coverage-actions">
                     <span id="coverageListScope" class="coverage-hint" data-days="{{ list_days }}">Last {{ list_days }} days</span>
-                    <button id="coverageListAll" type="button" class="coverage-secondary" aria-pressed="false">Show all checks</button>
+                    <button id="coverageListAll" type="button" class="workspace-secondary coverage-secondary" aria-pressed="false">Show all checks</button>
                 </div></div>
                 <div class="coverage-table-scroll"><table>
                     <thead><tr><th scope="col">Started</th><th scope="col">File</th><th scope="col">Rows</th><th scope="col">Progress</th><th scope="col">State</th><th scope="col">Prompt</th><th scope="col"><span class="coverage-visually-hidden">Actions</span></th></tr></thead>
                     <tbody id="coverageChecks"><tr><td colspan="7" class="coverage-empty">No checks yet.</td></tr></tbody>
                 </table></div>
             </section>
-            <section id="coverageResults" class="coverage-card" aria-labelledby="coverageResultsTitle" hidden>
+            <section id="coverageResults" class="coverage-card workspace-surface" aria-labelledby="coverageResultsTitle" hidden>
                 <div class="coverage-heading"><h2 id="coverageResultsTitle">Results</h2><div class="coverage-actions">
                     <span id="coverageSuggestProgress" class="coverage-suggest-progress" role="status" hidden></span>
-                    {% if 'coverage_run_start' in permissions %}<button id="coverageSuggestAll" class="coverage-secondary" type="button" disabled>Suggest for all unanswered (0)</button>
-                    <button id="coverageSuggestStop" class="coverage-secondary coverage-stop" type="button" hidden>Stop suggestions</button>
-                    <button id="coverageStop" class="coverage-secondary coverage-stop" type="button" hidden>Stop</button>{% endif %}
-                    <a id="coverageDownload" class="coverage-secondary" href="#">Download CSV</a></div></div>
+                    {% if 'coverage_run_start' in permissions %}<button id="coverageSuggestAll" class="workspace-secondary coverage-secondary" type="button" disabled>Suggest for all unanswered (0)</button>
+                    <button id="coverageSuggestStop" class="workspace-secondary coverage-secondary coverage-stop" type="button" hidden>Stop suggestions</button>
+                    <button id="coverageStop" class="workspace-secondary coverage-secondary coverage-stop" type="button" hidden>Stop</button>{% endif %}
+                    <a id="coverageDownload" class="workspace-secondary coverage-secondary" href="#">Download CSV</a></div></div>
                 <div id="coverageCounts" class="coverage-counts"></div>
                 <ul id="coverageLegend" class="coverage-legend" aria-label="What each result means"></ul>
                 <div class="coverage-toolbar"><label class="coverage-filter">Result<select id="coverageFilter">
@@ -81,12 +74,14 @@
                     <thead><tr><th scope="col">#</th><th scope="col">id</th><th scope="col">Question</th><th scope="col">Result</th><th scope="col">Answer batch</th><th scope="col">Answering FAQ titles</th></tr></thead>
                     <tbody id="coverageRows"></tbody>
                 </table></div>
-                <div class="coverage-pagination"><button id="coveragePrevious" class="coverage-secondary" type="button" disabled>Previous</button><span id="coveragePageLabel"></span><button id="coverageNext" class="coverage-secondary" type="button" disabled>Next</button></div>
+                <div class="coverage-pagination"><button id="coveragePrevious" class="workspace-secondary coverage-secondary" type="button" disabled>Previous</button><span id="coveragePageLabel"></span><button id="coverageNext" class="workspace-secondary coverage-secondary" type="button" disabled>Next</button></div>
             </section>
         </div>
+        </div>
     </main>
+    <div class="workspace-scrim" hidden></div>
 </div>
+<script src="{{ versioned_asset(request, 'js/workspace.js') }}" integrity="{{ asset_integrity('js/workspace.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/knowledge_coverage.js') }}" integrity="{{ asset_integrity('js/knowledge_coverage.js') }}" crossorigin="anonymous"></script>
-<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

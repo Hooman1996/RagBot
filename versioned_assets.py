@@ -18,9 +18,10 @@ from frontend_paths import STATIC_DIR
 # Every first-party file loaded by a browser page uses a content-addressed URL.
 # Local vendor stylesheets retain their versioned vendor directories and manifest hashes.
 VERSIONED_ASSETS = frozenset({
-    "css/base.css", "css/app.css", "css/analytics.css", "css/web_controls.css",
+    "css/base.css", "css/app.css", "css/chat.css", "css/workspace.css", "css/analytics.css",
+    "css/web_controls.css",
     "css/login.css", "css/kb_manager.css", "icons.svg", "negah-bank-icon.jpg",
-    "js/web_auth.js", "js/analytics.js", "js/i18n.js", "js/api.js",
+    "js/web_auth.js", "js/workspace.js", "js/analytics.js", "js/i18n.js", "js/api.js",
     "js/sidebar.js", "js/categoryFilter.js", "js/chat.js", "js/chat_dictation.js", "js/app.js",
     "js/kb_manager.js",
     "css/knowledge_coverage.css", "js/knowledge_coverage.js",

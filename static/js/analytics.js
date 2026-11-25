@@ -9,8 +9,8 @@
   const $ = (id) => document.getElementById(id);
   const message = (id, value) => { if ($(id)) $(id).textContent = value; };
   const theme = () => document.body.classList.contains("light-mode")
-    ? { text: "#4b5563", grid: "rgba(0,0,0,.08)", low: "#e0e7ff", high: "#4338ca" }
-    : { text: "#d1d5db", grid: "rgba(255,255,255,.08)", low: "#1e1e2f", high: "#818cf8" };
+    ? { text: "#4c6258", grid: "rgba(2,86,85,.14)", low: "#edf0e2", high: "#025655", main: "#025655", secondary: "#63836a", muted: "#c2c9ad", negative: "#a85349" }
+    : { text: "#c2d0be", grid: "rgba(194,208,190,.16)", low: "#26392e", high: "#a9dfcb", main: "#a9dfcb", secondary: "#86a984", muted: "#536a58", negative: "#dd9187" };
 
   function clearCharts() {
     charts.splice(0).forEach((chart) => chart.destroy());
@@ -181,40 +181,41 @@
 
   function renderData(d) {
     const k = d.kpis;
+    const colors = theme();
     message("analyticsTimezone", `${d.meta.days} UTC calendar days · ${d.meta.start} to ${d.meta.end} · Timezone: ${d.meta.timezone}`);
     renderKPIs(k);
     message("queriesDayMeta", `${number(k.total_queries)} queries · selected window`);
     plot("chartQueriesDay", "line", d.queries_per_day.labels,
-         [series("Queries", d.queries_per_day.data, "#818cf8", "line")], k.total_queries);
+         [series("Queries", d.queries_per_day.data, colors.main, "line")], k.total_queries);
     const feedback = d.feedback_outcomes;
     message("feedbackMeta", `${number(feedback.rated_responses)} rated responses / ${number(feedback.total_queries)} queries${feedback.other_values ? ` · ${number(feedback.other_values)} unrecognized vote values` : ""}`);
     plot("chartFeedback", "doughnut", feedback.labels,
-         [series("Queries", feedback.data, ["#34d399", "#f472b6", "#818cf8"], "doughnut")], feedback.total_queries,
+         [series("Queries", feedback.data, [colors.main, colors.negative, colors.muted], "doughnut")], feedback.total_queries,
          { denominator: feedback.total_queries });
     const depth = d.conversation_depth;
     message("depthMeta", `${number(depth.sessions)} sessions · in-window queries only · ${number(depth.queries_without_session)} queries without session`);
-    plot("chartDepth", "bar", depth.labels, [series("Sessions", depth.data, "#22d3ee", "bar")], depth.sessions,
+    plot("chartDepth", "bar", depth.labels, [series("Sessions", depth.data, colors.secondary, "bar")], depth.sessions,
          { denominator: depth.sessions });
     const duration = d.completion_duration;
     message("durationMeta", duration.measured
       ? `${number(duration.measured)} of ${number(duration.completed)} completed queries measured · ${number(duration.excluded_completed)} excluded`
       : `Unavailable: ${duration.unavailable_reason}`);
     if (duration.measured) plot("chartDuration", "bar", duration.labels,
-      [series("Completed queries", duration.data, "#f472b6", "bar")], duration.measured,
+      [series("Completed queries", duration.data, colors.secondary, "bar")], duration.measured,
       { denominator: duration.measured });
     else panelMessage("chartDuration", `Unavailable: ${duration.unavailable_reason}`, "unavailable");
     message("usersDayMeta", `${number(k.active_users)} distinct users in selected window; daily users may repeat across days`);
     plot("chartUsersDay", "line", d.users_per_day.labels,
-         [series("Users", d.users_per_day.data, "#22d3ee", "line")], d.users_per_day.query_total);
+         [series("Users", d.users_per_day.data, colors.secondary, "line")], d.users_per_day.query_total);
     message("statesMeta", `${number(d.query_states.total)} queries · observed states only`);
     plot("chartStates", "bar", d.query_states.labels,
-         [series("Queries", d.query_states.data, "#818cf8", "bar")], d.query_states.total,
+         [series("Queries", d.query_states.data, colors.main, "bar")], d.query_states.total,
          { denominator: d.query_states.total });
     const weekly = d.weekly_comparison;
     message("weeklyMeta", `Independent UTC 7-day windows · current ${number(weekly.current_total)} / previous ${number(weekly.previous_total)} queries`);
     plot("chartWeekly", "line", weekly.labels,
-         [series("Current 7 days", weekly.current, "#818cf8", "line"),
-          series("Previous 7 days", weekly.previous, "#22d3ee", "line")],
+         [series("Current 7 days", weekly.current, colors.main, "line"),
+          series("Previous 7 days", weekly.previous, colors.secondary, "line")],
          weekly.current_total + weekly.previous_total);
     renderHeatmap(d.heatmap);
   }
@@ -337,10 +338,12 @@
     });
     clone.querySelectorAll("svg").forEach((svg) => svg.remove());
     clone.querySelectorAll("#heatmapDetails").forEach((node) => node.setAttribute("open", ""));
-    clone.querySelectorAll("#analyticsStatus").forEach((node) => node.remove());
+    for (const selector of [".analytics-toolbar", ".analytics-heading", "#analyticsStatus"]) {
+      clone.querySelectorAll(selector).forEach((node) => node.remove());
+    }
     const title = escapeHtml(`RagBot analytics – ${lastData.meta.days} days (UTC)`);
     return `<!DOCTYPE html>
-<html lang="en" dir="ltr"><head><meta charset="UTF-8">
+<html class="workspace-page" lang="en" dir="ltr" data-theme="${document.body.classList.contains("light-mode") ? "light" : "dark"}"><head><meta charset="UTF-8">
 <meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data:; style-src 'unsafe-inline'">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>${title}</title>
@@ -385,6 +388,12 @@ ${clone.outerHTML}
 
   function init() {
     render();
+    window.addEventListener?.('workspace-themechange', () => {
+      if (lastData) {
+        clearCharts();
+        renderData(lastData);
+      }
+    });
     $("refreshAnalytics")?.addEventListener("click", render);
     $("exportSnapshot")?.addEventListener("click", exportSnapshot);
     $("exportCsv")?.addEventListener("click", exportCsv);

@@ -117,19 +117,26 @@ const Sessions = {
     loadingMessages: null,
     rawSessions: [],           // store unfiltered sessions
     currentFilter: "today",    // default filter
+    loadRequest: 0,
 
     // load from API, store, and apply filter
     async load() {
+        const requestId = ++this.loadRequest;
         try {
             let data = await API.getSessions();
             if (!data.sessions || data.sessions.length === 0) {
                 await API.createSession();
                 data = await API.getSessions();
             }
+            if (requestId !== this.loadRequest) return;
             this.rawSessions = data.sessions || [];
+            this.loadFailed = false;
             this.applyFilterAndRender();
-        } catch (err) {
-            this.showError(err);
+            this.updateThreadHeading();
+        } catch (_) {
+            if (requestId !== this.loadRequest) return;
+            this.loadFailed = true;
+            this.applyFilterAndRender();
         }
     },
 
@@ -140,8 +147,6 @@ const Sessions = {
     },
 
     // filter logic: pinned always first, then by date range
-    // sidebar.js – Sessions.filterSessions
-// sidebar.js – Sessions.filterSessions
     filterSessions(sessions, filter) {
         if (!sessions.length) return [];
 
@@ -189,80 +194,130 @@ const Sessions = {
         return [...pinned, ...filteredUnpinned];
     },
 
-    // render the filtered list (using I18N.t() for translatable labels)
     render(sessions) {
         const list = document.querySelector('.sidebar__chat-list');
         if (!list) return;
+        const focused = document.activeElement?.closest('.sidebar__chat-item');
+        const focusedMenu = document.activeElement?.classList.contains('sidebar__chat-item__menu-btn');
+        this.closeMenu();
+        list.replaceChildren();
+        list.setAttribute('aria-busy', 'false');
 
-        if (!sessions || !Array.isArray(sessions)) {
-            list.innerHTML = '<p class="sidebar__empty">No chats yet</p>';
-            return;
+        if (!sessions.length) {
+            const empty = document.createElement('p');
+            empty.className = 'sidebar__empty';
+            empty.dir = 'auto';
+            empty.dataset.i18n = this.loadFailed ? 'chat_history_error' : 'chat_no_history';
+            empty.textContent = I18N.t(empty.dataset.i18n);
+            list.appendChild(empty);
         }
 
-        if (sessions.length === 0) {
-            list.innerHTML = '<p class="sidebar__empty">No chats match this filter</p>';
-            return;
+        for (const session of sessions) {
+            const id = Number(session.id);
+            const active = id === this.currentSessionId;
+            const row = document.createElement('div');
+            row.className = 'sidebar__chat-item';
+            row.classList.toggle('sidebar__chat-item--active', active);
+            row.dataset.id = id;
+
+            const open = document.createElement('button');
+            open.type = 'button';
+            open.className = 'sidebar__chat-item__content';
+            if (active) open.setAttribute('aria-current', 'true');
+            open.innerHTML = `<span class="sidebar__chat-item__icon">${Chat.icon(session.is_pinned ? 'pin' : 'chat')}</span>`;
+            const label = document.createElement('bdi');
+            label.className = 'sidebar__chat-item__title';
+            this.setTitle(label, session.title);
+            open.appendChild(label);
+            open.addEventListener('click', () => {
+                window.dispatchEvent(new Event('conversationselected'));
+                this.select(id);
+            });
+            row.appendChild(open);
+
+            const trigger = document.createElement('button');
+            trigger.className = 'sidebar__chat-item__menu-btn';
+            trigger.type = 'button';
+            trigger.innerHTML = Chat.icon('more');
+            trigger.setAttribute('aria-expanded', 'false');
+            trigger.setAttribute('aria-controls', `menu-${id}`);
+            trigger.dataset.i18nLabel = 'chat_session_actions';
+            trigger.dataset.i18nTitle = 'chat_session_actions';
+            trigger.title = I18N.t('chat_session_actions');
+            trigger.setAttribute('aria-label', trigger.title);
+            row.appendChild(trigger);
+
+            const menu = document.createElement('div');
+            menu.id = `menu-${id}`;
+            menu.className = 'sidebar__chat-item__menu';
+            menu.hidden = true;
+            for (const [icon, labelKey, action] of [
+                [session.is_pinned ? 'unpin' : 'pin', session.is_pinned ? 'session_unpin' : 'session_pin', this.pinSession],
+                ['download', 'session_download', this.downloadSession],
+                ['delete', 'session_delete', this.deleteSession],
+            ]) {
+                const button = document.createElement('button');
+                button.type = 'button';
+                button.className = 'sidebar__chat-item__menu-item';
+                button.classList.toggle('sidebar__chat-item__menu-item--danger', icon === 'delete');
+                button.innerHTML = `${Chat.icon(icon)}<span dir="auto" data-i18n="${labelKey}"></span>`;
+                button.lastElementChild.textContent = I18N.t(labelKey);
+                button.addEventListener('click', event => {
+                    this.closeMenu(true);
+                    action.call(this, event, id);
+                });
+                menu.appendChild(button);
+            }
+            row.appendChild(menu);
+            trigger.addEventListener('click', () => this.toggleMenu(trigger, menu));
+            list.appendChild(row);
         }
 
-        list.innerHTML = sessions.map(s => `
-      <div class="sidebar__chat-item ${s.id === this.currentSessionId ? 'sidebar__chat-item--active' : ''}"
-           data-id="${s.id}">
-        <div class="sidebar__chat-item__icon">${`<svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#${s.is_pinned ? 'pin' : 'chat'}"></use></svg>`}</div>
-        <div class="sidebar__chat-item__content" onclick="Sessions.select('${s.id}')">
-          <div class="sidebar__chat-item__title"></div>
-          <div class="sidebar__chat-item__meta">
-            <span>${this.formatTime(s.updated_at)}</span>
-          </div>
-        </div>
-        <div class="sidebar__chat-item__actions">
-          <button class="sidebar__chat-item__menu-btn" onclick="Sessions.toggleMenu(event, '${s.id}')" aria-label="Session actions" title="Session actions">
-            ⋮
-          </button>
-          <div class="sidebar__chat-item__menu" id="menu-${s.id}">
-            <button class="sidebar__chat-item__menu-item" onclick="Sessions.pinSession(event, '${s.id}')">
-              <span class="menu-icon">${`<svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#${s.is_pinned ? 'unpin' : 'pin'}"></use></svg>`}</span>
-              <span>${s.is_pinned ? I18N.t('session_unpin') : I18N.t('session_pin')}</span>
-            </button>
-            <button class="sidebar__chat-item__menu-item" onclick="Sessions.downloadSession(event, '${s.id}')">
-              <span class="menu-icon"><svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#download"></use></svg></span>
-              <span>${I18N.t('session_download')}</span>
-            </button>
-            <button class="sidebar__chat-item__menu-item sidebar__chat-item__menu-item--danger" onclick="Sessions.deleteSession(event, '${s.id}')">
-              <span class="menu-icon"><svg aria-hidden="true" focusable="false"><use href="${document.body.dataset.iconsUrl}#delete"></use></svg></span>
-              <span>${I18N.t('session_delete')}</span>
-            </button>
-          </div>
-        </div>
-      </div>
-    `).join('');
-        list.querySelectorAll('.sidebar__chat-item__title').forEach((title, index) => {
-            title.textContent = sessions[index].title || 'Untitled Chat';
-        });
+        if (focused && document.activeElement === document.body) {
+            const currentRow = list.querySelector(`[data-id="${focused.dataset.id}"]`);
+            const control = currentRow?.querySelector(focusedMenu ? '.sidebar__chat-item__menu-btn' : '.sidebar__chat-item__content');
+            (control || document.querySelector('.btn-new-chat'))?.focus({preventScroll: true});
+        }
     },
 
-    activate(sessionId, loadingMessages = null) {
-        if (this.currentSessionId !== sessionId) {
-            Chat.dictation?.cancel();
-            Chat.sessionChanged();
+    setTitle(element, title) {
+        if (title && title !== 'New Chat') {
+            delete element.dataset.i18n;
+            element.textContent = title;
+        } else {
+            element.dataset.i18n = 'chat_new_title';
+            element.textContent = I18N.t('chat_new_title');
         }
+        element.title = title && title !== 'New Chat' ? title : '';
+    },
+
+    updateThreadHeading() {
+        const title = document.getElementById('thread-title');
+        if (!title) return;
+        const session = this.rawSessions.find(row => Number(row.id) === this.currentSessionId);
+        this.setTitle(title, session?.title);
+        const meta = document.getElementById('thread-meta');
+        const date = new Date(session?.last_activity_at);
+        meta.hidden = Number.isNaN(date.getTime());
+        if (!meta.hidden) {
+            const time = meta.querySelector('time');
+            time.dateTime = date.toISOString();
+            time.textContent = new Intl.DateTimeFormat(I18N.lang === 'fa' ? 'fa-IR' : 'en',
+                { dateStyle: 'medium', timeStyle: 'short' }).format(date);
+        }
+    },
+
+    activate(sessionId, loadingMessages = null, carryDraft = false) {
+        const previousId = this.currentSessionId;
         this.currentSessionId = sessionId;
         this.loadingMessages = loadingMessages;
+        if (previousId !== sessionId) {
+            Chat.dictation?.cancel();
+            Chat.sessionChanged(previousId, sessionId, carryDraft);
+            if (loadingMessages) Chat.showLoading();
+        }
+        this.updateThreadHeading();
         if (Chat.sendBtn) Chat.setSendingState(Chat.isSending);
-    },
-
-    // Load messages for a session
-    async loadMessages(sessionId) {
-        const res = await API.request(`/api/sessions/${sessionId}/messages`);
-        const data = await API.readJSON(res);
-        const messages = data.messages || data;
-        const container = document.getElementById('messages');
-        container.innerHTML = '';
-        messages.forEach(msg => {
-            const div = document.createElement('div');
-            div.className = `message message--${msg.role}`;
-            div.textContent = msg.content;
-            container.appendChild(div);
-        });
     },
 
     // Create a new session
@@ -276,7 +331,7 @@ const Sessions = {
                 body: JSON.stringify({title: 'New Chat'})
             });
             const session = await API.readJSON(res);
-            if (!onlyIfNone || !this.currentSessionId) this.activate(Number(session.id));
+            if (!onlyIfNone || !this.currentSessionId) this.activate(Number(session.id), null, onlyIfNone);
             await this.load();          // refresh sidebar list (will re-apply filter)
             return session;
         })();
@@ -305,74 +360,40 @@ const Sessions = {
             const messages = Array.isArray(data) ? data : (data.messages || []);
             if (this.loadingMessages === loading) Chat.loadMessages(messages);
         } catch (err) {
-            if (this.loadingMessages === loading) this.showError(err);
+            if (this.loadingMessages === loading) {
+                Chat.messagesContainer?.replaceChildren();
+                this.showError(err);
+            }
         } finally {
             if (this.loadingMessages === loading) this.activate(selectedId);
         }
     },
 
-    formatTime(iso) {
-        const date = new Date(iso);
-        if (isNaN(date.getTime())) return 'نامشخص';
-
-        const formatter = new Intl.DateTimeFormat('fa-IR', {
-            timeZone: 'Asia/Tehran',
-            calendar: 'persian',
-            year: 'numeric',
-            month: 'long',
-            day: 'numeric'
-        });
-
-        const fullPersianDate = formatter.format(date);
-        const parts = formatter.formatToParts(date);
-        const yearPart = parts.find(p => p.type === 'year');
-        const year = yearPart ? yearPart.value : null;
-
-        const now = new Date();
-        const nowParts = formatter.formatToParts(now);
-        const currentYear = nowParts.find(p => p.type === 'year')?.value;
-
-        if (year === currentYear) {
-            return fullPersianDate.replace(` ${year}`, '');
-        } else {
-            return fullPersianDate;
-        }
-    },
-
-    toggleMenu(event, sessionId) {
-        event.stopPropagation();
-        const menu = document.getElementById(`menu-${sessionId}`);
-        if (!menu) return;
-
-        const isOpen = menu.classList.contains('sidebar__chat-item__menu--open');
-        if (isOpen) {
-            menu.classList.remove('sidebar__chat-item__menu--open');
+    toggleMenu(trigger, menu) {
+        if (this.openMenu?.menu === menu) {
+            this.closeMenu(true);
             return;
         }
+        this.closeMenu();
+        this.openMenu = {trigger, menu};
+        menu.hidden = false;
+        const rect = trigger.getBoundingClientRect();
+        const bottom = window.visualViewport?.height || window.innerHeight;
+        const below = rect.bottom + 4;
+        menu.style.top = `${below + menu.offsetHeight <= bottom ? below : Math.max(4, rect.top - menu.offsetHeight - 4)}px`;
+        menu.style.left = `${Math.max(4, rect.right - menu.offsetWidth)}px`;
+        trigger.setAttribute('aria-expanded', 'true');
+        menu.firstElementChild.focus();
+    },
 
-        const allMenus = document.querySelectorAll('.sidebar__chat-item__menu');
-        allMenus.forEach(m => m.classList.remove('sidebar__chat-item__menu--open'));
-
-        const button = event.currentTarget;
-        const rect = button.getBoundingClientRect();
-        const menuWidth = menu.offsetWidth;
-        const menuHeight = menu.offsetHeight;
-        const gap = 4;
-
-        let top = rect.bottom + gap;
-        let left = rect.right - menuWidth;
-
-        if (top + menuHeight > window.innerHeight) {
-            top = rect.top - menuHeight - gap;
-        }
-        if (left < 0) left = 8;
-        if (left + menuWidth > window.innerWidth) {
-            left = window.innerWidth - menuWidth - 8;
-        }
-
-        menu.style.top = `${top}px`;
-        menu.style.left = `${left}px`;
-        menu.classList.add('sidebar__chat-item__menu--open');
+    closeMenu(restoreFocus = false) {
+        if (!this.openMenu) return false;
+        const {trigger, menu} = this.openMenu;
+        this.openMenu = null;
+        menu.hidden = true;
+        trigger.setAttribute('aria-expanded', 'false');
+        if (restoreFocus) trigger.focus({preventScroll: true});
+        return true;
     },
 
     async deleteSession(event, sessionId) {
@@ -383,6 +404,7 @@ const Sessions = {
         try {
             await API.deleteSession(sessionId);
             if (this.currentSessionId === selectedId) this.activate(null);
+            Chat.forgetSession(selectedId);
             await this.load();
         } catch (err) {
             this.showError(err);
@@ -401,10 +423,6 @@ const Sessions = {
 
     downloadSession(event, sessionId) {
         event.stopPropagation();
-        // Close the dropdown menu
-        const menu = document.getElementById(`menu-${sessionId}`);
-        if (menu) menu.classList.remove('sidebar__chat-item__menu--open');
-
         API.request(`/api/sessions/${sessionId}/download`)
             .then(async response => {
                 if (!response.ok) await API.readJSON(response);
@@ -425,47 +443,23 @@ const Sessions = {
             });
     },
 
-    // setup filter dropdown listener
-    initFilter() {
-        const filterSelect = document.getElementById('session-filter');
-        const scrollContainer = document.querySelector('.sidebar__chat-scroll');
-        if (scrollContainer) {
-            scrollContainer.addEventListener('scroll', () => {
-                document.querySelectorAll('.sidebar__chat-item__menu--open')
-                    .forEach(m => m.classList.remove('sidebar__chat-item__menu--open'));
-            });
-        }
-        if (filterSelect) {
-            filterSelect.addEventListener('change', (e) => {
-                this.currentFilter = e.target.value;
-                this.applyFilterAndRender();
-            });
-        }
+    init() {
+        document.getElementById('session-filter').addEventListener('change', event => {
+            this.currentFilter = event.target.value;
+            this.applyFilterAndRender();
+        });
+        document.querySelector('.sidebar__chat-scroll').addEventListener('scroll', () => {
+            this.closeMenu(this.openMenu?.menu.contains(document.activeElement));
+        });
+        document.addEventListener('click', event => {
+            const open = this.openMenu;
+            if (open && !open.menu.contains(event.target) && !open.trigger.contains(event.target)) this.closeMenu();
+        });
+        document.querySelector('.btn-new-chat').addEventListener('click', () => {
+            window.dispatchEvent(new Event('conversationselected'));
+            this.create().catch(error => this.showError(error));
+        });
+        window.addEventListener('languagechange', () => this.updateThreadHeading());
+        this.load();
     },
 };
-
-// Initialize filter on page load
-document.addEventListener('DOMContentLoaded', () => {
-    Sessions.initFilter();
-});
-
-// Close menus when clicking outside
-document.addEventListener('click', () => {
-    const allMenus = document.querySelectorAll('.sidebar__chat-item__menu');
-    allMenus.forEach(m => m.classList.remove('sidebar__chat-item__menu--open'));
-});
-
-// Hook new-chat button
-document.querySelector('.btn-new-chat')?.addEventListener('click', () => {
-    Sessions.create().catch(err => Sessions.showError(err));
-});
-
-// Initial session load
-Sessions.load();
-
-// Re-render session list when language changes (so menu labels update)
-window.addEventListener('languagechange', () => {
-    if (Sessions.rawSessions.length) {
-        Sessions.applyFilterAndRender();
-    }
-});

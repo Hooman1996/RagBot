@@ -86,12 +86,6 @@
       submit.textContent = t(busy ? 'users_loading' : 'users_add');
       form.setAttribute('aria-busy', String(busy));
     }
-    const theme = document.getElementById('usersTheme');
-    document.body.classList.toggle('light-mode', localStorage.getItem('theme') === 'light');
-    theme.addEventListener('click', () => {
-      const light = document.body.classList.toggle('light-mode');
-      localStorage.setItem('theme', light ? 'light' : 'dark');
-    });
     document.querySelectorAll('[data-lang]').forEach(button => button.addEventListener('click', () => I18N.setLanguage(button.dataset.lang)));
     window.addEventListener('languagechange', render);
     form.addEventListener('submit', async event => {

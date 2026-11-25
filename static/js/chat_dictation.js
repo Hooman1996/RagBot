@@ -114,9 +114,11 @@ class ChatDictation {
   render() {
     const phase = this.operation?.phase;
     this.mic.disabled = !this.ready || this.chat.isLocked || this.chat.isSending || Boolean(phase);
+    this.mic.dataset.phase = phase || '';
+    this.mic.setAttribute('aria-busy', String(phase === 'transcribing'));
     this.stopButton.hidden = phase !== 'recording';
     this.cancelButton.hidden = !phase;
-    const label = I18N.t('dictation_start');
+    const label = I18N.t(this.ready ? 'dictation_start' : 'dictation_unavailable');
     this.mic.setAttribute('aria-label', label);
     this.mic.title = label;
     const status = this.message ? I18N.t(this.message) : '';

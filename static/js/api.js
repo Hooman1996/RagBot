@@ -5,9 +5,10 @@ const API = {
     return error?.publicMessage || this.fallbackError;
   },
 
-  publicError(message) {
+  publicError(message, localeKey = 'chat_error_generic') {
     const error = new Error(message);
     error.publicMessage = message;
+    error.localeKey = localeKey;
     return error;
   },
 
@@ -15,7 +16,7 @@ const API = {
     try {
       return await fetch(url, options);
     } catch (_) {
-      throw this.publicError("ارتباط با سامانه برقرار نشد. اتصال شبکه را بررسی و دوباره تلاش کنید.");
+      throw this.publicError("ارتباط با سامانه برقرار نشد. اتصال شبکه را بررسی و دوباره تلاش کنید.", "chat_error_network");
     }
   },
 
@@ -32,35 +33,35 @@ const API = {
   responseError(data, status) {
     // Only known public errors are shown. Never echo arbitrary server/debug text.
     const codes = {
-      INVALID_REQUEST: "درخواست معتبر نیست. منابع دانش انتخاب‌شده را بررسی کنید.",
-      SERVICE_BUSY: "سامانه در حال حاضر مشغول است. کمی بعد دوباره تلاش کنید.",
-      DEPENDENCY_TIMEOUT: "زمان پاسخ‌گویی به پایان رسید. لطفاً دوباره تلاش کنید.",
-      DEPENDENCY_UNAVAILABLE: "سرویس پاسخ‌گویی موقتاً در دسترس نیست.",
-      DEPENDENCY_INVALID_RESPONSE: "سرویس پاسخ‌گویی پاسخ معتبری برنگرداند. لطفاً دوباره تلاش کنید.",
+      INVALID_REQUEST: ["درخواست معتبر نیست. منابع دانش انتخاب‌شده را بررسی کنید.", "chat_error_invalid"],
+      SERVICE_BUSY: ["سامانه در حال حاضر مشغول است. کمی بعد دوباره تلاش کنید.", "chat_error_busy"],
+      DEPENDENCY_TIMEOUT: ["زمان پاسخ‌گویی به پایان رسید. لطفاً دوباره تلاش کنید.", "chat_error_timeout"],
+      DEPENDENCY_UNAVAILABLE: ["سرویس پاسخ‌گویی موقتاً در دسترس نیست.", "chat_error_unavailable"],
+      DEPENDENCY_INVALID_RESPONSE: ["سرویس پاسخ‌گویی پاسخ معتبری برنگرداند. لطفاً دوباره تلاش کنید.", "chat_error_bad_response"],
       // A server-side prompt budget problem; the user's question length is rarely the cause.
-      MODEL_CONTEXT_LIMIT: "سامانه نتوانست به این پرسش پاسخ دهد. لطفاً کمی بعد دوباره تلاش کنید."
+      MODEL_CONTEXT_LIMIT: ["سامانه نتوانست به این پرسش پاسخ دهد. لطفاً کمی بعد دوباره تلاش کنید.", "chat_error_answer"]
     };
     const details = {
-      "Session not found": "گفتگو در دسترس نیست. فهرست گفتگوها را تازه‌سازی کنید.",
-      "Query not found": "پیام موردنظر در دسترس نیست.",
-      "No pending satisfaction request": "درخواست بازخورد فعالی وجود ندارد."
+      "Session not found": ["گفتگو در دسترس نیست. فهرست گفتگوها را تازه‌سازی کنید.", "chat_error_session"],
+      "Query not found": ["پیام موردنظر در دسترس نیست.", "chat_error_query"],
+      "No pending satisfaction request": ["درخواست بازخورد فعالی وجود ندارد.", "chat_error_satisfaction"]
     };
     const statuses = {
-      401: "لطفاً دوباره وارد حساب خود شوید.",
-      403: "اجازه انجام این درخواست را ندارید.",
-      404: "مورد درخواست‌شده در دسترس نیست.",
-      422: "اطلاعات درخواست معتبر نیست. ورودی‌ها را بررسی کنید.",
-      429: "درخواست‌های زیادی ارسال شده است. کمی بعد تلاش کنید.",
-      502: "سرویس پاسخ‌گویی پاسخ معتبری برنگرداند. لطفاً دوباره تلاش کنید.",
-      503: "سرویس پاسخ‌گویی موقتاً در دسترس نیست.",
-      504: "زمان پاسخ‌گویی به پایان رسید. لطفاً دوباره تلاش کنید."
+      401: ["لطفاً دوباره وارد حساب خود شوید.", "chat_error_auth"],
+      403: ["اجازه انجام این درخواست را ندارید.", "chat_error_forbidden"],
+      404: ["مورد درخواست‌شده در دسترس نیست.", "chat_error_missing"],
+      422: ["اطلاعات درخواست معتبر نیست. ورودی‌ها را بررسی کنید.", "chat_error_input"],
+      429: ["درخواست‌های زیادی ارسال شده است. کمی بعد تلاش کنید.", "chat_error_limit"],
+      502: ["سرویس پاسخ‌گویی پاسخ معتبری برنگرداند. لطفاً دوباره تلاش کنید.", "chat_error_bad_response"],
+      503: ["سرویس پاسخ‌گویی موقتاً در دسترس نیست.", "chat_error_unavailable"],
+      504: ["زمان پاسخ‌گویی به پایان رسید. لطفاً دوباره تلاش کنید.", "chat_error_timeout"]
     };
     const description = typeof data?.detail === "string" ? data.detail : data?.errorDesc;
-    return this.publicError(
+    const publicMessage =
       (Object.hasOwn(codes, data?.errorCode) && codes[data.errorCode]) ||
       (Object.hasOwn(details, description) && details[description]) ||
-      statuses[status] || this.fallbackError
-    );
+      statuses[status] || [this.fallbackError];
+    return this.publicError(...publicMessage);
   },
 
   async health() {

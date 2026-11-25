@@ -1,384 +1,205 @@
 <!DOCTYPE html>
-<html>
+<html lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, interactive-widget=resizes-content">
     <title>Negah Bank AI</title>
-
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous">
-    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/base.css') }}" integrity="{{ asset_integrity('css/base.css') }}" crossorigin="anonymous">
-    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/app.css') }}" integrity="{{ asset_integrity('css/app.css') }}" crossorigin="anonymous">
-    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/web_controls.css') }}" integrity="{{ asset_integrity('css/web_controls.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/workspace.css') }}" integrity="{{ asset_integrity('css/workspace.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ versioned_asset(request, 'css/chat.css') }}" integrity="{{ asset_integrity('css/chat.css') }}" crossorigin="anonymous">
     <!-- Dictation captures native fetch before web_auth installs the RagBot API wrapper. -->
     <script src="{{ versioned_asset(request, 'js/chat_dictation.js') }}" integrity="{{ asset_integrity('js/chat_dictation.js') }}" crossorigin="anonymous"></script>
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
-<body data-icons-url="{{ versioned_asset(request, 'icons.svg') }}">
-
+{% set icons = versioned_asset(request, 'icons.svg') %}
+{% set bank_logo = versioned_asset(request, 'negah-bank-icon.jpg') %}
+{% macro icon(name) -%}
+<svg class="chat-icon" aria-hidden="true" focusable="false"><use href="{{ icons }}#{{ name }}"></use></svg>
+{%- endmacro %}
+<body data-icons-url="{{ icons }}" data-bank-logo="{{ bank_logo }}">
 <div class="app-shell">
-
-    <div class="sidebar">
-
+    <aside id="chat-history" class="sidebar" aria-labelledby="history-title">
         <div class="sidebar__brand">
-            <div class="sidebar__logo">N</div>
-            <div class="sidebar__brand-text">
-                <div class="sidebar__brand-name" data-i18n="brand_name">Negah Bank AI</div>
-                <div class="sidebar__brand-sub" data-i18n="brand_sub">RAG Platform</div>
+            <img src="{{ bank_logo }}" alt="" width="40" height="40">
+            <div>
+                <div class="sidebar__brand-name" dir="auto" data-i18n="brand_name">Negah Bank AI</div>
+                <div class="sidebar__brand-sub" dir="auto" data-i18n="chat_staff_workspace">Staff workspace</div>
             </div>
+            <button class="icon-button history-close" type="button" data-close-panel="history" data-i18n-label="chat_close_history" aria-label="Close history">{{ icon('close') }}</button>
         </div>
-
-        <div class="sidebar__nav">
-            <a href="/app" class="sidebar__nav-item active">
-                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#chat"></use></svg>
-                <span data-i18n="nav_chat">Chat</span>
-            </a>
-
-            {% if 'kb_page' in permissions %}<a href="/knowledge-base" class="sidebar__nav-item">
-                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#knowledge"></use></svg>
-                <span data-i18n="nav_knowledge">Knowledge</span>
-            </a>{% endif %}
-
-            {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">
-                <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#analytics"></use></svg>
-                <span data-i18n="nav_analytics">Analytics</span>
-            </a>{% endif %}
-            {% include "_users_nav_link.html" %}
-            {% include "_coverage_nav_link.html" %}
-        </div>
-
-        <div class="sidebar__section" style="padding: 0.75rem 0.85rem 0.4rem;">
-            <button class="btn-new-chat">
-                <span class="btn-new-chat__icon">+</span>
-                <span data-i18n="new_chat">New Chat</span>
-            </button>
-        </div>
+        <button class="btn-new-chat" type="button">{{ icon('plus') }}<span dir="auto" data-i18n="new_chat">New Chat</span></button>
 
         <div class="sidebar__history">
             <div class="sidebar__filter">
-                <select id="session-filter" class="session-filter-select">
+                <h2 id="history-title" dir="auto" data-i18n="chat_history">History</h2>
+                <select id="session-filter" class="session-filter-select" dir="auto" aria-labelledby="history-title">
                     <option value="today" data-i18n="filter_today">Today</option>
                     <option value="yesterday" data-i18n="filter_yesterday">Yesterday</option>
                     <option value="last7days" data-i18n="filter_last7">Last 7 days</option>
                     <option value="older" data-i18n="filter_older">Older</option>
                 </select>
             </div>
-
             <div class="sidebar__chat-scroll">
-                <div class="sidebar__chat-list"></div>
+                <div class="sidebar__chat-list" aria-busy="true"></div>
             </div>
         </div>
-    </div>
+
+        <footer class="sidebar__footer">
+            <details class="workspace-tools">
+                <summary>{{ icon('states') }}<span dir="auto" data-i18n="chat_tools">Workspace tools</span>{{ icon('chevron-down') }}</summary>
+                <nav class="sidebar__nav" data-i18n-label="chat_tools" aria-label="Workspace tools">
+                    <a href="/app" class="sidebar__nav-item active" aria-current="page">{{ icon('chat') }}<span data-i18n="nav_chat">Chat</span></a>
+                    {% if 'kb_page' in permissions %}<a href="/knowledge-base" class="sidebar__nav-item">{{ icon('knowledge') }}<span data-i18n="nav_knowledge">Knowledge</span></a>{% endif %}
+                    {% if 'analytics' in permissions %}<a href="/analytics" class="sidebar__nav-item">{{ icon('analytics') }}<span data-i18n="nav_analytics">Analytics</span></a>{% endif %}
+                    {% include "_users_nav_link.html" %}
+                    {% include "_coverage_nav_link.html" %}
+                    {% if 'batch' in permissions %}
+                    <button id="batch-upload-btn" class="sidebar__nav-item" type="button">{{ icon('documents') }}<span data-i18n="chat_batch">Batch processing</span></button>
+                    {% endif %}
+                </nav>
+            </details>
+        </footer>
+    </aside>
 
     <div class="main-content">
-
-        <div class="topbar">
-            <div class="topbar__title" data-i18n="topbar_title">Main Chat Interface</div>
-
+        <header class="topbar">
+            <div class="topbar__start">
+                <button type="button" id="history-toggle" class="icon-button history-toggle" aria-controls="chat-history" aria-expanded="false" data-i18n-label="chat_history" aria-label="History">{{ icon('menu') }}</button>
+                <span class="topbar__workspace" dir="auto" data-i18n="chat_workspace">Workspace</span>
+                <span class="topbar__divider" aria-hidden="true"></span>
+                <span class="topbar__title" dir="auto" data-i18n="nav_chat">Chat</span>
+            </div>
             <div class="topbar__actions">
+                <div class="status-chip" id="systemHealth" role="status" data-i18n-title="chat_health_checking" title="Checking system status">
+                    <span id="healthDot" class="dot" aria-hidden="true"></span>
+                    <span class="status-label" dir="auto" data-i18n="chat_health_checking">Checking system status</span>
+                </div>
                 <div class="web-header-controls">
                     {% set logout_label = "Log out" %}{% set logout_localized = true %}{% include "_logout_button.html" %}
-                    <button class="theme-toggle" id="themeToggleBtn" title="Toggle dark/light mode" aria-label="Toggle dark/light mode">
-                        <svg class="toggle-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#moon"></use></svg>
-                    </button>
-                    <div class="lang-toggle-container" id="langToggleContainer">
-                        <button class="lang-option" data-lang="fa" id="langFaBtn">FA</button>
-                        <span class="lang-separator">|</span>
-                        <button class="lang-option" data-lang="en" id="langEnBtn">EN</button>
+                    <button type="button" class="icon-button theme-toggle" id="themeToggleBtn" data-i18n-label="chat_theme" aria-label="Toggle dark mode" aria-pressed="false">{{ icon('moon') }}</button>
+                    <div class="lang-toggle-container" id="langToggleContainer" role="group" data-i18n-label="chat_language" aria-label="Language">
+                        <button type="button" class="lang-option" data-lang="en" id="langEnBtn" lang="en" aria-label="English" aria-pressed="true">EN</button>
+                        <button type="button" class="lang-option" data-lang="fa" id="langFaBtn" lang="fa" aria-pressed="false">فارسی</button>
                     </div>
                 </div>
-
-                <div class="status-chip">
-                    <div id="healthDot" class="dot"></div>
-                    <span data-i18n="system_status">System Status</span>
-                </div>
+                <button type="button" class="documents-toggle" id="documents-toggle" aria-controls="chat-documents" aria-expanded="true" data-i18n-label="doc_filters_title" aria-label="Documents">
+                    {{ icon('knowledge') }}<span dir="auto" data-i18n="doc_filters_title">Documents</span>
+                </button>
             </div>
-        </div>
+        </header>
 
         <div class="chat-layout">
-
-            <div class="chat-main">
-
-                <div id="messages" class="messages-area">
-
+            <main class="chat-main" aria-labelledby="thread-title">
+                <header class="thread-head chat-column">
+                    <h1 id="thread-title" dir="auto" data-i18n="chat_new_title">New conversation</h1>
+                    <div class="thread-meta" id="thread-meta" hidden>{{ icon('duration') }}<time dir="auto"></time></div>
+                </header>
+                <div class="transcript" id="transcript" tabindex="0" data-i18n-label="chat_transcript" aria-label="Conversation messages">
+                    <div id="messages" class="messages-area chat-column"></div>
+                </div>
+                <template id="chat-welcome-template">
                     <div class="chat-welcome">
-                        <div class="chat-welcome__title" data-i18n="welcome_title">Ask the Bank Knowledge AI</div>
-                        <div class="chat-welcome__subtitle" data-i18n="welcome_subtitle">
-                            Search internal documents, policies and regulatory guidance.
-                        </div>
+                        <img src="{{ bank_logo }}" alt="" width="44" height="44">
+                        <h2 dir="auto" data-i18n="welcome_title">Ask the Bank Knowledge AI</h2>
+                        <p dir="auto" data-i18n="welcome_subtitle">Search internal documents, policies and regulatory guidance.</p>
                     </div>
+                </template>
 
-                </div>
-
-                <div class="chat-input-area">
-                    <div id="lockNotice" class="lock-notice">
-                        <svg class="lock-notice__icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#lock"></use></svg>
-                        <span class="lock-notice__text" data-i18n="lock_text">برای شروع پرسش، حداقل یک سند انتخاب کنید یا فایلی بارگذاری نمایید</span>
+                <div class="chat-input-area chat-column">
+                    <div id="lockNotice" class="lock-notice" role="status">
+                        {{ icon('lock') }}
+                        <span dir="auto" data-i18n="lock_text">Please select at least one document or upload a file to start asking questions.</span>
                     </div>
-
-                    <div id="docFilters" class="doc-filter-bar"></div>
-
                     <div class="chat-input-box">
-                        <textarea id="chatInput" class="chat-textarea" data-i18n-placeholder="input_placeholder"
-                                  placeholder="..." dir="auto"></textarea>
-                        <div class="chat-input-actions">
-                            <button type="button" id="dictationMic" class="btn-dictation" disabled
-                                    data-asr-origin="{{ asr_origin|default('') }}"
-                                    aria-label="Dictate in Persian" aria-describedby="dictationStatus">
-                                <svg class="dictation-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#microphone"></use></svg>
-                            </button>
-                            <button id="sendBtn" class="btn-send">➤</button>
+                        <label class="sr-only" for="chatInput" data-i18n="chat_input_label">Question</label>
+                        <textarea id="chatInput" class="chat-textarea" rows="2" dir="auto" disabled aria-describedby="lockNotice"></textarea>
+                        <div id="docFilters" class="attachment-context"></div>
+                        <div id="ocr-status" class="composer-status" dir="auto" role="status"></div>
+                        <div class="dictation-feedback">
+                            <p id="dictationStatus" class="dictation-status" dir="auto" role="status" aria-live="polite" aria-atomic="true"></p>
+                            <button type="button" id="dictationStop" class="dictation-action" data-i18n="dictation_stop" hidden>Stop</button>
+                            <button type="button" id="dictationCancel" class="dictation-action" data-i18n="dictation_cancel" hidden>Cancel</button>
+                        </div>
+                        <div class="composer-controls">
+                            <div class="chat-input-actions">
+                                <button type="button" id="dictationMic" class="btn-dictation" disabled
+                                        data-asr-origin="{{ asr_origin|default('') }}"
+                                        aria-label="Dictate in Persian" aria-describedby="dictationStatus">
+                                    {{ icon('microphone') }}
+                                </button>
+                            </div>
+                            <span class="send-hint" dir="auto" data-i18n="chat_enter_to_send">Enter to send</span>
+                            <button id="sendBtn" class="btn-send" type="button" disabled><span dir="auto" data-i18n="chat_send">Send</span>{{ icon('arrow-up') }}</button>
                         </div>
                     </div>
-                    <div class="dictation-feedback">
-                        <p id="dictationStatus" class="dictation-status" role="status" aria-live="polite" aria-atomic="true"></p>
-                        <button type="button" id="dictationStop" class="dictation-action" data-i18n="dictation_stop" hidden>Stop</button>
-                        <button type="button" id="dictationCancel" class="dictation-action" data-i18n="dictation_cancel" hidden>Cancel</button>
+                    <div class="composer-scope" id="composer-scope" hidden>
+                        {{ icon('knowledge') }}<span id="selected-document-names"></span>
                     </div>
-
-                    {% if 'batch' in permissions %}<div class="batch-processing-container"
-                         style="display: flex; align-items: center; gap: 10px; margin-top: 12px; padding: 0 4px;">
-                        <input type="file" id="batch-file-input" accept=".csv, .xlsx, .xls" style="display: none;"/>
-
-                        <button id="batch-upload-btn"
-                                style="background-color: #4f46e5; color: white; font-family: inherit; font-size: 0.85rem; padding: 8px 14px; border-radius: 6px; display: flex; align-items: center; border: none; cursor: pointer; transition: background-color 0.2s;">
-                            <svg style="width: 16px; height: 16px; margin-inline-end: 8px;" fill="none"
-                                 stroke="currentColor" viewBox="0 0 24 24">
-                                <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2"
-                                      d="M4 16v1a3 3 0 003 3h10a3 3 0 003-3v-1m-4-8l-4-4m0 0L8 8m4-4v12"></path>
-                            </svg>
-                            پردازش دسته‌ای سوالات (Excel/CSV)
-                        </button>
-
-                        <span id="batch-status" style="font-size: 0.8rem; color: #64748b; display: none;">
-                            ⏳ در حال پردازش فایل، لطفا شکیبا باشید...
-                        </span>
-                    </div>{% endif %}
-
                 </div>
-            </div>
+            </main>
 
-            <div class="knowledge-panel">
+            <aside id="chat-documents" class="knowledge-panel" aria-labelledby="documents-title">
                 <div class="kp-header">
-                    <div class="kp-title" data-i18n="doc_filters_title">Document Filters</div>
+                    <h2 id="documents-title" dir="auto" data-i18n="doc_filters_title">Documents</h2>
+                    <button class="icon-button" type="button" data-close-panel="documents" data-i18n-label="chat_close_documents" aria-label="Close documents">{{ icon('close') }}</button>
                 </div>
-                <div class="kp-body">
-                    <div class="kp-section-title">Search</div>
-                    <input type="text" id="doc-search-input" class="doc-search-input"
-                           data-i18n-placeholder="search_placeholder"
-                           placeholder="Search by name or number..."/>
-
-                    <div class="kp-section-title" style="margin-top: 16px;" data-i18n="categories_title">Categories
-                    </div>
-                    <div id="category-filters" class="category-filter-list">
-                    </div>
-                    <div class="kp-section-title" style="margin-top: 20px;" data-i18n="active_sources_title">Active
-                        Sources
-                    </div>
-                    <div id="active-sources-list" class="kp-doc-list">
-                    </div>
+                <p class="kp-help" dir="auto" data-i18n="chat_doc_help">Select the documents the assistant can search.</p>
+                <div class="doc-search">
+                    {{ icon('search') }}
+                    <label class="sr-only" for="doc-search-input" data-i18n="chat_search_docs">Search documents</label>
+                    <input type="search" id="doc-search-input" data-i18n-placeholder="chat_search_placeholder" placeholder="Search by title" dir="auto" autocomplete="off">
                 </div>
-            </div>
-
+                <div class="kp-section-title" id="categories-title" dir="auto" data-i18n="categories_title">Categories</div>
+                <div id="category-filters" class="category-filter-list" role="group" aria-labelledby="categories-title"></div>
+                <div class="kp-list-head">
+                    <h3 id="sources-title" dir="auto" data-i18n="active_sources_title">Available documents</h3>
+                    <span id="selected-document-count" dir="auto" role="status"></span>
+                </div>
+                <div id="active-sources-list" class="kp-doc-list" role="group" aria-labelledby="sources-title"></div>
+                <p class="kp-note" dir="auto" data-i18n="category_warning">You can select documents from one category at a time.</p>
+                <p id="document-status" class="panel-status" dir="auto" role="status"></p>
+            </aside>
         </div>
-
     </div>
-
+    <div id="drawer-scrim" class="drawer-scrim" hidden></div>
 </div>
 
-<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
+{% if 'batch' in permissions %}
+<dialog id="batch-dialog" class="batch-dialog" aria-labelledby="batch-title">
+    <header class="batch-header">
+        <h2 id="batch-title" dir="auto" data-i18n="chat_batch">Batch processing</h2>
+        <button class="icon-button" id="batch-close" type="button" data-i18n-label="chat_close_batch" aria-label="Close batch processing">{{ icon('close') }}</button>
+    </header>
+    <form id="batch-form" class="batch-form">
+        <div class="batch-documents">
+            <div class="batch-documents-heading">
+                <h3 dir="auto" data-i18n="batch_sources">Selected documents</h3>
+                <button class="batch-secondary" type="button" id="batch-choose-documents" data-i18n="batch_choose_documents">Choose documents</button>
+            </div>
+            <ul id="batch-document-list" hidden></ul>
+            <p id="batch-no-documents" dir="auto" data-i18n="batch_empty_sources">Select at least one document to start.</p>
+        </div>
+        <div class="batch-file">
+            <label for="batch-file-input" dir="auto" data-i18n="batch_file">Question file</label>
+            <input type="file" id="batch-file-input" accept=".csv,.xlsx,.xls" aria-describedby="batch-file-hint" required autofocus>
+            <p id="batch-file-hint" dir="auto" data-i18n="batch_file_hint">Upload a CSV or Excel file with a question column.</p>
+        </div>
+        <progress id="batch-progress" data-i18n-label="batch_progress_label" aria-label="Batch progress" hidden></progress>
+        <p id="batch-status" class="batch-status" role="status" dir="auto" hidden></p>
+        <div class="batch-actions">
+            <button id="batch-download" class="batch-secondary" type="button" hidden>{{ icon('download') }}<span data-i18n="batch_download">Download result</span></button>
+            <button id="batch-run" class="btn-send" type="submit" data-i18n="batch_run" disabled>Process file</button>
+        </div>
+    </form>
+</dialog>
+{% endif %}
 
+<script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/api.js') }}" integrity="{{ asset_integrity('js/api.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/sidebar.js') }}" integrity="{{ asset_integrity('js/sidebar.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/categoryFilter.js') }}" integrity="{{ asset_integrity('js/categoryFilter.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/chat.js') }}" integrity="{{ asset_integrity('js/chat.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/app.js') }}" integrity="{{ asset_integrity('js/app.js') }}" crossorigin="anonymous"></script>
-
-<script>
-    // Theme toggle (unchanged)
-    const themeBtn = document.getElementById('themeToggleBtn');
-    const body = document.body;
-    const themeIcon = themeBtn.querySelector('.toggle-icon');
-
-    if (localStorage.getItem('theme') === 'light') {
-        body.classList.add('light-mode');
-        themeIcon.firstElementChild.setAttribute('href', '{{ versioned_asset(request, 'icons.svg') }}#sun');
-    }
-
-    themeBtn.addEventListener('click', () => {
-        const isLight = body.classList.toggle('light-mode');
-        themeIcon.firstElementChild.setAttribute('href', '{{ versioned_asset(request, 'icons.svg') }}#' + (isLight ? 'sun' : 'moon'));
-        localStorage.setItem('theme', isLight ? 'light' : 'dark');
-    });
-
-    // Language toggle
-    const langFaBtn = document.getElementById('langFaBtn');
-    const langEnBtn = document.getElementById('langEnBtn');
-
-    function updateLangToggleUI() {
-        const logoutLabel = I18N.t('logout');
-        const logoutButton = document.querySelector('.web-logout');
-        logoutButton.title = logoutLabel;
-        logoutButton.setAttribute('aria-label', logoutLabel);
-        if (I18N.lang === 'fa') {
-            langFaBtn.classList.add('active');
-            langEnBtn.classList.remove('active');
-        } else {
-            langEnBtn.classList.add('active');
-            langFaBtn.classList.remove('active');
-        }
-    }
-
-    updateLangToggleUI();
-
-    function setDirection(lang) {
-        document.body.classList.toggle('rtl', lang === 'fa');
-    }
-
-    // inside existing language button listeners:
-    langFaBtn.addEventListener('click', () => {
-        I18N.setLanguage('fa');
-        setDirection('fa');
-    });
-    langEnBtn.addEventListener('click', () => {
-        I18N.setLanguage('en');
-        setDirection('en');
-    });
-
-    // initial state
-    setDirection(I18N.lang);  // 'fa' or 'en'
-
-    window.addEventListener('languagechange', updateLangToggleUI);
-
-    // =========================================================================
-    // BATCH PROCESSING LOGIC (exact selected documents)
-    // =========================================================================
-    document.addEventListener('DOMContentLoaded', () => {
-        const fileInput = document.getElementById('batch-file-input');
-        const uploadBtn = document.getElementById('batch-upload-btn');
-        const statusEl = document.getElementById('batch-status');
-        const lockNotice = document.getElementById('lockNotice');
-
-        // ---- CORRECTED: robust extraction of selected document names ----
-        function getActiveDocuments() {
-            // Option 1: Use the Chat module's array if available and non‑empty
-            if (typeof Chat !== 'undefined' && Chat.selectedDocs && Chat.selectedDocs.length > 0) {
-                return Chat.selectedDocs.slice();   // return a copy
-            }
-
-            // Option 2: Scrape the tag bar for elements with class "selected"
-            const bar = document.getElementById("docFilters");
-            if (!bar) return [];
-
-            const selectedTags = bar.querySelectorAll('.doc-tag.selected');
-            const names = [];
-            selectedTags.forEach(tag => {
-                // Remove any nested elements (like the "×" button) and whitespace
-                const title = tag.textContent.replace(/×/g, '').trim();
-                if (title) names.push(title);
-            });
-            return names;
-        }
-
-        if (uploadBtn && fileInput) {
-
-            uploadBtn.addEventListener('click', (e) => {
-                const isAppLocked = lockNotice && window.getComputedStyle(lockNotice).display !== 'none';
-
-                if (isAppLocked) {
-                    alert("🔒 برای شروع پردازش دسته‌ای، ابتدا محدودیت صفحه را برطرف کنید (انتخاب سند یا بارگذاری فایل).");
-                    e.preventDefault();
-                    return;
-                }
-
-                // Proceed – batch is independent of active chat session
-                fileInput.click();
-            });
-
-            fileInput.addEventListener('change', async (e) => {
-                const file = e.target.files[0];
-                if (!file) return;
-
-                uploadBtn.disabled = true;
-                uploadBtn.style.opacity = '0.5';
-                uploadBtn.style.cursor = 'not-allowed';
-                statusEl.style.display = 'inline-block';
-                statusEl.style.color = '#64748b';
-                statusEl.textContent = "⏳ در حال پردازش فایل، ممکن است زمان‌بر باشد...";
-
-                const formData = new FormData();
-                formData.append("file", file);
-
-                const activeSessionId = window.currentSessionId || (typeof Chat !== 'undefined' && Chat.currentSessionId) || "0";
-                formData.append("session_id", activeSessionId);
-
-                // ---- Send the real selected documents ----
-                const selectedDocs = getActiveDocuments();
-                formData.append("selected_docs", JSON.stringify(selectedDocs));
-
-                try {
-                    let response = await fetch('/api/mass-answer', {
-                        method: 'POST',
-                        body: formData
-                    });
-
-                    if (response.status === 202) {
-                        const job = await response.json();
-                        while (true) {
-                            await new Promise(resolve => setTimeout(resolve, 2000));
-                            const statusResponse = await fetch(job.status_url, {headers: {'X-Job-Access': job.job_access}});
-                            if (!statusResponse.ok) {
-                                throw new Error("خطا در دریافت وضعیت پردازش دسته‌ای");
-                            }
-                            const progress = await statusResponse.json();
-                            statusEl.textContent = `⏳ پردازش ${progress.completed_rows} از ${progress.total_rows} ردیف...`;
-                            if (progress.status === 'completed') {
-                                response = await fetch(progress.result_url, {headers: {'X-Job-Access': job.job_access}});
-                                break;
-                            }
-                            if (progress.status === 'failed') {
-                                throw new Error(progress.error_message || "پردازش دسته‌ای ناموفق بود");
-                            }
-                        }
-                    }
-
-                    if (!response.ok) {
-                        const errData = await response.json();
-                        throw new Error(errData.detail || "خطا در برقراری ارتباط با سرور");
-                    }
-
-                    const blob = await response.blob();
-                    const downloadUrl = window.URL.createObjectURL(blob);
-                    const a = document.createElement('a');
-                    a.href = downloadUrl;
-                    a.download = `Answered_${file.name}`;
-                    document.body.appendChild(a);
-                    a.click();
-                    a.remove();
-                    window.URL.revokeObjectURL(downloadUrl);
-
-                    statusEl.textContent = "✅ پردازش با موفقیت انجام شد!";
-                    statusEl.style.color = '#059669';
-
-                } catch (error) {
-                    console.error("Batch processing error:", error);
-                    statusEl.textContent = `❌ ${error.message}`;
-                    statusEl.style.color = '#ef4444';
-                } finally {
-                    uploadBtn.disabled = false;
-                    uploadBtn.style.opacity = '1';
-                    uploadBtn.style.cursor = 'pointer';
-                    fileInput.value = '';
-
-                    setTimeout(() => {
-                        statusEl.style.display = 'none';
-                    }, 5000);
-                }
-            });
-        }
-    });
-
-</script>
-
-</script>
-
 </body>
 </html>

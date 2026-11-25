@@ -1,36 +1,26 @@
 <!DOCTYPE html>
-<html lang="en" dir="ltr">
+<html class="workspace-page" lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
     <title>Users · Negah Bank AI</title>
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
-    {% for css in ['css/base.css','css/app.css','css/web_controls.css','css/admin_users.css'] %}
+    {% for css in ['css/workspace.css','css/admin_users.css'] %}
     <link rel="stylesheet" href="{{ versioned_asset(request, css) }}" integrity="{{ asset_integrity(css) }}" crossorigin="anonymous">
     {% endfor %}
     <script src="{{ versioned_asset(request, 'js/web_auth.js') }}" integrity="{{ asset_integrity('js/web_auth.js') }}" crossorigin="anonymous"></script>
 </head>
-<body class="users-workspace">
-<div class="app-shell">
-    <aside class="sidebar" aria-label="Main navigation">
-        <div class="sidebar__brand"><div class="sidebar__logo">N</div><div class="sidebar__brand-text"><div class="sidebar__brand-name" data-i18n="brand_name">Negah Bank AI</div><div class="sidebar__brand-sub" data-i18n="brand_sub">RAG Platform</div></div></div>
-        <nav class="sidebar__nav">
-            {% for permission, path, icon, key, label in [('chat','/app','chat','nav_chat','Chat'), ('kb_page','/knowledge-base','knowledge','nav_knowledge','Knowledge'), ('analytics','/analytics','analytics','nav_analytics','Analytics')] %}
-            {% if permission in permissions %}<a href="{{ path }}" class="sidebar__nav-item"><svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#{{ icon }}"></use></svg><span data-i18n="{{ key }}">{{ label }}</span></a>{% endif %}
-            {% endfor %}
-            {% set users_active = true %}{% include "_users_nav_link.html" %}
-            {% include "_coverage_nav_link.html" %}
-        </nav>
-    </aside>
-    <main class="main-content">
-        <header class="topbar"><div class="topbar__title" data-i18n="nav_users">Users</div><div class="topbar__actions"><div class="web-header-controls">
-            {% set logout_label = 'Log out' %}{% set logout_localized = true %}{% include "_logout_button.html" %}
-            <button id="usersTheme" class="theme-toggle" type="button" aria-label="Toggle dark/light mode"><svg aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#moon"></use></svg></button>
-            <div class="lang-toggle-container"><button class="lang-option" type="button" data-lang="fa">FA</button><span class="lang-separator">|</span><button class="lang-option" type="button" data-lang="en">EN</button></div>
-        </div></div></header>
-        <div class="users-page">
-            <section class="users-card" aria-labelledby="usersTitle">
-                <h1 id="usersTitle" data-i18n="users_add">Add user</h1>
+<body class="workspace-body users-workspace">
+{% set workspace_page = 'users' %}
+{% set workspace_title = 'Users' %}
+{% set workspace_theme_id = 'usersTheme' %}
+<div class="app-shell workspace-shell">
+    {% include "_workspace_rail.html" %}
+    <main class="main-content workspace-main">
+        {% include "_workspace_header.html" %}
+        <div class="users-page workspace-scroll" data-workspace-content>
+            <section class="users-card workspace-surface" aria-labelledby="usersTitle">
+                <h1 id="usersTitle" class="workspace-heading" data-i18n="users_add">Add user</h1>
                 <p class="users-hint" data-i18n="users_hint">Create an account with access defined by its role.</p>
                 <p id="usersStatus" role="status" aria-live="polite" tabindex="-1" hidden></p>
                 <p id="usersError" class="users-error" role="alert" tabindex="-1" hidden></p>
@@ -45,12 +35,14 @@
                         {% endfor %}
                     </div>
                     <p id="usersPasswordHint" class="users-hint" data-i18n="users_password_hint">Use a nonempty password of at most 72 UTF-8 bytes, without NUL.</p>
-                    <button id="usersSubmit" class="users-primary" type="submit" data-i18n="users_add">Add user</button>
+                    <button id="usersSubmit" class="users-primary workspace-primary" type="submit" data-i18n="users_add">Add user</button>
                 </form>
             </section>
         </div>
     </main>
+    <div class="workspace-scrim" hidden></div>
 </div>
+<script src="{{ versioned_asset(request, 'js/workspace.js') }}" integrity="{{ asset_integrity('js/workspace.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
 <script src="{{ versioned_asset(request, 'js/admin_users.js') }}" integrity="{{ asset_integrity('js/admin_users.js') }}" crossorigin="anonymous"></script>
 </body>

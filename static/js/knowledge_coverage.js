@@ -524,8 +524,6 @@
             finally { $('Start').disabled = false; }
         }
 
-        if (global.localStorage && global.localStorage.getItem('theme') === 'light') document.body.classList.add('light-mode');
-        $('Theme').addEventListener('click', () => { const light = document.body.classList.toggle('light-mode'); global.localStorage.setItem('theme', light ? 'light' : 'dark'); });
         $('ListAll')?.addEventListener('click', () => {
             state.listAll = !state.listAll;
             $('ListAll')?.setAttribute('aria-pressed', String(state.listAll));
