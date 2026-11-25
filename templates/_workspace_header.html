@@ -1,22 +1,22 @@
 <header class="topbar workspace-topbar">
     <div class="workspace-breadcrumb">
-        <button class="workspace-icon-button workspace-nav-toggle" type="button" data-workspace-toggle="navigation" aria-controls="workspace-navigation" aria-expanded="false" aria-label="{{ 'ناوبری میز کار' if workspace_page == 'knowledge' else 'Workspace navigation' }}"{% if workspace_page == 'users' %} data-i18n-label="workspace_navigation"{% endif %}>
+        <button class="workspace-icon-button workspace-nav-toggle" type="button" data-workspace-toggle="navigation" aria-controls="workspace-navigation" aria-expanded="false" aria-label="{{ 'ناوبری میز کار' if workspace_page == 'knowledge' else 'Workspace navigation' }}"{% if workspace_page in ('users', 'knowledge') %} data-i18n-label="workspace_navigation"{% endif %}>
             <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#menu"></use></svg>
         </button>
-        <span class="workspace-breadcrumb-root" dir="auto"{% if workspace_page == 'users' %} data-i18n="chat_workspace"{% endif %}>{{ 'فضای کاری' if workspace_page == 'knowledge' else 'Workspace' }}</span>
+        <span class="workspace-breadcrumb-root" dir="auto"{% if workspace_page in ('users', 'knowledge') %} data-i18n="chat_workspace"{% endif %}>{{ 'فضای کاری' if workspace_page == 'knowledge' else 'Workspace' }}</span>
         <span class="workspace-breadcrumb-divider" aria-hidden="true"></span>
-        <span class="topbar__title" dir="auto"{% if workspace_page == 'users' %} data-i18n="nav_users"{% endif %}>{{ workspace_title }}</span>
+        <span class="topbar__title" dir="auto"{% if workspace_page in ('users', 'knowledge') %} data-i18n="{{ 'nav_knowledge' if workspace_page == 'knowledge' else 'nav_users' }}"{% endif %}>{{ workspace_title }}</span>
     </div>
     <div class="topbar__actions">
         <div class="web-header-controls">
             {% set logout_label = 'خروج' if workspace_page == 'knowledge' else 'Log out' %}
-            {% set logout_localized = workspace_page == 'users' %}
+            {% set logout_localized = workspace_page in ('users', 'knowledge') %}
             {% include "_logout_button.html" %}
             <button type="button" class="workspace-icon-button theme-toggle" id="{{ workspace_theme_id }}" data-workspace-theme aria-pressed="false"
-                    aria-label="{{ 'حالت تیره' if workspace_page == 'knowledge' else 'Dark mode' }}"{% if workspace_page == 'users' %} data-i18n-label="chat_theme"{% endif %}>
+                    aria-label="{{ 'حالت تیره' if workspace_page == 'knowledge' else 'Dark mode' }}"{% if workspace_page in ('users', 'knowledge') %} data-i18n-label="chat_theme"{% endif %}>
                 <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#moon"></use></svg>
             </button>
-            {% if workspace_page == 'users' %}
+            {% if workspace_page in ('users', 'knowledge') %}
             <div class="lang-toggle-container" role="group" data-i18n-label="chat_language" aria-label="Language">
                 <button class="lang-option" type="button" data-lang="en" lang="en" aria-label="English">EN</button>
                 <button class="lang-option" type="button" data-lang="fa" lang="fa">فارسی</button>
@@ -24,7 +24,7 @@
             {% endif %}
         </div>
         {% if workspace_page == 'knowledge' %}
-        <button class="workspace-icon-button workspace-documents-toggle" type="button" data-workspace-toggle="documents" aria-controls="knowledge-documents" aria-expanded="false" aria-label="فهرست اسناد">
+        <button class="workspace-icon-button workspace-documents-toggle" type="button" data-workspace-toggle="documents" aria-controls="knowledge-documents" aria-expanded="false" aria-label="Documents" data-i18n-label="doc_filters_title">
             <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#documents"></use></svg>
         </button>
         {% endif %}

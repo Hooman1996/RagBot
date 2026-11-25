@@ -36,14 +36,47 @@ document.addEventListener('DOMContentLoaded', () => {
         }
     };
 
+    let activeNotice;
+    const languageButtons = document.querySelectorAll('.lang-option[data-lang]');
+    function renderLanguage() {
+        document.documentElement.lang = I18N.lang;
+        document.documentElement.dir = I18N.lang === 'fa' ? 'rtl' : 'ltr';
+        if (activeNotice) {
+            const {text, key, values} = activeNotice;
+            text.textContent = I18N.t(key, values);
+        }
+        for (const time of document.querySelectorAll('.kb-version time[datetime]')) {
+            time.textContent = formatVersionDate(time.dateTime);
+        }
+        for (const button of languageButtons) {
+            button.setAttribute('aria-pressed', String(button.dataset.lang === I18N.lang));
+        }
+    }
+    for (const button of languageButtons) {
+        button.addEventListener('click', () => I18N.setLanguage(button.dataset.lang));
+    }
+    window.addEventListener('languagechange', renderLanguage);
+    renderLanguage();
     loadAvailableDocuments();
+
+    function formatVersionDate(value) {
+        return new Date(value).toLocaleString(I18N.lang === 'fa' ? 'fa-IR' : 'en');
+    }
+
+    function label(key) {
+        return `<span data-i18n="${key}">${escapeHTML(I18N.t(key))}</span>`;
+    }
+    function setLabel(element, key) {
+        element.dataset.i18n = key;
+        element.textContent = I18N.t(key);
+    }
 
     function apiErrorMessage(data, fallback) {
         if (typeof data?.detail === 'string') return data.detail;
         if (typeof data?.detail?.message === 'string') {
             const updateId = data.detail.knowledge_update_id;
             return updateId
-                ? `${data.detail.message} (شناسه پیگیری: ${updateId})`
+                ? I18N.t("kb_tracking", {detail: data.detail.message, id: updateId})
                 : data.detail.message;
         }
         if (Array.isArray(data?.detail)) return data.detail.map(item => item.msg).join('؛ ');
@@ -52,12 +85,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function validateTaxonomy(main, sub, focusTarget) {
         if (sub && !main) {
-            displayToastNotify('برای زیردسته، ابتدا دسته‌بندی را وارد کنید.', 'error');
+            displayToastNotify("kb_tax_required", 'error');
             focusTarget.focus();
             return false;
         }
         if ([main, sub].some(value => /[\r\n]|question\s+category\s*:|sub\s*_\s*category\s*:/i.test(value))) {
-            displayToastNotify('فقط نام دسته‌بندی و زیردسته را در فیلدهای مربوط وارد کنید.', 'error');
+            displayToastNotify("kb_tax_invalid", 'error');
             focusTarget.focus();
             return false;
         }
@@ -66,10 +99,10 @@ document.addEventListener('DOMContentLoaded', () => {
 
     function taxonomyControls(chunk) {
         return `<div class="kb-taxonomy-fields" aria-describedby="taxonomy-help-${chunk.id}">
-            <div><label for="main-category-${chunk.id}">دسته‌بندی</label><input id="main-category-${chunk.id}" type="text" dir="auto" value="${escapeHTML(chunk.main_category || '')}" aria-describedby="taxonomy-help-${chunk.id}"></div>
-            <div><label for="sub-category-${chunk.id}">زیردسته</label><input id="sub-category-${chunk.id}" type="text" dir="auto" value="${escapeHTML(chunk.sub_category || '')}" aria-describedby="taxonomy-help-${chunk.id}"></div>
-            <p id="taxonomy-help-${chunk.id}" class="kb-taxonomy-help">اختیاری؛ با تغییر یا پاک‌کردن دسته‌بندی، زیردسته را دوباره مشخص کنید.</p>
-            ${chunk.taxonomy_error ? '<p class="kb-taxonomy-error" role="alert">دسته‌بندی مبهم است؛ محتوای منبع باید پیش از ذخیره بررسی شود.</p>' : ''}
+            <div><label for="main-category-${chunk.id}">${label("kb_category")}</label><input id="main-category-${chunk.id}" type="text" dir="auto" value="${escapeHTML(chunk.main_category || '')}" aria-describedby="taxonomy-help-${chunk.id}"></div>
+            <div><label for="sub-category-${chunk.id}">${label("kb_subcategory")}</label><input id="sub-category-${chunk.id}" type="text" dir="auto" value="${escapeHTML(chunk.sub_category || '')}" aria-describedby="taxonomy-help-${chunk.id}"></div>
+            <p id="taxonomy-help-${chunk.id}" class="kb-taxonomy-help">${label("kb_taxonomy_edit")}</p>
+            ${chunk.taxonomy_error ? `<p class="kb-taxonomy-error" role="alert">${label("kb_taxonomy_ambiguous")}</p>` : ''}
         </div>`;
     }
 
@@ -103,7 +136,7 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             renderSidebarNodes(data.documents);
         } catch (err) {
-            UI.sidebar.innerHTML = '<p class="kb-message kb-message--error" dir="rtl">بارگیری اسناد انجام نشد. صفحه را تازه‌سازی کنید.</p>';
+            UI.sidebar.innerHTML = `<p class="kb-message kb-message--error" dir="auto">${label("kb_docs_error")}</p>`;
         } finally {
             UI.sidebar.setAttribute('aria-busy', 'false');
         }
@@ -112,7 +145,7 @@ document.addEventListener('DOMContentLoaded', () => {
     function renderSidebarNodes(documents) {
         UI.sidebar.innerHTML = '';
         if (!documents || documents.length === 0) {
-            UI.sidebar.innerHTML = '<p class="kb-message" dir="rtl">هیچ سندی یافت نشد.</p>';
+            UI.sidebar.innerHTML = `<p class="kb-message" dir="auto">${label("kb_docs_empty")}</p>`;
             return;
         }
 
@@ -149,8 +182,8 @@ document.addEventListener('DOMContentLoaded', () => {
         const actionRow = document.createElement('div');
         actionRow.className = 'kb-action-row workspace-surface';
         actionRow.innerHTML = `
-            <div><h2 dir="auto">${escapeHTML(activeDocTitle)}</h2>${canWrite ? '' : '<p>فقط خواندنی</p>'}</div>
-            ${canWrite ? '<button id="global-add-chunk-trigger" class="kb-write-action workspace-primary" type="button">افزودن تکه</button>' : ''}
+            <div><h2 dir="auto">${escapeHTML(activeDocTitle)}</h2>${canWrite ? '' : `<p>${label("kb_read_only")}</p>`}</div>
+            ${canWrite ? `<button id="global-add-chunk-trigger" class="kb-write-action workspace-primary" type="button">${label("kb_add_action")}</button>` : ''}
         `;
         UI.workspace.appendChild(actionRow);
 
@@ -183,7 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
         loadIndicator.id = "kb-loading-indicator";
         loadIndicator.className = 'kb-message';
         loadIndicator.setAttribute('role', 'status');
-        loadIndicator.textContent = 'در حال بارگیری تکه‌ها…';
+        setLabel(loadIndicator, "kb_loading");
         UI.workspace.appendChild(loadIndicator);
 
         try {
@@ -202,7 +235,7 @@ document.addEventListener('DOMContentLoaded', () => {
             if (isFirstBatch && (!data.chunks || data.chunks.length === 0)) {
                 const emptyMsg = document.createElement('div');
                 emptyMsg.className = 'kb-message';
-                emptyMsg.textContent = 'هیچ موجودیتی منطبق با فیلتر جستجو یافت نشد.';
+                setLabel(emptyMsg, "kb_empty");
                 UI.workspace.appendChild(emptyMsg);
                 return;
             }
@@ -217,7 +250,7 @@ document.addEventListener('DOMContentLoaded', () => {
         } catch (err) {
             if (loadId === chunkLoad) {
                 loadIndicator.remove();
-                displayToastNotify('بارگیری تکه‌ها انجام نشد. دوباره تلاش کنید.', 'error');
+                displayToastNotify("kb_load_error", 'error');
             }
         } finally {
             if (loadId === chunkLoad) isLoadLocked = false;
@@ -234,18 +267,18 @@ document.addEventListener('DOMContentLoaded', () => {
             if (!canWrite) {
                 dynamicBodyLayout = chunk.is_qa ? `
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div><span class="kb-field-label">سوال</span><div class="kb-readable-content question-readonly-panel" dir="auto">${escapeHTML(chunk.question)}</div></div>
-                        <div><span class="kb-field-label">پاسخ</span><div class="kb-readable-content" dir="auto">${escapeHTML(chunk.answer)}</div></div>
-                    </div>` : `<div><span class="kb-field-label">متن تکه</span><div class="kb-readable-content" dir="auto">${escapeHTML(chunk.answer)}</div></div>`;
+                        <div><span class="kb-field-label">${label("kb_question_short")}</span><div class="kb-readable-content question-readonly-panel" dir="auto">${escapeHTML(chunk.question)}</div></div>
+                        <div><span class="kb-field-label">${label("kb_answer")}</span><div class="kb-readable-content" dir="auto">${escapeHTML(chunk.answer)}</div></div>
+                    </div>` : `<div><span class="kb-field-label">${label("kb_text")}</span><div class="kb-readable-content" dir="auto">${escapeHTML(chunk.answer)}</div></div>`;
             } else if (chunk.is_qa) {
                 dynamicBodyLayout = `
                     <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div>
-                            <span class="kb-field-label">پرسش (فقط خواندنی)</span>
+                            <span class="kb-field-label">${label("kb_locked_question")}</span>
                             <div class="kb-readable-content question-readonly-panel" dir="auto">${escapeHTML(chunk.question)}</div>
                         </div>
                         <div>
-                            <label for="target-field-${chunk.id}" class="kb-field-label">پاسخ</label>
+                            <label for="target-field-${chunk.id}" class="kb-field-label">${label("kb_answer")}</label>
                             <textarea id="target-field-${chunk.id}" class="kb-input kb-input--text" dir="auto">${escapeHTML(chunk.answer)}</textarea>
                         </div>
                     </div>
@@ -253,36 +286,36 @@ document.addEventListener('DOMContentLoaded', () => {
             } else {
                 dynamicBodyLayout = `
                     <div>
-                        <label for="target-field-${chunk.id}" class="kb-field-label">متن تکه</label>
+                        <label for="target-field-${chunk.id}" class="kb-field-label">${label("kb_text")}</label>
                         <textarea id="target-field-${chunk.id}" class="kb-input kb-input--text" dir="auto">${escapeHTML(chunk.answer)}</textarea>
                     </div>
                 `;
             }
 
             if (chunk.is_qa) {
-                dynamicBodyLayout += canWrite ? taxonomyControls(chunk) : `<div class="kb-taxonomy-summary" dir="auto">دسته‌بندی: ${escapeHTML(chunk.main_category || 'ثبت نشده')}؛ زیردسته: ${escapeHTML(chunk.sub_category || 'ثبت نشده')}</div>`;
+                dynamicBodyLayout += canWrite ? taxonomyControls(chunk) : `<div class="kb-taxonomy-summary" dir="auto">${label("kb_category_label")} ${chunk.main_category ? escapeHTML(chunk.main_category) : label("kb_unset")} / ${label("kb_subcategory_label")} ${chunk.sub_category ? escapeHTML(chunk.sub_category) : label("kb_unset")}</div>`;
             }
             card.innerHTML = `
                 <div class="kb-chunk-head">
                     <div class="kb-chunk-meta">
-                        <strong>تکه ${chunk.chunk_index}</strong>
-                        <span>شناسه <bdi>${escapeHTML(String(chunk.id))}</bdi></span>
+                        <strong>${label("kb_chunk")} <bdi>${chunk.chunk_index}</bdi></strong>
+                        <span>${label("kb_id")} <bdi>${escapeHTML(String(chunk.id))}</bdi></span>
                     </div>
                     <div class="kb-chunk-actions">
                         <button type="button" id="history-btn-${chunk.id}" class="workspace-secondary">
-                            تاریخچه
+                            ${label("kb_history")}
                         </button>
                         ${canWrite ? `<button id="delete-btn-${chunk.id}" class="kb-write-action workspace-secondary kb-danger">
-                            حذف
+                            ${label("kb_delete")}
                         </button>
                         <button id="sync-btn-${chunk.id}" class="kb-write-action workspace-primary">
-                            ذخیره تکه
+                            ${label("kb_save")}
                         </button>` : ''}
                     </div>
                 </div>
                 ${dynamicBodyLayout}
                 ${canWrite ? `<div class="kb-chunk-footer">
-                    <label for="operator-field-${chunk.id}">شناسه اپراتور</label>
+                    <label for="operator-field-${chunk.id}">${label("kb_operator_short")}</label>
                     <input type="text" id="operator-field-${chunk.id}" value="Hooman (AI Engineer)" class="kb-input" dir="auto" />
                 </div>` : ''}
             `;
@@ -308,20 +341,20 @@ document.addEventListener('DOMContentLoaded', () => {
         const operator = UI.addChunkForm.changedBy.value.trim() || "Hooman (AI Engineer)";
 
         if (!answerVal) {
-            alert("پر کردن فیلد متن اصلی / پاسخ الزامیست.");
+            alert(I18N.t("kb_answer_required"));
             return;
         }
         const main = UI.addChunkForm.mainCategory.value.trim();
         const sub = UI.addChunkForm.subCategory.value.trim();
         if (isQa && !questionVal) {
-            displayToastNotify('متن سوال را وارد کنید.', 'error');
+            displayToastNotify("kb_question_required", 'error');
             UI.addChunkForm.question.focus();
             return;
         }
         if (isQa && !validateTaxonomy(main, sub, UI.addChunkForm.mainCategory)) return;
 
         UI.saveNewChunkBtn.disabled = true;
-        UI.saveNewChunkBtn.textContent = "در حال ایجاد چانک...";
+        setLabel(UI.saveNewChunkBtn, "kb_saving");
 
         try {
             const response = await fetch('/knowledge-base/api/chunks/create', {
@@ -341,21 +374,21 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await response.json();
             if (response.ok) {
                 UI.addChunkModal.close();
-                displayToastNotify("تکه ذخیره شد.", "success");
+                displayToastNotify("kb_saved", "success");
                 triggerWorkspaceResetQuery();
             } else {
                 throw new Error(apiErrorMessage(data, "Error injecting item."));
             }
         } catch (err) {
-            displayToastNotify(`خطا: ${err.message}`, "error");
+            displayToastNotify("kb_error_detail", "error", {detail: err.message});
         } finally {
             UI.saveNewChunkBtn.disabled = false;
-            UI.saveNewChunkBtn.innerHTML = "ذخیره تکه";
+            setLabel(UI.saveNewChunkBtn, "kb_save");
         }
     }
 
     async function dispatchDeleteExecutionPipeline(chunkId) {
-        if (!confirm("آیا از حذف قطعی این تکه داده از پایگاه داده PostgreSQL و دیتابیس برداری Qdrant اطمینان کامل دارید؟ این عملیات غیرقابل بازگشت است.")) {
+        if (!confirm(I18N.t("kb_delete_confirm"))) {
             return;
         }
 
@@ -366,20 +399,20 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
 
             if (response.ok) {
-                displayToastNotify("موجودیت با موفقیت از تمامی لایه‌ها حذف گردید.", "success");
+                displayToastNotify("kb_deleted", "success");
                 const card = document.getElementById(`chunk-card-wrapper-${chunkId}`);
                 if (card) card.remove();
             } else {
                 throw new Error(apiErrorMessage(result, "Purge pipeline issue."));
             }
         } catch (err) {
-            displayToastNotify(`خطای ناموفقیت امیز: ${err.message}`, "error");
+            displayToastNotify("kb_error_detail", "error", {detail: err.message});
         }
     }
 
     async function launchHistoryTrackingModal(chunkId) {
         dynamicCurrentChunkIdForModal = chunkId;
-        UI.historyList.innerHTML = `<div class="kb-message">در حال بازیابی تاریخچه نسخ ثبت شده...</div>`;
+        UI.historyList.innerHTML = `<div class="kb-message">${label("kb_history_loading")}</div>`;
         UI.historyModal.querySelector('.kb-dialog-notice').hidden = true;
         UI.historyModal.showModal();
 
@@ -388,14 +421,14 @@ document.addEventListener('DOMContentLoaded', () => {
             const data = await res.json();
             renderHistoryVersionRows(data.versions);
         } catch (err) {
-            UI.historyList.innerHTML = `<div class="kb-message kb-message--error">خطا در بارگذاری تاریخچه دیتابیس.</div>`;
+            UI.historyList.innerHTML = `<div class="kb-message kb-message--error">${label("kb_history_error")}</div>`;
         }
     }
 
     function renderHistoryVersionRows(versions) {
         UI.historyList.innerHTML = '';
         if (!versions || versions.length === 0) {
-            UI.historyList.innerHTML = `<div class="kb-message">هیچ نسخه قدیمی تری برای این چانک یافت نشد.</div>`;
+            UI.historyList.innerHTML = `<div class="kb-message">${label("kb_history_empty")}</div>`;
             return;
         }
 
@@ -404,21 +437,21 @@ document.addEventListener('DOMContentLoaded', () => {
             row.className = 'kb-version';
 
             const textSnippet = ver.is_qa
-                ? `<strong>سوال:</strong> ${escapeHTML(ver.question)}<br><strong>پاسخ:</strong> ${escapeHTML(ver.answer)}<br><strong>دسته‌بندی:</strong> ${escapeHTML(ver.main_category || 'ثبت نشده')}؛ <strong>زیردسته:</strong> ${escapeHTML(ver.sub_category || 'ثبت نشده')}`
+                ? `<strong>${label("kb_question_label")}</strong> ${escapeHTML(ver.question)}<br><strong>${label("kb_answer_label")}</strong> ${escapeHTML(ver.answer)}<br><strong>${label("kb_category_label")}</strong> ${ver.main_category ? escapeHTML(ver.main_category) : label("kb_unset")} / <strong>${label("kb_subcategory_label")}</strong> ${ver.sub_category ? escapeHTML(ver.sub_category) : label("kb_unset")}`
                 : escapeHTML(ver.answer);
-            const dateParsed = new Date(ver.created_at).toLocaleString('fa-IR');
+            const dateParsed = formatVersionDate(ver.created_at);
 
             row.innerHTML = `
-                <div class="flex-1 text-right">
+                <div class="flex-1">
                     <div class="kb-version-head">
-                        <span class="kb-version-index">نسخه #${versions.length - index}</span>
-                        <span dir="auto">توسط: ${escapeHTML(ver.changed_by)}</span>
-                        <span dir="ltr">${dateParsed}</span>
+                        <span class="kb-version-index">${label("kb_version")} <bdi>#${versions.length - index}</bdi></span>
+                        <span dir="auto">${label("kb_by")} <bdi>${escapeHTML(ver.changed_by)}</bdi></span>
+                        <time dir="auto" datetime="${escapeHTML(ver.created_at)}">${dateParsed}</time>
                     </div>
                     <div class="kb-readable-content" dir="auto">${textSnippet}</div>
                 </div>
                 ${canWrite ? `<button id="revert-btn-${ver.id}" class="kb-write-action workspace-secondary">
-                    بازگردانی این نسخه
+                    ${label("kb_restore")}
                 </button>` : ''}
             `;
             UI.historyList.appendChild(row);
@@ -428,7 +461,7 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     async function executeStateReversion(versionId) {
-        if (!confirm("آیا از بازگردانی بافت چانک به این نسخه ساختاری مطمئن هستید؟ نسخه جدیدی بر این مبنا ثبت خواهد شد.")) return;
+        if (!confirm(I18N.t("kb_restore_confirm"))) return;
 
         try {
             const response = await fetch('/knowledge-base/api/chunks/revert', {
@@ -444,13 +477,13 @@ document.addEventListener('DOMContentLoaded', () => {
             const result = await response.json();
             if (response.ok) {
                 UI.historyModal.close();
-                displayToastNotify("نسخه بازگردانی شد.", "success");
+                displayToastNotify("kb_restored", "success");
                 triggerWorkspaceResetQuery(); // Refresh tracking workspace grid nodes
             } else {
                 throw new Error(apiErrorMessage(result, "Reversion pipeline execution error."));
             }
         } catch (err) {
-            displayToastNotify(`خطا در بازگردانی: ${err.message}`, "error");
+            displayToastNotify("kb_error_detail", "error", {detail: err.message});
         }
     }
 
@@ -458,7 +491,7 @@ document.addEventListener('DOMContentLoaded', () => {
         const btnRow = document.createElement('button');
         btnRow.id = "kb-load-more-row-btn";
         btnRow.className = "workspace-secondary kb-more";
-        btnRow.textContent = 'نمایش تکه‌های بیشتر';
+        setLabel(btnRow, "kb_more");
         btnRow.addEventListener('click', () => fetchAndAppendChunks(docId, false));
         UI.workspace.appendChild(btnRow);
     }
@@ -471,11 +504,10 @@ document.addEventListener('DOMContentLoaded', () => {
     async function executeAtomicPipelineSync(chunk, buttonInstance) {
         const inputArea = document.getElementById(`target-field-${chunk.id}`);
         const operatorName = document.getElementById(`operator-field-${chunk.id}`).value.trim() || "Hooman (AI Engineer)";
-        const originalHTML = buttonInstance.innerHTML;
         const taxonomy = {};
         if (chunk.is_qa) {
             if (chunk.taxonomy_error) {
-                displayToastNotify('دسته‌بندی مبهم است؛ محتوای منبع باید بررسی شود.', 'error');
+                displayToastNotify("kb_taxonomy_review", 'error');
                 return;
             }
             const mainInput = document.getElementById(`main-category-${chunk.id}`);
@@ -490,7 +522,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }
 
         buttonInstance.disabled = true;
-        buttonInstance.innerHTML = `⏳ اعمال تغییرات...`;
+        setLabel(buttonInstance, "kb_saving");
 
         try {
             const response = await fetch('/knowledge-base/api/chunks/update', {
@@ -517,30 +549,32 @@ document.addEventListener('DOMContentLoaded', () => {
                         document.getElementById(`sub-category-${chunk.id}`).value = result.sub_category || '';
                     }
                 }
-                displayToastNotify(result.no_op ? 'تغییری برای ثبت وجود نداشت.' : "بروزرسانی موفقیت‌آمیز در پایگاه داده و Qdrant اعمال گردید.", "success");
+                displayToastNotify(result.no_op ? "kb_no_changes" : "kb_updated", "success");
             } else {
                 throw new Error(apiErrorMessage(result, "Error processing pipeline script."));
             }
         } catch (err) {
-            displayToastNotify(`خطا در پردازش: ${err.message}`, "error");
+            displayToastNotify("kb_error_detail", "error", {detail: err.message});
         } finally {
             buttonInstance.disabled = false;
-            buttonInstance.innerHTML = originalHTML;
+            setLabel(buttonInstance, "kb_save");
         }
     }
 
-    let noticeNumber = 0;
-    function displayToastNotify(message, mode) {
+    function displayToastNotify(key, mode, values) {
         const modal = [UI.addChunkModal, UI.historyModal].find(dialog => dialog?.open);
         const inline = modal?.querySelector('.kb-dialog-notice');
         const notice = inline || UI.toast;
         const text = inline || UI.toastText;
-        const id = ++noticeNumber;
-        text.textContent = message;
+        const entry = {text, key, values};
+        activeNotice = entry;
+        text.textContent = I18N.t(key, values);
         notice.dataset.error = String(mode === 'error');
         notice.hidden = false;
         setTimeout(() => {
-            if (id === noticeNumber) notice.hidden = true;
+            if (activeNotice !== entry) return;
+            notice.hidden = true;
+            activeNotice = null;
         }, 3500);
     }
 

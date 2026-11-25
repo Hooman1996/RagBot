@@ -1,10 +1,11 @@
 <!DOCTYPE html>
-<html class="workspace-page" lang="fa" dir="rtl">
+<html class="workspace-page" lang="en" dir="ltr">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Negah Yar AI - مدیریت پایگاه دانش</title>
+    <title data-i18n="kb_title">Knowledge | Negah Bank AI</title>
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/tailwind/3.4.17/tailwind.min.css') }}" integrity="{{ vendor_integrity('vendor/tailwind/3.4.17/tailwind.min.css') }}" crossorigin="anonymous">
+    <link rel="stylesheet" href="{{ url_for('static', path='vendor/google-fonts/fonts.css') }}" integrity="{{ vendor_integrity('vendor/google-fonts/fonts.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ url_for('static', path='vendor/vazirmatn/33.003/vazirmatn.css') }}" integrity="{{ vendor_integrity('vendor/vazirmatn/33.003/vazirmatn.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/workspace.css') }}" integrity="{{ asset_integrity('css/workspace.css') }}" crossorigin="anonymous">
     <link rel="stylesheet" href="{{ versioned_asset(request, 'css/kb_manager.css') }}" integrity="{{ asset_integrity('css/kb_manager.css') }}" crossorigin="anonymous">
@@ -12,41 +13,41 @@
 </head>
 <body data-can-write="{{ 'true' if 'kb_write' in permissions else 'false' }}" class="workspace-body kb-workspace" data-icons-url="{{ versioned_asset(request, 'icons.svg') }}">
 {% set workspace_page = 'knowledge' %}
-{% set workspace_title = 'پایگاه دانش' %}
+{% set workspace_title = 'Knowledge' %}
 {% set workspace_theme_id = 'kbTheme' %}
 <div class="app-shell workspace-shell">
     {% include "_workspace_rail.html" %}
     <main class="main-content workspace-main">
         {% include "_workspace_header.html" %}
         <div class="kb-layout">
-            <div class="kb-content workspace-scroll" dir="rtl" data-workspace-content>
+            <div class="kb-content workspace-scroll" data-workspace-content>
                 <div class="workspace-content">
-                    <h1 class="workspace-heading kb-page-title">تکه‌های دانش</h1>
-                    {% if 'kb_write' not in permissions %}<p id="kb-read-only-indicator" role="status" class="kb-read-only">دسترسی فقط خواندنی. می‌توانید اسناد، تکه‌ها و تاریخچه تغییرات را مشاهده و جستجو کنید.</p>{% endif %}
+                    <h1 class="workspace-heading kb-page-title" data-i18n="kb_chunks">Knowledge chunks</h1>
+                    {% if 'kb_write' not in permissions %}<p id="kb-read-only-indicator" role="status" class="kb-read-only" data-i18n="kb_read_notice">Read-only access. You can browse and search documents, chunks, and version history.</p>{% endif %}
                     <div class="kb-search workspace-surface">
                         <div>
-                            <label for="kb-search-input">جستجو در سند</label>
-                            <input type="search" id="kb-search-input" dir="auto" placeholder="جستجو در محتوا یا سوالات" disabled>
+                            <label for="kb-search-input" data-i18n="kb_search_document">Search this document</label>
+                            <input type="search" id="kb-search-input" dir="auto" placeholder="Search content or questions" data-i18n-placeholder="kb_search_placeholder" disabled>
                         </div>
-                        <button id="kb-search-trigger" class="workspace-primary" type="button" disabled>جستجو</button>
+                        <button id="kb-search-trigger" class="workspace-primary" type="button" disabled data-i18n="kb_search">Search</button>
                     </div>
                     <div id="chunks-workspace-wrapper">
                         <div class="kb-empty workspace-surface">
                             <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#documents"></use></svg>
-                            <p>برای مشاهده تکه‌ها، یک سند از فهرست اسناد انتخاب کنید.</p>
+                            <p data-i18n="kb_choose_doc">Select a document to view its chunks.</p>
                         </div>
                     </div>
                 </div>
             </div>
             <aside id="knowledge-documents" class="kb-documents" aria-labelledby="kb-documents-title" data-workspace-panel="documents">
                 <div class="kb-documents-head">
-                    <button class="workspace-icon-button kb-documents-close" type="button" data-workspace-close="documents" aria-label="بستن فهرست اسناد">
+                    <h2 id="kb-documents-title" dir="auto" data-i18n="kb_documents">Active documents</h2>
+                    <button class="workspace-icon-button kb-documents-close" type="button" data-workspace-close="documents" aria-label="Close documents" data-i18n-label="kb_close_documents">
                         <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg>
                     </button>
-                    <h2 id="kb-documents-title" dir="rtl">اسناد فعال</h2>
                 </div>
                 <div id="document-sidebar-list" class="kb-documents-list" aria-busy="true">
-                    <p class="kb-message" dir="rtl">در حال بارگیری اسناد…</p>
+                    <p class="kb-message" dir="auto" data-i18n="kb_docs_loading">Loading documents…</p>
                 </div>
             </aside>
         </div>
@@ -58,10 +59,10 @@
         <div class="kb-dialog-layout">
             <div class="kb-dialog-header">
                 <div>
-                    <h2 id="kb-history-title">تاریخچه تغییرات تکه</h2>
-                    <p class="kb-dialog-hint">{% if 'kb_write' in permissions %}مشاهده نسخه‌های گذشته و بازگردانی محتوا{% else %}مشاهده نسخه‌های گذشته محتوا{% endif %}</p>
+                    <h2 id="kb-history-title" data-i18n="kb_history_title">Chunk version history</h2>
+                    <p class="kb-dialog-hint" data-i18n="{{ 'kb_history_write' if 'kb_write' in permissions else 'kb_history_read' }}">{{ 'View and restore previous versions.' if 'kb_write' in permissions else 'View previous versions.' }}</p>
                 </div>
-                <button id="close-history-modal" class="workspace-icon-button" type="button" aria-label="بستن"><svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg></button>
+                <button id="close-history-modal" class="workspace-icon-button" type="button" aria-label="Close" data-i18n-label="kb_close"><svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg></button>
             </div>
             <p class="kb-dialog-notice" dir="auto" role="status" hidden></p>
             <div id="history-versions-stack" class="kb-dialog-body kb-versions">
@@ -73,43 +74,43 @@
         <div class="kb-dialog-layout">
             <div class="kb-dialog-header">
                 <div>
-                    <h2 id="kb-add-title">افزودن تکه به سند</h2>
-                    <p class="kb-dialog-hint">نوع تکه و متن آن را مشخص کنید.</p>
+                    <h2 id="kb-add-title" data-i18n="kb_add">Add chunk</h2>
+                    <p class="kb-dialog-hint" data-i18n="kb_add_hint">Choose a chunk type and enter its content.</p>
                 </div>
-                <button id="close-add-modal" class="workspace-icon-button" type="button" aria-label="بستن"><svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg></button>
+                <button id="close-add-modal" class="workspace-icon-button" type="button" aria-label="Close" data-i18n-label="kb_close"><svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg></button>
             </div>
             <p class="kb-dialog-notice" dir="auto" role="status" hidden></p>
             <div class="kb-dialog-body kb-edit-fields">
                 <div>
-                    <label class="kb-field-label" for="new-chunk-is-qa">نوع بافت تکه داده:</label>
+                    <label class="kb-field-label" for="new-chunk-is-qa" data-i18n="kb_type">Chunk type</label>
                     <select id="new-chunk-is-qa" class="kb-input" autofocus>
-                        <option value="false">تکه متن خام بدون ساختار مستنداتی (Standard Raw Text)</option>
-                        <option value="true">پیکربندی پرسش و پاسخ ساختاریافته (Structured FAQ Link)</option>
+                        <option value="false" data-i18n="kb_raw">Plain text</option>
+                        <option value="true" data-i18n="kb_faq">Structured FAQ</option>
                     </select>
                 </div>
                 <div id="new-chunk-qa-fields-wrapper" class="hidden">
-                    <label for="new-chunk-question" class="kb-field-label">متن پرسش:</label>
-                    <input type="text" id="new-chunk-question" placeholder="عنوان سوال مرتبط را وارد کنید..."
+                    <label for="new-chunk-question" class="kb-field-label" data-i18n="kb_question">Question</label>
+                    <input type="text" id="new-chunk-question" placeholder="Enter the question" data-i18n-placeholder="kb_question_placeholder"
                            class="kb-input" dir="auto">
                     <div class="kb-taxonomy-fields">
-                        <div><label for="new-chunk-main-category">دسته‌بندی</label><input id="new-chunk-main-category" type="text" dir="auto" aria-describedby="new-taxonomy-help"></div>
-                        <div><label for="new-chunk-sub-category">زیردسته</label><input id="new-chunk-sub-category" type="text" dir="auto" aria-describedby="new-taxonomy-help"></div>
-                        <p id="new-taxonomy-help" class="kb-taxonomy-help">اختیاری؛ برای زیردسته، دسته‌بندی را نیز مشخص کنید.</p>
+                        <div><label for="new-chunk-main-category" data-i18n="kb_category">Category</label><input id="new-chunk-main-category" type="text" dir="auto" aria-describedby="new-taxonomy-help"></div>
+                        <div><label for="new-chunk-sub-category" data-i18n="kb_subcategory">Subcategory</label><input id="new-chunk-sub-category" type="text" dir="auto" aria-describedby="new-taxonomy-help"></div>
+                        <p id="new-taxonomy-help" class="kb-taxonomy-help" data-i18n="kb_taxonomy_optional">Optional. A subcategory requires a category.</p>
                     </div>
                 </div>
                 <div>
-                    <label for="new-chunk-answer" id="content-label-context" class="kb-field-label">متن تکه یا پاسخ:</label>
-                    <textarea id="new-chunk-answer" placeholder="محتوای متنی یا پاسخ متصل را با دقت بالا وارد کنید..."
+                    <label for="new-chunk-answer" id="content-label-context" class="kb-field-label" data-i18n="kb_content">Chunk text or answer</label>
+                    <textarea id="new-chunk-answer" placeholder="Enter the chunk text or answer" data-i18n-placeholder="kb_content_placeholder"
                               class="kb-input kb-input--text" dir="auto"></textarea>
                 </div>
                 <div class="kb-edit-footer">
                     <div>
-                        <label for="new-chunk-operator-name" class="kb-field-label">شناسه اپراتور تغییرات:</label>
+                        <label for="new-chunk-operator-name" class="kb-field-label" data-i18n="kb_operator">Operator ID</label>
                         <input type="text" id="new-chunk-operator-name" value="Hooman (AI Engineer)" class="kb-input" dir="auto" />
                     </div>
                     <div class="flex items-end justify-end">
-                        <button id="submit-new-chunk-btn" class="workspace-primary" type="button">
-                            ذخیره تکه
+                        <button id="submit-new-chunk-btn" data-i18n="kb_save" class="workspace-primary" type="button">
+                            Save chunk
                         </button>
                     </div>
                 </div>
@@ -119,10 +120,11 @@
 
     {% endif %}
     <div id="global-toast" role="status" aria-live="polite" class="kb-toast" hidden>
-        <span>✓</span> <span id="toast-text">تغییرات با موفقیت اعمال شد.</span>
+        <span>✓</span> <span id="toast-text"></span>
     </div>
 
     <script src="{{ versioned_asset(request, 'js/workspace.js') }}" integrity="{{ asset_integrity('js/workspace.js') }}" crossorigin="anonymous"></script>
+    <script src="{{ versioned_asset(request, 'js/i18n.js') }}" integrity="{{ asset_integrity('js/i18n.js') }}" crossorigin="anonymous"></script>
     <script src="{{ versioned_asset(request, 'js/kb_manager.js') }}" integrity="{{ asset_integrity('js/kb_manager.js') }}" crossorigin="anonymous"></script>
 </body>
 </html>

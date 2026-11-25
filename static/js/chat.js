@@ -233,6 +233,33 @@ const Chat = {
     return new Date().toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
   },
 
+  async copyResponseText(text) {
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(text);
+        return;
+      }
+    } catch {
+      // A browser can expose the Clipboard API and still deny the write.
+    }
+
+    const focused = document.activeElement;
+    const buffer = document.createElement("textarea");
+    buffer.className = "clipboard-copy-buffer";
+    buffer.readOnly = true;
+    buffer.tabIndex = -1;
+    buffer.value = text;
+    document.body.appendChild(buffer);
+    try {
+      buffer.select();
+      buffer.setSelectionRange(0, buffer.value.length);
+      if (!document.execCommand?.("copy")) throw new Error("Clipboard unavailable");
+    } finally {
+      buffer.remove();
+      focused?.focus({preventScroll: true});
+    }
+  },
+
   /* ── Feedback toolbar (copy / like / dislike / comment / ticket) ── */
   _buildFeedbackBar(queryId, existingHelpful = null, existingComment = "",
                      satisfactionNeeded = false, sessionId = null) {
@@ -246,7 +273,7 @@ const Chat = {
     copyBtn.innerHTML = `<svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="9" y="9" width="13" height="13" rx="2"/><path d="M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1"/></svg>`;
     copyBtn.addEventListener("click", () => {
       const bubble = bar.closest(".message__body").querySelector(".message__bubble");
-      Promise.resolve().then(() => navigator.clipboard.writeText(bubble.textContent)).then(() => {
+      this.copyResponseText(bubble.textContent).then(() => {
         copyBtn.innerHTML = `<svg aria-hidden="true" focusable="false" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="20 6 9 17 4 12"/></svg>`;
         copyBtn.classList.add("feedback-btn--active");
         setTimeout(() => {

@@ -3,6 +3,7 @@
     min-height: 0; min-width: 0; direction: ltr;
 }
 .kb-content { min-width: 0; }
+.kb-workspace:lang(fa) :is(.kb-content, .kb-documents) { direction: rtl; }
 .kb-content .workspace-content { max-width: 1000px; }
 .kb-page-title { margin-bottom: 17px; }
 .kb-read-only {
@@ -21,7 +22,7 @@
     font-size: .92rem;
 }
 .kb-input[dir="auto"], .kb-search input { text-align: start; unicode-bidi: plaintext; }
-.kb-input:placeholder-shown, .kb-search input:placeholder-shown { direction: rtl; }
+.kb-workspace:lang(fa) :is(.kb-input, .kb-search input):placeholder-shown { direction: rtl; }
 .kb-input::placeholder, .kb-search input::placeholder { color: var(--muted); opacity: 1; }
 .kb-search input:disabled { opacity: .67; cursor: not-allowed; }
 .kb-input--text { min-height: 120px; resize: vertical; line-height: 1.75; }
@@ -36,7 +37,7 @@
     border-left: 1px solid var(--line);
 }
 .kb-documents-head { display: flex; justify-content: space-between; align-items: center; margin-bottom: 12px; }
-.kb-documents-head h2 { margin-left: auto; font-size: 1.12rem; font-weight: 700; color: var(--accent); }
+.kb-documents-head h2 { margin: 0; font-size: 1.12rem; font-weight: 700; color: var(--accent); }
 .kb-documents-list { display: grid; gap: 5px; }
 .kb-documents-list[aria-busy="true"]::before { content: ""; height: 45px; background: var(--wash); border-radius: var(--control-radius); }
 .workspace-body .kb-documents-close { display: none; }
@@ -49,7 +50,8 @@
 .sidebar-doc-node svg { width: 17px; height: 17px; flex: none; color: var(--accent); }
 .sidebar-doc-node bdi { flex: 1; min-width: 0; overflow-wrap: anywhere; text-align: start; }
 .sidebar-doc-node:hover { border-color: var(--focus); }
-.sidebar-doc-node.is-active { background: var(--wash); border-color: var(--field-line); box-shadow: inset -2px 0 var(--gold); }
+.sidebar-doc-node.is-active { background: var(--wash); border-color: var(--field-line); box-shadow: inset 2px 0 var(--gold); }
+.kb-workspace:lang(fa) .sidebar-doc-node.is-active { box-shadow: inset -2px 0 var(--gold); }
 .kb-message { padding: 8px; font-size: .87rem; color: var(--muted); }
 .kb-message--error { color: var(--error); }
 .kb-action-row, .kb-chunk-head, .kb-chunk-actions, .kb-chunk-meta, .kb-chunk-footer {

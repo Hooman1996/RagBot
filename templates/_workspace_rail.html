@@ -1,12 +1,12 @@
 {% set fa_workspace = workspace_page == 'knowledge' %}
-<aside id="workspace-navigation" class="sidebar workspace-rail" aria-label="{{ 'ناوبری میز کار' if fa_workspace else 'Workspace navigation' }}"{% if workspace_page == 'users' %} data-i18n-label="workspace_navigation"{% endif %} data-workspace-panel="navigation">
+<aside id="workspace-navigation" class="sidebar workspace-rail" aria-label="{{ 'ناوبری میز کار' if fa_workspace else 'Workspace navigation' }}"{% if workspace_page in ('users', 'knowledge') %} data-i18n-label="workspace_navigation"{% endif %} data-workspace-panel="navigation">
     <div class="workspace-brand">
         <img src="{{ versioned_asset(request, 'negah-bank-icon.jpg') }}" alt="" width="40" height="40">
         <div>
-            <strong dir="auto"{% if not fa_workspace %} data-i18n="brand_name"{% endif %}>{{ 'نگاه یار' if fa_workspace else 'Negah Bank AI' }}</strong>
-            <small dir="auto"{% if not fa_workspace %} data-i18n="chat_staff_workspace"{% endif %}>{{ 'فضای کاری کارکنان' if fa_workspace else 'Staff workspace' }}</small>
+            <strong dir="auto" data-i18n="brand_name">{{ 'نگاه یار' if fa_workspace else 'Negah Bank AI' }}</strong>
+            <small dir="auto" data-i18n="chat_staff_workspace">{{ 'فضای کاری کارکنان' if fa_workspace else 'Staff workspace' }}</small>
         </div>
-        <button class="workspace-icon-button workspace-rail-close" type="button" data-workspace-close="navigation" aria-label="{{ 'بستن ناوبری' if fa_workspace else 'Close navigation' }}"{% if workspace_page == 'users' %} data-i18n-label="workspace_close_navigation"{% endif %}>
+        <button class="workspace-icon-button workspace-rail-close" type="button" data-workspace-close="navigation" aria-label="{{ 'بستن ناوبری' if fa_workspace else 'Close navigation' }}"{% if workspace_page in ('users', 'knowledge') %} data-i18n-label="workspace_close_navigation"{% endif %}>
             <svg aria-hidden="true"><use href="{{ versioned_asset(request, 'icons.svg') }}#close"></use></svg>
         </button>
     </div>
@@ -21,7 +21,7 @@
         {% if permission in permissions %}
         <a href="{{ path }}" class="sidebar__nav-item{% if workspace_page == page %} active{% endif %}"{% if workspace_page == page %} aria-current="page"{% endif %}>
             <svg class="nav-icon" aria-hidden="true" focusable="false"><use href="{{ versioned_asset(request, 'icons.svg') }}#{{ icon }}"></use></svg>
-            <span dir="auto"{% if workspace_page == 'users' %} data-i18n="{{ key }}"{% endif %}>{{ fa if fa_workspace else en }}</span>
+            <span dir="auto"{% if workspace_page in ('users', 'knowledge') %} data-i18n="{{ key }}"{% endif %}>{{ fa if fa_workspace else en }}</span>
         </a>
         {% endif %}
         {% endfor %}
